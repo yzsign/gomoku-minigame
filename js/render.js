@@ -168,6 +168,65 @@ function drawOpponentLastMoveMarker(ctx, layout, theme, r, c, stoneColor) {
   ctx.restore();
 }
 
+/**
+ * 连成五子高亮：每个胜子外围一圈橙金色柔光晕（与棋子半径一致参考 drawPieces）
+ * @param {Array<{r:number,c:number}>} cells 一般为 5 点
+ */
+function drawWinningLine(ctx, layout, cells) {
+  if (!cells || cells.length < 1) {
+    return;
+  }
+  var cell = layout.cell;
+  var ox = layout.originX;
+  var oy = layout.originY;
+  /** 与 drawPieces 中棋子半径一致 */
+  var pr = cell * 0.38;
+  var i;
+  for (i = 0; i < cells.length; i++) {
+    var rr = cells[i].r;
+    var cc = cells[i].c;
+    var cx = ox + cc * cell;
+    var cy = oy + rr * cell;
+    ctx.save();
+    /* 外圈柔光：自棋子边缘向外衰减 */
+    var rGlowOut = pr * 1.62;
+    var g = ctx.createRadialGradient(
+      cx,
+      cy,
+      pr * 0.92,
+      cx,
+      cy,
+      rGlowOut
+    );
+    g.addColorStop(0, 'rgba(255, 195, 85, 0)');
+    g.addColorStop(0.22, 'rgba(255, 175, 55, 0.42)');
+    g.addColorStop(0.48, 'rgba(255, 150, 42, 0.58)');
+    g.addColorStop(0.72, 'rgba(255, 125, 35, 0.38)');
+    g.addColorStop(1, 'rgba(255, 95, 28, 0)');
+    ctx.beginPath();
+    ctx.arc(cx, cy, rGlowOut, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    /* 紧贴棋边的高亮环 + 外发光 */
+    ctx.beginPath();
+    ctx.arc(cx, cy, pr * 1.14, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 225, 130, 0.88)';
+    ctx.lineWidth = Math.max(2.4, cell * 0.075);
+    ctx.shadowColor = 'rgba(255, 155, 55, 0.95)';
+    ctx.shadowBlur = Math.max(12, cell * 0.16);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, pr * 1.06, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 200, 95, 0.5)';
+    ctx.lineWidth = Math.max(1.2, cell * 0.038);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 /** 浅色格线不用作白子标记，退回深木棕 */
 function lineStrokeForClassicMarker(line, fallback) {
   if (!line || line.length < 4) {
@@ -211,5 +270,6 @@ module.exports = {
   drawBoard: drawBoard,
   drawPieces: drawPieces,
   drawOpponentLastMoveMarker: drawOpponentLastMoveMarker,
+  drawWinningLine: drawWinningLine,
   drawText: drawText
 };

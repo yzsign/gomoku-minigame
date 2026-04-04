@@ -11,8 +11,9 @@ worker.onMessage(function (res) {
   var gen = res.gen;
   var board = res.board;
   var aiColor = res.aiColor;
+  var openingOptions = res.openingOptions;
   try {
-    var mv = engine.aiMove(board, aiColor);
+    var mv = engine.aiMove(board, aiColor, openingOptions);
     worker.postMessage({
       type: 'AI_MOVE_RESULT',
       seq: seq,

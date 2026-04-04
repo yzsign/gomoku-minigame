@@ -10,15 +10,17 @@ var EMPTY = 0;
 var BLACK = 1;
 var WHITE = 2;
 
+var openingBook = require('./opening_book.js');
+
 /**
  * AI：主线程兜底（无 Worker 或创建失败时用）。人机优先走 workers/index.js + gomoku_ai.js。
- * 时间预算避免主线程长考卡顿；强棋力在 Worker 中不设预算（见 workers/gomoku_ai.js）。
+ * 时间预算避免主线程长考卡顿；强棋力主要在 Worker。
  */
-var AI_SEARCH_DEPTH = 5;
-var AI_MAX_CANDIDATES = 18;
+var AI_SEARCH_DEPTH = 9;
+var AI_MAX_CANDIDATES = 34;
 
-/** 单次思考上限；略长可提升棋力，过长会拖慢界面（一般 220–320ms 可接受） */
-var AI_TIME_BUDGET_MS = 280;
+/** 主线程兜底：尽量强但仍控卡顿；常用人机走 Worker */
+var AI_TIME_BUDGET_MS = 800;
 var searchDeadline = 0;
 
 function createBoard() {
@@ -79,6 +81,63 @@ function checkWin(board, r, c, color) {
     if (count >= 5) return true;
   }
   return false;
+}
+
+/**
+ * 取构成胜利的连续五子（含 (r,c)，用于高亮连线；超过五连时取包含该子的连续五格）
+ * @returns {Array<{r:number,c:number}>|null}
+ */
+function getWinningLineCells(board, r, c, color) {
+  var dirs = [
+    [0, 1],
+    [1, 0],
+    [1, 1],
+    [1, -1]
+  ];
+  var d;
+  for (d = 0; d < dirs.length; d++) {
+    var dr = dirs[d][0];
+    var dc = dirs[d][1];
+    var sr = r;
+    var sc = c;
+    while (inBounds(sr - dr, sc - dc) && board[sr - dr][sc - dc] === color) {
+      sr -= dr;
+      sc -= dc;
+    }
+    var cells = [];
+    var tr = sr;
+    var tc = sc;
+    while (inBounds(tr, tc) && board[tr][tc] === color) {
+      cells.push({ r: tr, c: tc });
+      tr += dr;
+      tc += dc;
+    }
+    if (cells.length < 5) {
+      continue;
+    }
+    var k = -1;
+    var i;
+    for (i = 0; i < cells.length; i++) {
+      if (cells[i].r === r && cells[i].c === c) {
+        k = i;
+        break;
+      }
+    }
+    if (k < 0) {
+      continue;
+    }
+    var startIdx = Math.max(0, k - 4);
+    var maxStart = cells.length - 5;
+    if (startIdx > maxStart) {
+      startIdx = maxStart;
+    }
+    var out = [];
+    for (i = 0; i < 5; i++) {
+      out.push(cells[startIdx + i]);
+    }
+    return out;
+  }
+  return null;
 }
 
 var DIRS = [
@@ -179,17 +238,17 @@ function evaluateBoard(board, aiColor) {
     }
     if (op > 0 && ai > 0) return 0;
     if (op > 0) {
-      if (op === 5) return -2200000;
-      if (op === 4 && em === 1) return -180000;
-      if (op === 3 && em === 2) return -8000;
-      if (op === 2 && em === 3) return -400;
+      if (op === 5) return -2600000;
+      if (op === 4 && em === 1) return -240000;
+      if (op === 3 && em === 2) return -12000;
+      if (op === 2 && em === 3) return -520;
       return 0;
     }
-    if (ai === 5) return 2200000;
-    if (ai === 4 && em === 1) return 180000;
-    if (ai === 3 && em === 2) return 8000;
-    if (ai === 2 && em === 3) return 400;
-    if (ai === 1 && em === 4) return 40;
+    if (ai === 5) return 2600000;
+    if (ai === 4 && em === 1) return 210000;
+    if (ai === 3 && em === 2) return 10000;
+    if (ai === 2 && em === 3) return 480;
+    if (ai === 1 && em === 4) return 48;
     return 0;
   }
 
@@ -229,6 +288,24 @@ function countStones(board) {
   return n;
 }
 
+function minChebyshevDistToNearestStone(board, r, c) {
+  var best = 99;
+  var rr;
+  var cc;
+  for (rr = 0; rr < SIZE; rr++) {
+    for (cc = 0; cc < SIZE; cc++) {
+      if (board[rr][cc] === EMPTY) {
+        continue;
+      }
+      var d = Math.max(Math.abs(rr - r), Math.abs(cc - c));
+      if (d < best) {
+        best = d;
+      }
+    }
+  }
+  return best;
+}
+
 function nearOccupied(board, r, c, dist) {
   var dr;
   var dc;
@@ -244,7 +321,7 @@ function nearOccupied(board, r, c, dist) {
 }
 
 /**
- * 候选落子点：已有棋子周围 2 格内；开局靠近天元
+ * 候选落子点：仅在已有子邻域内展开；开局邻距收紧，避免首步远离战场。
  */
 function getCandidates(board) {
   var stones = countStones(board);
@@ -252,6 +329,7 @@ function getCandidates(board) {
     return [{ r: 7, c: 7 }];
   }
 
+  var ring = stones <= 2 ? 2 : 4;
   var list = [];
   var seen = {};
   var r;
@@ -259,14 +337,7 @@ function getCandidates(board) {
   for (r = 0; r < SIZE; r++) {
     for (c = 0; c < SIZE; c++) {
       if (board[r][c] !== EMPTY) continue;
-      if (stones < 4 && (r === 7 || r === 6 || r === 8) && (c === 7 || c === 6 || c === 8)) {
-        var k = r * SIZE + c;
-        if (!seen[k]) {
-          seen[k] = 1;
-          list.push({ r: r, c: c });
-        }
-      }
-      if (nearOccupied(board, r, c, 2)) {
+      if (nearOccupied(board, r, c, ring)) {
         var k2 = r * SIZE + c;
         if (!seen[k2]) {
           seen[k2] = 1;
@@ -298,7 +369,14 @@ function sortMovesByHeuristic(board, moves, color, desc, maxCandidates) {
       m.c,
       color === BLACK ? WHITE : BLACK
     );
-    scored.push({ m: m, s: h + h2 * 1.12 });
+    var s = h + h2 * 1.55;
+    if (countStones(board) <= 2) {
+      var d0 = minChebyshevDistToNearestStone(board, m.r, m.c);
+      if (d0 < 99) {
+        s += (6 - d0) * 350;
+      }
+    }
+    scored.push({ m: m, s: s });
   }
   scored.sort(function (a, b) {
     return desc ? b.s - a.s : a.s - b.s;
@@ -310,15 +388,121 @@ function sortMovesByHeuristic(board, moves, color, desc, maxCandidates) {
   return out;
 }
 
-function tryWinningMove(board, color, pool) {
+function tryWinningMoveInPool(board, color, pool) {
   var i;
   for (i = 0; i < pool.length; i++) {
     var m = pool[i];
-    if (board[m.r][m.c] !== EMPTY) continue;
+    if (board[m.r][m.c] !== EMPTY) {
+      continue;
+    }
     board[m.r][m.c] = color;
     var w = checkWin(board, m.r, m.c, color);
     board[m.r][m.c] = EMPTY;
-    if (w) return m;
+    if (w) {
+      return m;
+    }
+  }
+  return null;
+}
+
+function tryWinningMoveAnywhere(board, color) {
+  var r;
+  var c;
+  for (r = 0; r < SIZE; r++) {
+    for (c = 0; c < SIZE; c++) {
+      if (board[r][c] !== EMPTY) {
+        continue;
+      }
+      board[r][c] = color;
+      var w = checkWin(board, r, c, color);
+      board[r][c] = EMPTY;
+      if (w) {
+        return { r: r, c: c };
+      }
+    }
+  }
+  return null;
+}
+
+function hasImmediateWin(board, color, pool) {
+  return (
+    tryWinningMoveInPool(board, color, pool) ||
+    tryWinningMoveAnywhere(board, color)
+  );
+}
+
+var THREAT_LIVE_THREE = 45000;
+var THREAT_SLEEP_THREE = 6000;
+var THREAT_LIVE_TWO = 2000;
+
+function maxLineThreatAtMove(board, r, c, color) {
+  if (board[r][c] !== EMPTY) {
+    return -1;
+  }
+  board[r][c] = color;
+  var localMax = 0;
+  var d;
+  for (d = 0; d < DIRS.length; d++) {
+    var v = linePatternScore(
+      board,
+      r,
+      c,
+      DIRS[d][0],
+      DIRS[d][1],
+      color
+    );
+    if (v > localMax) {
+      localMax = v;
+    }
+  }
+  board[r][c] = EMPTY;
+  return localMax;
+}
+
+function findBestThreatCell(board, color) {
+  var bestR = -1;
+  var bestC = -1;
+  var bestM = -1;
+  var r;
+  var c;
+  for (r = 0; r < SIZE; r++) {
+    for (c = 0; c < SIZE; c++) {
+      if (board[r][c] !== EMPTY) {
+        continue;
+      }
+      var t = maxLineThreatAtMove(board, r, c, color);
+      if (t > bestM) {
+        bestM = t;
+        bestR = r;
+        bestC = c;
+      }
+    }
+  }
+  return { r: bestR, c: bestC, max: bestM };
+}
+
+function urgentDefenseAgainstShape(board, aiColor) {
+  var opp = aiColor === BLACK ? WHITE : BLACK;
+  var o = findBestThreatCell(board, opp);
+  var m = findBestThreatCell(board, aiColor);
+  if (o.r < 0 || o.max < THREAT_SLEEP_THREE) {
+    return null;
+  }
+  if (o.max >= THREAT_LIVE_THREE) {
+    if (m.max > o.max + 4000) {
+      return null;
+    }
+    return { r: o.r, c: o.c };
+  }
+  if (o.max >= THREAT_SLEEP_THREE && o.max >= m.max + 200) {
+    return { r: o.r, c: o.c };
+  }
+  if (
+    countStones(board) > 8 &&
+    o.max >= THREAT_LIVE_TWO &&
+    o.max > m.max + 120
+  ) {
+    return { r: o.r, c: o.c };
   }
   return null;
 }
@@ -334,7 +518,7 @@ function minimax(board, depth, alpha, beta, maximizing, aiColor, maxCandidates) 
   var turnColor = maximizing ? aiColor : opp;
 
   var fullPool = getCandidates(board);
-  var winSelf = tryWinningMove(board, turnColor, fullPool);
+  var winSelf = hasImmediateWin(board, turnColor, fullPool);
   if (winSelf) {
     if (turnColor === aiColor) return 20000000 - depth;
     return -20000000 + depth;
@@ -344,9 +528,8 @@ function minimax(board, depth, alpha, beta, maximizing, aiColor, maxCandidates) 
     return evaluateBoard(board, aiColor);
   }
 
-  /** 剩余层数越深，分支越宽；越接近叶子越窄，显著减少节点数 */
-  var poolCap = Math.min(maxCandidates, 4 + depth * 4);
-  if (poolCap < 8) poolCap = 8;
+  var poolCap = Math.min(maxCandidates, 6 + depth * 6);
+  if (poolCap < 12) poolCap = 12;
   var pool = sortMovesByHeuristic(
     board,
     fullPool,
@@ -417,8 +600,9 @@ function minimax(board, depth, alpha, beta, maximizing, aiColor, maxCandidates) 
 
 /**
  * AI：必胜/必堵 + 候选裁剪 + minimax + 棋型启发
+ * @param {{rif?: boolean}|undefined} options 开局库：rif 为 false 时用自由远距离 26 点
  */
-function aiMove(board, aiColor) {
+function aiMove(board, aiColor, options) {
   var searchDepth = AI_SEARCH_DEPTH;
   var maxCandidates = AI_MAX_CANDIDATES;
   searchDeadline = Date.now() + AI_TIME_BUDGET_MS;
@@ -427,12 +611,22 @@ function aiMove(board, aiColor) {
     var pool = getCandidates(board);
     if (pool.length === 0) return null;
 
-    var win = tryWinningMove(board, aiColor, pool);
-    if (win) return win;
+    var win = tryWinningMoveAnywhere(board, aiColor);
+    if (win) {
+      return win;
+    }
 
-    var block = tryWinningMove(board, opp, pool);
-    if (block) return block;
+    var block = tryWinningMoveAnywhere(board, opp);
+    if (block) {
+      return block;
+    }
 
+    var shapeBlock = urgentDefenseAgainstShape(board, aiColor);
+    if (shapeBlock) {
+      return shapeBlock;
+    }
+
+    var joseki = openingBook.getJosekiMove(board, aiColor, options);
     var ordered = sortMovesByHeuristic(
       board,
       pool,
@@ -441,7 +635,27 @@ function aiMove(board, aiColor) {
       maxCandidates
     );
     if (!ordered.length) {
-      return pool[0];
+      return joseki || pool[0];
+    }
+    if (
+      joseki &&
+      board[joseki.r][joseki.c] === EMPTY
+    ) {
+      var dupIdx = -1;
+      var k;
+      for (k = 0; k < ordered.length; k++) {
+        if (ordered[k].r === joseki.r && ordered[k].c === joseki.c) {
+          dupIdx = k;
+          break;
+        }
+      }
+      if (dupIdx >= 0) {
+        var without = ordered.slice();
+        without.splice(dupIdx, 1);
+        ordered = [joseki].concat(without).slice(0, maxCandidates);
+      } else {
+        ordered = [joseki].concat(ordered).slice(0, maxCandidates);
+      }
     }
     var bestMove = ordered[0];
     var bestScore = -1e15;
@@ -487,6 +701,7 @@ module.exports = {
   createBoard: createBoard,
   isBoardFull: isBoardFull,
   checkWin: checkWin,
+  getWinningLineCells: getWinningLineCells,
   aiMove: aiMove,
   inBounds: inBounds
 };

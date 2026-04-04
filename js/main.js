@@ -8,9 +8,214 @@ var themes = require('./themes.js');
 var doodles = require('./doodles.js');
 var roomApi = require('./roomApi.js');
 var authApi = require('./authApi.js');
+var defaultAvatars = require('./defaultAvatars.js');
+var ratingTitle = require('./ratingTitle.js');
+
+/** 首页画布战绩卡片（替代 wx.showModal） */
+var ratingCardVisible = false;
+var ratingCardData = null;
+var ratingFetchInFlight = false;
 
 /** 是否已处理过「首次资料」询问（含用户点暂不） */
 var PROFILE_PROMPT_STORAGE_KEY = 'gomoku_profile_prompt_done';
+/** 授权后写入，棋盘左下角展示「我」的昵称 */
+var LOCAL_NICKNAME_KEY = 'gomoku_local_nickname';
+/** 避免每帧 draw 调用 getStorageSync（同步 IO 易卡顿） */
+var myDisplayNameCache = null;
+
+function persistLocalNickname(userInfo) {
+  if (userInfo) {
+    defaultAvatars.setGenderFromUserInfo(userInfo);
+  }
+  if (!userInfo || !userInfo.nickName) {
+    return;
+  }
+  var trimmed = String(userInfo.nickName).trim();
+  myDisplayNameCache = trimmed || '我';
+  try {
+    if (typeof wx !== 'undefined' && wx.setStorageSync) {
+      wx.setStorageSync(LOCAL_NICKNAME_KEY, trimmed);
+    }
+  } catch (e) {}
+}
+
+function getMyDisplayName() {
+  if (myDisplayNameCache !== null) {
+    return myDisplayNameCache;
+  }
+  try {
+    if (typeof wx !== 'undefined' && wx.getStorageSync) {
+      var n = wx.getStorageSync(LOCAL_NICKNAME_KEY);
+      if (n && String(n).trim()) {
+        myDisplayNameCache = String(n).trim();
+        return myDisplayNameCache;
+      }
+    }
+  } catch (e2) {}
+  myDisplayNameCache = '我';
+  return '我';
+}
+
+function getOpponentDisplayName() {
+  if (isPvpOnline) {
+    return '对手';
+  }
+  if (isPvpLocal) {
+    return '对方';
+  }
+  if (isRandomMatch) {
+    return randomOpponentName || '对手';
+  }
+  return '电脑';
+}
+
+/** 与 render.drawBoard 中棋盘外接矩形一致 */
+function getBoardOuterRect(layout) {
+  var cell = layout.cell;
+  var n = layout.size;
+  var bx = layout.originX - cell * 0.5;
+  var by = layout.originY - cell * 0.5;
+  var bw = n * cell;
+  return { bx: bx, by: by, bw: bw, bh: bw };
+}
+
+function truncateNameToWidth(ctx, text, maxW) {
+  text = String(text || '');
+  if (!text) {
+    return '';
+  }
+  if (ctx.measureText(text).width <= maxW) {
+    return text;
+  }
+  var ellipsis = '…';
+  var i = text.length;
+  while (
+    i > 0 &&
+    ctx.measureText(text.slice(0, i) + ellipsis).width > maxW
+  ) {
+    i--;
+  }
+  return i > 0 ? text.slice(0, i) + ellipsis : ellipsis;
+}
+
+/**
+ * 棋盘两侧昵称与头像几何（绘制与点击共用）
+ */
+function computeBoardNameLabelLayout(layout) {
+  var r = getBoardOuterRect(layout);
+  var pad = Math.max(8, layout.cell * 0.22);
+  var outerGap = Math.max(10, layout.cell * 0.34);
+  var maxW = r.bw * 0.48;
+  var fontPx = Math.max(
+    15,
+    Math.min(20, Math.round(14 + layout.cell * 0.22))
+  );
+  var avR = Math.max(17, Math.min(30, Math.round(layout.cell * 0.46)));
+  var myImg = defaultAvatars.getMyAvatarImage();
+  var oppImg = defaultAvatars.getOpponentAvatarImage();
+  var hasMyAv = myImg && myImg.width && myImg.height;
+  var hasOppAv = oppImg && oppImg.width && oppImg.height;
+  var myNameExtra = hasMyAv ? avR * 2 + 6 : 0;
+  var oppNameExtra = hasOppAv ? avR * 2 + 6 : 0;
+  var textTop = r.by + r.bh + outerGap;
+  return {
+    r: r,
+    pad: pad,
+    outerGap: outerGap,
+    maxW: maxW,
+    fontPx: fontPx,
+    avR: avR,
+    myImg: myImg,
+    oppImg: oppImg,
+    hasMyAv: hasMyAv,
+    hasOppAv: hasOppAv,
+    textTop: textTop,
+    myTextX: r.bx + pad + myNameExtra,
+    myCx: r.bx + pad + avR,
+    /** 与本人昵称同一行垂直中线（见 draw 中 textBaseline 'middle'） */
+    myCy: textTop + fontPx * 0.5,
+    oppNameRightX: r.bx + r.bw - pad - oppNameExtra,
+    oppCx: r.bx + r.bw - pad - avR,
+    /** 与对手昵称同一行垂直中线（见 draw 中 textBaseline 'middle'） */
+    oppCy: r.by - outerGap - fontPx * 0.5
+  };
+}
+
+function drawBoardNameLabels(ctx, layout, th) {
+  var L = computeBoardNameLabelLayout(layout);
+  var oppName = getOpponentDisplayName();
+  var myName = getMyDisplayName();
+  ctx.save();
+  ctx.font =
+    'bold ' +
+    L.fontPx +
+    'px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = th.title || th.subtitle;
+  oppName = truncateNameToWidth(
+    ctx,
+    oppName,
+    Math.max(40, L.maxW - (L.hasOppAv ? L.avR * 2 + 6 : 0))
+  );
+  myName = truncateNameToWidth(
+    ctx,
+    myName,
+    Math.max(40, L.maxW - (L.hasMyAv ? L.avR * 2 + 6 : 0))
+  );
+  /** 对手：棋盘右上角外侧；右侧为与「我」性别相反的默认头像 */
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(oppName, L.oppNameRightX, L.oppCy);
+  if (L.hasOppAv) {
+    defaultAvatars.drawCircleAvatar(
+      ctx,
+      L.oppImg,
+      L.oppCx,
+      L.oppCy,
+      L.avR,
+      th
+    );
+  }
+  /** 我：棋盘左下角外侧；左侧为默认头像（女/男） */
+  if (L.hasMyAv) {
+    defaultAvatars.drawCircleAvatar(
+      ctx,
+      L.myImg,
+      L.myCx,
+      L.myCy,
+      L.avR,
+      th
+    );
+  }
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = th.title || th.subtitle;
+  ctx.fillText(myName, L.myTextX, L.myCy);
+  ctx.restore();
+}
+
+function hitCircleAvatar(clientX, clientY, cx, cy, r) {
+  var dx = clientX - cx;
+  var dy = clientY - cy;
+  var hitR = r + 10;
+  return dx * dx + dy * dy <= hitR * hitR;
+}
+
+/**
+ * 对局中点击棋盘旁头像区域：返回 'my' | 'opp' | null（仅「我」可点开天梯弹层）
+ */
+function hitWhichGameBoardNameAvatar(clientX, clientY) {
+  if (screen !== 'game') {
+    return null;
+  }
+  var L = computeBoardNameLabelLayout(layout);
+  if (L.hasMyAv && hitCircleAvatar(clientX, clientY, L.myCx, L.myCy, L.avR)) {
+    return 'my';
+  }
+  if (L.hasOppAv && hitCircleAvatar(clientX, clientY, L.oppCx, L.oppCy, L.avR)) {
+    return 'opp';
+  }
+  return null;
+}
 
 /**
  * 首次进入：系统弹窗询问是否授权昵称与头像（无页面内自定义按钮）。
@@ -49,6 +254,7 @@ function maybeFirstVisitProfileModal() {
           desc: '用于展示昵称与头像',
           success: function (up) {
             if (up && up.userInfo) {
+              persistLocalNickname(up.userInfo);
               authApi.silentLogin(up.userInfo, function (ok) {
                 if (typeof wx.showToast === 'function') {
                   wx.showToast({
@@ -56,6 +262,7 @@ function maybeFirstVisitProfileModal() {
                     icon: ok ? 'success' : 'none'
                   });
                 }
+                draw();
               });
             }
             try {
@@ -108,6 +315,7 @@ function tryOneShotInvisibleUserInfoButton() {
   btn.onTap(function (res) {
     var userInfo = res && (res.userInfo || (res.detail && res.detail.userInfo));
     if (userInfo) {
+      persistLocalNickname(userInfo);
       authApi.silentLogin(userInfo, function (ok) {
         if (typeof wx.showToast === 'function') {
           wx.showToast({
@@ -115,6 +323,7 @@ function tryOneShotInvisibleUserInfoButton() {
             icon: ok ? 'success' : 'none'
           });
         }
+        draw();
       });
     }
     try {
@@ -190,8 +399,19 @@ syncCanvasWithWindow();
 
 /* ---------- 界面与对局状态 ---------- */
 
-/** 'home' | 'pvp_select' | 'pve_color' | 'matching' | 'game' | 'result' */
+/** 'home' | 'pve_color' | 'matching' | 'game' */
 var screen = 'home';
+
+/** 对局结束：在棋盘页上以半透明弹层展示（不再切全屏 result） */
+var showResultOverlay = false;
+
+/** 联机：对方已重置开新局，本端仍显示上一局结算直至用户点「再来一局/返回首页」 */
+var onlineResultOverlaySticky = false;
+
+/** 对方胜：先高亮五连连线，约 2s 后再弹出结算 */
+var WIN_REVEAL_DELAY_MS = 2000;
+var winningLineCells = null;
+var winRevealTimerId = null;
 
 /**
  * 对局结束页：pve_win | pve_lose | pve_draw | pvp_* | online_win | online_lose
@@ -201,8 +421,12 @@ var resultKind = '';
 /** 人机：玩家执子 gomoku.BLACK | gomoku.WHITE */
 var pveHumanColor = BLACK;
 
-/** 人机难度展示文案（引擎侧固定为困难） */
-var PVE_DIFF_LABEL = '困难';
+/**
+ * 人机连珠：固定启用 RIF 式开局（开局库），无交换执棋流程。
+ */
+
+/** 人机难度展示文案（与 Worker 搜索强度对应） */
+var PVE_DIFF_LABEL = '巅峰';
 
 function pveAiColor() {
   return pveHumanColor === BLACK ? WHITE : BLACK;
@@ -222,12 +446,23 @@ var onlineToken = '';
 var pvpOnlineYourColor = BLACK;
 var onlineBlackConnected = false;
 var onlineWhiteConnected = false;
+/** 对方曾在线后断开，用于状态栏「对方已离开房间」 */
+var onlineOpponentLeft = false;
 var socketTask = null;
+/** WebSocket 已 onOpen，可 send；断线后为 false，用于重连提示与拦截落子 */
+var onlineWsConnected = false;
+var onlineReconnectTimer = null;
+var onlineReconnectAttempt = 0;
+var ONLINE_RECONNECT_BASE_MS = 800;
+var ONLINE_RECONNECT_MAX_MS = 30000;
+/** 当前 WS 代数，用于忽略 closeSocketOnly 触发的旧连接 onClose */
+var onlineSocketConnectGen = 0;
+/** 是否曾成功 onOpen（用于区分首连与断线重连文案） */
+var onlineWsEverOpened = false;
 /** 避免冷启动与 onShow 各处理一次同一邀请 */
 var onlineInviteConsumed = false;
-
-/** 调起转发后，等用户从微信返回小游戏时再开局 */
-var pendingFriendWaitAfterShare = false;
+/** 本局是否已请求 POST /api/games/settle（防重复；新局由 applyOnlineState 置 false） */
+var onlineSettleSent = false;
 
 /** 随机匹配到的假对手昵称 */
 var randomOpponentName = '';
@@ -281,9 +516,70 @@ function closeSocketOnly() {
     } catch (e1) {}
     socketTask = null;
   }
+  onlineWsConnected = false;
+}
+
+function clearOnlineReconnectTimer() {
+  if (onlineReconnectTimer) {
+    clearTimeout(onlineReconnectTimer);
+    onlineReconnectTimer = null;
+  }
+}
+
+/** 联机对局/匹配等待中是否应保持 roomId+token 并允许自动重连 */
+function shouldAutoReconnectOnline() {
+  if (!onlineRoomId || !onlineToken) {
+    return false;
+  }
+  if (screen === 'game') {
+    return true;
+  }
+  if (screen === 'matching' && randomMatchHostWaiting) {
+    return true;
+  }
+  return false;
+}
+
+function scheduleOnlineReconnect(immediate) {
+  clearOnlineReconnectTimer();
+  if (!shouldAutoReconnectOnline()) {
+    return;
+  }
+  var delay;
+  if (immediate) {
+    delay = 0;
+  } else {
+    delay = Math.min(
+      ONLINE_RECONNECT_BASE_MS * Math.pow(2, onlineReconnectAttempt),
+      ONLINE_RECONNECT_MAX_MS
+    );
+  }
+  onlineReconnectTimer = setTimeout(function () {
+    onlineReconnectTimer = null;
+    if (!shouldAutoReconnectOnline()) {
+      return;
+    }
+    onlineReconnectAttempt++;
+    startOnlineSocket();
+  }, delay);
+}
+
+function handleOnlineSocketDead() {
+  socketTask = null;
+  onlineWsConnected = false;
+  if (shouldAutoReconnectOnline()) {
+    scheduleOnlineReconnect(false);
+    draw();
+  }
 }
 
 function disconnectOnline() {
+  clearOnlineReconnectTimer();
+  onlineReconnectAttempt = 0;
+  onlineSocketConnectGen++;
+  onlineWsEverOpened = false;
+  onlineResultOverlaySticky = false;
+  onlineOpponentLeft = false;
   closeSocketOnly();
   isPvpOnline = false;
   onlineRoomId = '';
@@ -293,6 +589,15 @@ function disconnectOnline() {
   onlineWhiteConnected = false;
   onlineUndoPending = false;
   onlineUndoRequesterColor = null;
+  onlineSettleSent = false;
+}
+
+function onlineSocketCanSend() {
+  return (
+    socketTask &&
+    typeof socketTask.send === 'function' &&
+    onlineWsConnected
+  );
 }
 
 function copyBoardFromServer(b) {
@@ -319,6 +624,24 @@ function boardIsEmpty(b) {
     }
   }
   return true;
+}
+
+/** 联机同步：找出新落的一子（该方颜色），用于定位五连 */
+function findSingleNewStoneOfColor(prevBoard, newBoard, color) {
+  var list = [];
+  var r;
+  var c;
+  for (r = 0; r < SIZE; r++) {
+    for (c = 0; c < SIZE; c++) {
+      if (prevBoard[r][c] === gomoku.EMPTY && newBoard[r][c] === color) {
+        list.push({ r: r, c: c });
+      }
+    }
+  }
+  if (list.length === 0) {
+    return null;
+  }
+  return list.length === 1 ? list[0] : list[list.length - 1];
 }
 
 /** 根据前后盘面差分，更新「对方」新增的唯一一子（联机） */
@@ -400,6 +723,7 @@ function execPveUndo() {
     wx.showToast({ title: '没有可悔的棋', icon: 'none' });
     return;
   }
+  /** 人机：轮到 AI 时只撤己方最后一手；轮到己方时可撤两手（撤回上一回合人机各一手） */
   if (current === pveAiColor()) {
     aiMoveGeneration++;
     var hm = pveMoveHistory.pop();
@@ -438,12 +762,11 @@ function tryLocalUndoRequest() {
 }
 
 function applyLocalUndoPops() {
-  var pops = localMoveHistory.length >= 2 ? 2 : 1;
-  var i;
-  for (i = 0; i < pops; i++) {
-    var m = localMoveHistory.pop();
-    board[m.r][m.c] = gomoku.EMPTY;
+  if (localMoveHistory.length === 0) {
+    return;
   }
+  var m = localMoveHistory.pop();
+  board[m.r][m.c] = gomoku.EMPTY;
   syncCurrentFromBoard();
   refreshLocalLastOpponent();
 }
@@ -468,7 +791,8 @@ function execLocalUndoCancel() {
 }
 
 function sendOnlineUndo(msgType) {
-  if (!socketTask || typeof socketTask.send !== 'function') {
+  if (!onlineSocketCanSend()) {
+    wx.showToast({ title: '网络未连接', icon: 'none' });
     return;
   }
   socketTask.send({
@@ -492,15 +816,64 @@ function showUndoRespondRow() {
   return false;
 }
 
+function clearWinRevealTimer() {
+  if (winRevealTimerId != null) {
+    clearTimeout(winRevealTimerId);
+    winRevealTimerId = null;
+  }
+}
+
+/** 是否走「连线 → 延迟 → 结算」：对方胜（人机 AI、联机对手、同桌任一方胜） */
+function isOpponentWinForReveal(winnerColor) {
+  if (isPvpLocal) {
+    return true;
+  }
+  if (isPvpOnline) {
+    return winnerColor !== pvpOnlineYourColor;
+  }
+  return winnerColor === pveAiColor();
+}
+
+function finishGameWithWin(r, c, winnerColor) {
+  gameOver = true;
+  winner = winnerColor;
+  if (!isOpponentWinForReveal(winnerColor)) {
+    clearWinRevealTimer();
+    winningLineCells = null;
+    openResult();
+    return;
+  }
+  var line = gomoku.getWinningLineCells(board, r, c, winnerColor);
+  if (!line || line.length < 2) {
+    winningLineCells = null;
+    openResult();
+    return;
+  }
+  winningLineCells = line;
+  showResultOverlay = false;
+  clearWinRevealTimer();
+  winRevealTimerId = setTimeout(function () {
+    winRevealTimerId = null;
+    winningLineCells = null;
+    openResult();
+  }, WIN_REVEAL_DELAY_MS);
+  draw();
+}
+
 function applyOnlineState(data) {
   if (!data || data.type !== 'STATE') {
     return;
   }
+  var prevBlack = onlineBlackConnected;
+  var prevWhite = onlineWhiteConnected;
   var wasOver = gameOver;
   var prevBoard = copyBoardFromServer(board);
   board = copyBoardFromServer(data.board);
   current = data.current;
   gameOver = data.gameOver;
+  if (!gameOver) {
+    onlineSettleSent = false;
+  }
   if (data.winner === undefined || data.winner === null) {
     winner = null;
   } else {
@@ -509,6 +882,16 @@ function applyOnlineState(data) {
   pvpOnlineYourColor = data.yourColor;
   onlineBlackConnected = !!data.blackConnected;
   onlineWhiteConnected = !!data.whiteConnected;
+  if (isPvpOnline && (screen === 'game' || screen === 'matching')) {
+    var yc = data.yourColor;
+    var oppWas = yc === BLACK ? prevWhite : prevBlack;
+    var oppNow = yc === BLACK ? onlineWhiteConnected : onlineBlackConnected;
+    if (oppNow) {
+      onlineOpponentLeft = false;
+    } else if (oppWas && !oppNow) {
+      onlineOpponentLeft = true;
+    }
+  }
   if (randomMatchHostWaiting && screen === 'matching' && data.whiteConnected) {
     randomMatchHostWaiting = false;
     cancelMatchingTimers();
@@ -525,11 +908,29 @@ function applyOnlineState(data) {
 
   if (gameOver && !wasOver) {
     screen = 'game';
+    if (winner != null && isOpponentWinForReveal(winner)) {
+      var wm = findSingleNewStoneOfColor(prevBoard, board, winner);
+      if (
+        wm &&
+        gomoku.checkWin(board, wm.r, wm.c, winner)
+      ) {
+        finishGameWithWin(wm.r, wm.c, winner);
+      } else {
+        openResult();
+      }
+      return;
+    }
     openResult();
     return;
   }
   if (!gameOver && wasOver) {
     screen = 'game';
+    if (showResultOverlay) {
+      onlineResultOverlaySticky = true;
+    } else {
+      clearWinRevealTimer();
+      winningLineCells = null;
+    }
   }
   draw();
 }
@@ -538,21 +939,36 @@ function startOnlineSocket() {
   if (!onlineRoomId || !onlineToken) {
     return;
   }
+  onlineSocketConnectGen++;
+  var myGen = onlineSocketConnectGen;
   closeSocketOnly();
   isPvpOnline = true;
   var wsBase = roomApi.wsUrlFromApiBase();
+  var st = authApi.getSessionToken();
   var url =
     wsBase +
     '/ws/gomoku?roomId=' +
     encodeURIComponent(onlineRoomId) +
     '&token=' +
-    encodeURIComponent(onlineToken);
+    encodeURIComponent(onlineToken) +
+    '&sessionToken=' +
+    encodeURIComponent(st);
   if (typeof console !== 'undefined' && console.log) {
     console.log('[Gomoku] WebSocket URL:', url);
   }
   socketTask = wx.connectSocket({
     url: url,
     fail: function () {
+      if (myGen !== onlineSocketConnectGen) {
+        return;
+      }
+      socketTask = null;
+      onlineWsConnected = false;
+      if (shouldAutoReconnectOnline()) {
+        scheduleOnlineReconnect(false);
+        draw();
+        return;
+      }
       wx.showToast({ title: '连接失败', icon: 'none' });
       disconnectOnline();
       screen = 'home';
@@ -562,8 +978,20 @@ function startOnlineSocket() {
   if (!socketTask || !socketTask.onOpen) {
     return;
   }
-  socketTask.onOpen(function () {});
+  socketTask.onOpen(function () {
+    if (myGen !== onlineSocketConnectGen) {
+      return;
+    }
+    onlineWsConnected = true;
+    onlineWsEverOpened = true;
+    onlineReconnectAttempt = 0;
+    clearOnlineReconnectTimer();
+    draw();
+  });
   socketTask.onMessage(function (res) {
+    if (myGen !== onlineSocketConnectGen) {
+      return;
+    }
     var raw = res.data;
     var data;
     try {
@@ -583,20 +1011,29 @@ function startOnlineSocket() {
     }
   });
   socketTask.onClose(function () {
-    if (isPvpOnline && screen === 'game') {
-      wx.showToast({ title: '连接已断开', icon: 'none' });
+    if (myGen !== onlineSocketConnectGen) {
+      return;
     }
+    handleOnlineSocketDead();
   });
   socketTask.onError(function () {
-    wx.showToast({ title: '网络异常', icon: 'none' });
+    if (myGen !== onlineSocketConnectGen) {
+      return;
+    }
+    handleOnlineSocketDead();
   });
 }
 
 function startOnlineAsHost() {
-  disconnectOnline();
-  wx.showLoading({ title: '创建房间…', mask: true });
-  wx.request(
-    Object.assign(roomApi.roomApiCreateOptions(), {
+  authApi.ensureSession(function (sessionOk, errHint) {
+    if (!sessionOk) {
+      wx.showToast({ title: errHint || '请先完成登录', icon: 'none' });
+      return;
+    }
+    disconnectOnline();
+    wx.showLoading({ title: '创建房间…', mask: true });
+    wx.request(
+      Object.assign(roomApi.roomApiCreateOptions(), {
     success: function (res) {
       wx.hideLoading();
       if ((res.statusCode !== 200 && res.statusCode !== 201) || !res.data) {
@@ -621,13 +1058,25 @@ function startOnlineAsHost() {
       lastMsg = '等待白方加入…';
       startOnlineSocket();
       draw();
+      if (typeof wx.shareAppMessage === 'function') {
+        wx.shareAppMessage({
+          title: '五子棋 房号 ' + onlineRoomId,
+          query: 'roomId=' + onlineRoomId + '&online=1'
+        });
+      } else {
+        wx.showToast({
+          title: '请点右上角菜单转发给好友',
+          icon: 'none'
+        });
+      }
     },
     fail: function () {
       wx.hideLoading();
       wx.showToast({ title: '网络请求失败', icon: 'none' });
     }
   })
-  );
+    );
+  });
 }
 
 function joinOnlineAsGuest(roomId) {
@@ -635,19 +1084,32 @@ function joinOnlineAsGuest(roomId) {
     return;
   }
   onlineInviteConsumed = true;
-  disconnectOnline();
-  wx.showLoading({ title: '加入房间…', mask: true });
-  wx.request(
-    Object.assign(roomApi.roomApiJoinOptions(roomId), {
+  authApi.ensureSession(function (sessionOk, errHint) {
+    if (!sessionOk) {
+      onlineInviteConsumed = false;
+      wx.showToast({ title: errHint || '请先完成登录', icon: 'none' });
+      return;
+    }
+    disconnectOnline();
+    wx.showLoading({ title: '加入房间…', mask: true });
+    wx.request(
+      Object.assign(roomApi.roomApiJoinOptions(roomId), {
     success: function (res) {
       wx.hideLoading();
-      if (res.statusCode !== 200 || !res.data) {
+        if (res.statusCode !== 200 || !res.data) {
         onlineInviteConsumed = false;
         var msg = '无法加入';
-        if (res.statusCode === 404) {
+        if (res.statusCode === 401) {
+          msg = '请先登录';
+        } else if (res.statusCode === 404) {
           msg = '房间不存在';
         } else if (res.statusCode === 409) {
-          msg = '房间已满';
+          var er = res.data;
+          if (er && er.code === 'SAME_USER') {
+            msg = '不能用同一账号加入';
+          } else {
+            msg = '房间已满';
+          }
         }
         wx.showToast({ title: msg, icon: 'none' });
         return;
@@ -674,7 +1136,8 @@ function joinOnlineAsGuest(roomId) {
       wx.showToast({ title: '网络请求失败', icon: 'none' });
     }
   })
-  );
+    );
+  });
 }
 
 function tryLaunchOnlineInvite(query) {
@@ -685,29 +1148,6 @@ function tryLaunchOnlineInvite(query) {
     return;
   }
   joinOnlineAsGuest(String(query.roomId));
-}
-
-function tryManualJoinRoom() {
-  if (typeof wx.showModal !== 'function') {
-    wx.showToast({ title: '请从邀请卡片进入', icon: 'none' });
-    return;
-  }
-  wx.showModal({
-    title: '加入联机房间',
-    editable: true,
-    placeholderText: '输入房号',
-    success: function (r) {
-      if (!r.confirm) {
-        return;
-      }
-      var id = (r.content || '').trim();
-      if (!id) {
-        wx.showToast({ title: '房号为空', icon: 'none' });
-        return;
-      }
-      joinOnlineAsGuest(id);
-    }
-  });
 }
 
 /* ---------- 棋盘布局与菜单几何 ---------- */
@@ -784,6 +1224,345 @@ function getHomeLayout() {
     y2: y1 + step,
     y3: y1 + step * 2
   };
+}
+
+/** 首页左上角默认头像（点击可查看天梯与胜率；性别来自授权资料） */
+function getHomeAvatarLayout() {
+  var sb = sys.statusBarHeight || 24;
+  var safeTop =
+    sys.safeArea && sys.safeArea.top != null ? sys.safeArea.top : 0;
+  var insetTop = Math.max(sb, safeTop);
+  var avR = 30;
+  var padL = 12;
+  var cx = padL + avR;
+  var cy = insetTop + 10 + avR;
+  return { cx: cx, cy: cy, r: avR };
+}
+
+function hitHomeAvatar(clientX, clientY) {
+  if (screen !== 'home') {
+    return false;
+  }
+  var L = getHomeAvatarLayout();
+  var dx = clientX - L.cx;
+  var dy = clientY - L.cy;
+  return dx * dx + dy * dy <= (L.r + 10) * (L.r + 10);
+}
+
+function getRatingCardLayout() {
+  var w = Math.min(W - 48, 300);
+  var h = 228;
+  var cx = W / 2;
+  var cy = H * 0.42;
+  return { cx: cx, cy: cy, w: w, h: h, r: 18 };
+}
+
+function hitRatingCardInside(x, y) {
+  var L = getRatingCardLayout();
+  var x0 = L.cx - L.w / 2;
+  var y0 = L.cy - L.h / 2;
+  return x >= x0 && x <= x0 + L.w && y >= y0 && y <= y0 + L.h;
+}
+
+function hitRatingCardClose(x, y) {
+  var L = getRatingCardLayout();
+  var y0 = L.cy - L.h / 2;
+  var btnW = 128;
+  var btnH = 36;
+  var btnX = L.cx - btnW / 2;
+  var btnY = y0 + L.h - 52;
+  return x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH;
+}
+
+function drawRatingCardOverlay(th) {
+  if (!ratingCardVisible || !ratingCardData) {
+    return;
+  }
+  var d = ratingCardData;
+  var L = getRatingCardLayout();
+  var x = L.cx - L.w / 2;
+  var y = L.cy - L.h / 2;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.48)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.shadowColor = 'rgba(0,0,0,0.18)';
+  ctx.shadowBlur = 28;
+  ctx.shadowOffsetY = 10;
+  ctx.fillStyle = 'rgba(255,255,255,0.97)';
+  roundRect(x, y, L.w, L.h, L.r);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 1;
+  roundRect(x, y, L.w, L.h, L.r);
+  ctx.stroke();
+
+  var titleBlock = 0;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  if (d.cardTitle) {
+    ctx.font =
+      'bold 15px "PingFang SC","Hiragino Sans GB",sans-serif';
+    ctx.fillStyle = th.title;
+    ctx.fillText(d.cardTitle, L.cx, y + 14);
+    titleBlock += 26;
+  }
+  if (d.nicknameLine) {
+    ctx.font = '12px "PingFang SC","Hiragino Sans GB",sans-serif';
+    ctx.fillStyle = th.muted;
+    ctx.fillText(d.nicknameLine, L.cx, y + 14 + titleBlock);
+    titleBlock += 18;
+  }
+
+  var btnTop = y + L.h - 52;
+  var gapAboveBtn = 14;
+  var availH = btnTop - gapAboveBtn - y - titleBlock;
+  var contentBlockH = 67;
+  var rowTop = y + titleBlock + (availH - contentBlockH) / 2;
+  if (rowTop < y + 10 + titleBlock) {
+    rowTop = y + 10 + titleBlock;
+  }
+  var colL = x + L.w / 6;
+  var colM = x + L.w / 2;
+  var colR = x + (5 * L.w) / 6;
+
+  ctx.font = '12px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = th.muted;
+  ctx.fillText('得分', colL, rowTop);
+  ctx.fillText('胜率', colM, rowTop);
+  ctx.fillText('称号', colR, rowTop);
+
+  ctx.font = 'bold 20px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = th.title;
+  ctx.fillText(String(d.elo), colL, rowTop + 20);
+  ctx.fillText(d.winPctDisplay, colM, rowTop + 20);
+  ctx.font = 'bold 18px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillText(d.titleName, colR, rowTop + 20);
+
+  var statY = rowTop + 56;
+  ctx.font = '11px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = th.muted;
+  if (!d.noGames && d.total > 0) {
+    ctx.fillText('胜 ' + d.win + ' · 共 ' + d.total + ' 局', L.cx, statY);
+  } else {
+    ctx.fillText('暂无对局', L.cx, statY);
+  }
+
+  ctx.strokeStyle = 'rgba(0,0,0,0.05)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + L.w / 3 - 0.5, rowTop + 6);
+  ctx.lineTo(x + L.w / 3 - 0.5, rowTop + 48);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + (2 * L.w) / 3 - 0.5, rowTop + 6);
+  ctx.lineTo(x + (2 * L.w) / 3 - 0.5, rowTop + 48);
+  ctx.stroke();
+
+  var btnW = 128;
+  var btnH = 36;
+  var btnX = L.cx - btnW / 2;
+  var btnY = y + L.h - 52;
+  ctx.fillStyle = th.homeCards && th.homeCards[0] ? th.homeCards[0] : '#FFB6C1';
+  roundRect(btnX, btnY, btnW, btnH, btnH / 2);
+  ctx.fill();
+  ctx.font = '15px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = '#fff';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('知道了', L.cx, btnY + btnH / 2);
+
+  ctx.restore();
+}
+
+/**
+ * 将 /api/me/rating 或 /api/rooms/opponent-rating 的 JSON 填入战绩卡片
+ * opts: { cardTitle, nicknameLine, usePayloadNickname }
+ */
+function fillRatingCardFromApiData(d, opts) {
+  opts = opts || {};
+  var cardTitle = opts.cardTitle || '';
+  var nicknameLine = opts.nicknameLine;
+  if (nicknameLine === undefined) {
+    if (opts.usePayloadNickname) {
+      nicknameLine =
+        typeof d.nickname === 'string' && d.nickname.trim()
+          ? d.nickname.trim()
+          : '';
+    } else {
+      nicknameLine = '';
+    }
+  }
+  var elo = typeof d.eloScore === 'number' ? d.eloScore : 0;
+  var total = typeof d.totalGames === 'number' ? d.totalGames : 0;
+  var win = typeof d.winCount === 'number' ? d.winCount : 0;
+  var rt = ratingTitle.getRankAndTitleByElo(elo);
+  var winPctDisplay;
+  var noGames = total <= 0;
+  if (noGames) {
+    winPctDisplay = '—';
+  } else {
+    var pct = Math.round((win * 1000) / total) / 10;
+    winPctDisplay = pct + '%';
+  }
+  ratingCardData = {
+    cardTitle: cardTitle,
+    nicknameLine: nicknameLine,
+    elo: elo,
+    titleName: rt.titleName,
+    winPctDisplay: winPctDisplay,
+    win: win,
+    total: total,
+    noGames: noGames
+  };
+}
+
+/** 拉取天梯数据并在画布上展示战绩卡片（依赖已登录 sessionToken） */
+function showMyRatingModal() {
+  if (!authApi.getSessionToken()) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '请先完成登录', icon: 'none' });
+    }
+    return;
+  }
+  if (ratingFetchInFlight) {
+    return;
+  }
+  ratingFetchInFlight = true;
+  if (typeof wx.showLoading === 'function') {
+    wx.showLoading({ title: '加载中…', mask: true });
+  }
+  wx.request(
+    Object.assign(roomApi.meRatingOptions(), {
+      success: function (res) {
+        if (typeof wx.hideLoading === 'function') {
+          wx.hideLoading();
+        }
+        ratingFetchInFlight = false;
+        if (res.statusCode === 401) {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '请先登录', icon: 'none' });
+          }
+          return;
+        }
+        if (res.statusCode !== 200 || !res.data) {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '获取失败', icon: 'none' });
+          }
+          return;
+        }
+        var d = res.data;
+        if (d && typeof d === 'string') {
+          try {
+            d = JSON.parse(d);
+          } catch (pe) {
+            d = null;
+          }
+        }
+        if (!d) {
+          return;
+        }
+        fillRatingCardFromApiData(d, {});
+        ratingCardVisible = true;
+        draw();
+      },
+      fail: function () {
+        if (typeof wx.hideLoading === 'function') {
+          wx.hideLoading();
+        }
+        ratingFetchInFlight = false;
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '网络错误', icon: 'none' });
+        }
+      }
+    })
+  );
+}
+
+/** 联机对局中：拉取当前房间对手的公开天梯 */
+function showOpponentRatingModal() {
+  if (!isPvpOnline || !onlineRoomId) {
+    return;
+  }
+  if (!authApi.getSessionToken()) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '请先完成登录', icon: 'none' });
+    }
+    return;
+  }
+  if (ratingFetchInFlight) {
+    return;
+  }
+  ratingFetchInFlight = true;
+  if (typeof wx.showLoading === 'function') {
+    wx.showLoading({ title: '加载中…', mask: true });
+  }
+  wx.request(
+    Object.assign(roomApi.roomOpponentRatingOptions(onlineRoomId), {
+      success: function (res) {
+        if (typeof wx.hideLoading === 'function') {
+          wx.hideLoading();
+        }
+        ratingFetchInFlight = false;
+        if (res.statusCode === 401) {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '请先登录', icon: 'none' });
+          }
+          return;
+        }
+        if (res.statusCode === 404 || res.statusCode === 403) {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({
+              title: res.statusCode === 403 ? '无法查看' : '暂无对手数据',
+              icon: 'none'
+            });
+          }
+          return;
+        }
+        if (res.statusCode !== 200 || !res.data) {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '获取失败', icon: 'none' });
+          }
+          return;
+        }
+        var d = res.data;
+        if (d && typeof d === 'string') {
+          try {
+            d = JSON.parse(d);
+          } catch (pe2) {
+            d = null;
+          }
+        }
+        if (!d) {
+          return;
+        }
+        fillRatingCardFromApiData(d, {
+          cardTitle: '对手战绩',
+          usePayloadNickname: true
+        });
+        ratingCardVisible = true;
+        draw();
+      },
+      fail: function () {
+        if (typeof wx.hideLoading === 'function') {
+          wx.hideLoading();
+        }
+        ratingFetchInFlight = false;
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '网络错误', icon: 'none' });
+        }
+      }
+    })
+  );
+}
+
+function drawHomeTopLeftAvatar(th) {
+  var L = getHomeAvatarLayout();
+  var img = defaultAvatars.getMyAvatarImage();
+  defaultAvatars.drawCircleAvatar(ctx, img, L.cx, L.cy, L.r, th);
 }
 
 /** 各页右上角「风格」：下移避开微信胶囊 / 菜单按钮 */
@@ -940,17 +1719,15 @@ function startThemeBubbleFadeAnim() {
 function themeScreenShowsStyleEntry() {
   return (
     screen === 'home' ||
-    screen === 'pvp_select' ||
     screen === 'pve_color' ||
     screen === 'matching' ||
-    screen === 'result' ||
     screen === 'game'
   );
 }
 
 function drawThemeChrome(th) {
-  drawThemeEntry(th);
   drawThemeBubble(th);
+  drawThemeEntry(th);
 }
 
 function hitThemeEntry(clientX, clientY) {
@@ -961,24 +1738,6 @@ function hitThemeEntry(clientX, clientY) {
   );
 }
 
-function getPvpLayout() {
-  var btnW = Math.min(W - 48, 300);
-  var btnH = 48;
-  var cx = W / 2;
-  var step = Math.min(H * 0.076, 54);
-  var y0 = H * 0.28;
-  return {
-    btnW: btnW,
-    btnH: btnH,
-    cx: cx,
-    yOnline: y0,
-    yJoin: y0 + step,
-    yLocal: y0 + step * 2,
-    yShare: y0 + step * 3,
-    backY: H * 0.82
-  };
-}
-
 function getPveColorLayout() {
   var btnW = Math.min(W - 48, 300);
   var btnH = 54;
@@ -987,7 +1746,7 @@ function getPveColorLayout() {
     btnW: btnW,
     btnH: btnH,
     cx: cx,
-    yBlack: H * 0.40,
+    yBlack: H * 0.4,
     yWhite: H * 0.52,
     backY: H * 0.66
   };
@@ -1004,10 +1763,14 @@ function pixelToCell(clientX, clientY) {
 }
 
 function resetGame() {
+  showResultOverlay = false;
+  onlineResultOverlaySticky = false;
+  clearWinRevealTimer();
+  winningLineCells = null;
   lastOpponentMove = null;
   if (isPvpOnline) {
     screen = 'game';
-    if (socketTask && gameOver) {
+    if (gameOver && onlineSocketCanSend()) {
       socketTask.send({
         data: JSON.stringify({ type: 'RESET' })
       });
@@ -1031,24 +1794,7 @@ function resetGame() {
     draw();
     return;
   }
-  var sideLabel = pveHumanColor === BLACK ? '黑' : '白';
-  if (isRandomMatch) {
-    lastMsg =
-      '「' +
-      randomOpponentName +
-      '」·' +
-      PVE_DIFF_LABEL +
-      '·你执' +
-      sideLabel +
-      (pveHumanColor === BLACK ? '先行' : '后行');
-  } else {
-    lastMsg =
-      '人机（' +
-      PVE_DIFF_LABEL +
-      '）你执' +
-      sideLabel +
-      (pveHumanColor === BLACK ? '先行' : '后行');
-  }
+  lastMsg = '';
   draw();
   if (!gameOver && current === pveAiColor()) {
     setTimeout(function () {
@@ -1134,18 +1880,25 @@ function onRandomMatchHostTimeout() {
 function startRandomMatch() {
   cancelMatchingTimers();
   randomMatchHostWaiting = false;
-  disconnectOnline();
-  matchingDots = 0;
-  screen = 'matching';
-  matchingAnimTimer = setInterval(function () {
-    matchingDots = (matchingDots + 1) % 4;
-    if (screen === 'matching') {
+  authApi.ensureSession(function (sessionOk, errHint) {
+    if (!sessionOk) {
+      wx.showToast({ title: errHint || '请先完成登录', icon: 'none' });
+      screen = 'home';
       draw();
+      return;
     }
-  }, 400);
-  draw();
-  wx.request(
-    Object.assign(roomApi.roomApiRandomMatchOptions(), {
+    disconnectOnline();
+    matchingDots = 0;
+    screen = 'matching';
+    matchingAnimTimer = setInterval(function () {
+      matchingDots = (matchingDots + 1) % 4;
+      if (screen === 'matching') {
+        draw();
+      }
+    }, 400);
+    draw();
+    wx.request(
+      Object.assign(roomApi.roomApiRandomMatchOptions(), {
       success: function (res) {
         if (screen !== 'matching') {
           return;
@@ -1223,7 +1976,8 @@ function startRandomMatch() {
         draw();
       }
     })
-  );
+    );
+  });
 }
 
 function cancelMatching() {
@@ -1238,6 +1992,10 @@ function cancelMatching() {
 }
 
 function backToHome() {
+  showResultOverlay = false;
+  onlineResultOverlaySticky = false;
+  clearWinRevealTimer();
+  winningLineCells = null;
   destroyAiWorker();
   lastOpponentMove = null;
   pveMoveHistory = [];
@@ -1250,7 +2008,6 @@ function backToHome() {
   disconnectOnline();
   isRandomMatch = false;
   isPvpLocal = false;
-  pendingFriendWaitAfterShare = false;
   onlineInviteConsumed = false;
   screen = 'home';
   draw();
@@ -1258,6 +2015,10 @@ function backToHome() {
 
 function startPvpLocal() {
   lastOpponentMove = null;
+  showResultOverlay = false;
+  onlineResultOverlaySticky = false;
+  clearWinRevealTimer();
+  winningLineCells = null;
   disconnectOnline();
   isRandomMatch = false;
   isPvpLocal = true;
@@ -1270,26 +2031,62 @@ function startPvpLocal() {
   draw();
 }
 
-function shareToWeChatFriend() {
-  if (typeof wx.shareAppMessage !== 'function') {
-    wx.showToast({
-      title: '当前环境不支持转发',
-      icon: 'none'
-    });
+/**
+ * 联机终局后上报结算，服务端写入 game 记录并更新 elo（须已登录）。
+ * 双方都会调用，先成功者结算，另一方可能收到 409 已结算。
+ */
+function maybeRequestOnlineGameSettle() {
+  if (!isPvpOnline || !onlineRoomId || onlineSettleSent) {
     return;
   }
-  pendingFriendWaitAfterShare = true;
-  wx.shareAppMessage({
-    title: '来一局团团五子棋吧！',
-    query: 'from=invite'
-  });
+  if (!authApi.getSessionToken()) {
+    return;
+  }
+  var steps = countStonesOnBoard(board);
+  if (steps < 0 || steps > 256) {
+    return;
+  }
+  var outcome;
+  if (winner === null) {
+    outcome = 'DRAW';
+  } else if (winner === BLACK) {
+    outcome = 'BLACK_WIN';
+  } else {
+    outcome = 'WHITE_WIN';
+  }
+  onlineSettleSent = true;
+  wx.request(
+    Object.assign(
+      roomApi.gameSettleOptions({
+        roomId: onlineRoomId,
+        outcome: outcome,
+        totalSteps: steps
+      }),
+      {
+        success: function (res) {
+          if (res.statusCode === 409) {
+            return;
+          }
+          if (res.statusCode !== 200) {
+            onlineSettleSent = false;
+          }
+        },
+        fail: function () {
+          onlineSettleSent = false;
+        }
+      }
+    )
+  );
 }
 
 function openResult() {
   if (!gameOver) {
     return;
   }
+  clearWinRevealTimer();
+  winningLineCells = null;
   if (isPvpOnline) {
+    maybeRequestOnlineGameSettle();
     if (winner === null) {
       resultKind = 'pvp_draw';
     } else if (winner === pvpOnlineYourColor) {
@@ -1310,23 +2107,36 @@ function openResult() {
   } else {
     resultKind = winner === pveHumanColor ? 'pve_win' : 'pve_lose';
   }
-  screen = 'result';
+  onlineResultOverlaySticky = false;
+  showResultOverlay = true;
+  screen = 'game';
   draw();
 }
 
-function getResultLayout() {
+/** 棋盘页结算弹层：卡片与按钮位置（与 drawResultOverlay / hitResultButton 一致） */
+function getResultOverlayLayout() {
   var btnW = Math.min(W - 48, 300);
   var btnH = 54;
+  var cardW = Math.min(W - 40, 360);
+  var cardH = Math.min(300, Math.max(260, H * 0.38));
+  var cardX = (W - cardW) / 2;
+  var cardY = Math.max((sys.statusBarHeight || 0) + 24, H * 0.22);
   return {
     btnW: btnW,
     btnH: btnH,
     cx: W / 2,
-    yAgain: H * 0.58,
-    yHome: H * 0.71
+    cardX: cardX,
+    cardY: cardY,
+    cardW: cardW,
+    cardH: cardH,
+    yTitle: cardY + 50,
+    ySub: cardY + 102,
+    yAgain: cardY + 162,
+    yHome: cardY + 228
   };
 }
 
-function drawResult() {
+function drawResultOverlay() {
   var th = getCurrentTheme();
   var rs = th.result;
   var bg = rs.defaultEnd;
@@ -1387,24 +2197,42 @@ function drawResult() {
       sub = '';
   }
 
-  var rg = ctx.createLinearGradient(0, 0, 0, H);
-  rg.addColorStop(0, bg);
-  rg.addColorStop(1, rs.defaultEnd);
-  ctx.fillStyle = rg;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
   ctx.fillRect(0, 0, W, H);
 
-  render.drawText(ctx, title, W / 2, H * 0.30, 40, titleColor);
+  var ly = getResultOverlayLayout();
+  var rg = ctx.createLinearGradient(
+    0,
+    ly.cardY,
+    0,
+    ly.cardY + ly.cardH
+  );
+  rg.addColorStop(0, bg);
+  rg.addColorStop(1, rs.defaultEnd);
+  var cr = Math.min(26, ly.cardH * 0.12);
+  ctx.shadowColor = 'rgba(0,0,0,0.18)';
+  ctx.shadowBlur = 24;
+  ctx.shadowOffsetY = 8;
+  ctx.fillStyle = rg;
+  roundRect(ly.cardX, ly.cardY, ly.cardW, ly.cardH, cr);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.42)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  render.drawText(ctx, title, ly.cx, ly.yTitle, 36, titleColor);
   if (sub) {
-    render.drawText(ctx, sub, W / 2, H * 0.40, 16, rs.sub, 'normal');
+    render.drawText(ctx, sub, ly.cx, ly.ySub, 16, rs.sub, 'normal');
   }
 
-  var rl = getResultLayout();
   drawMacaronCard(
     '再来一局',
-    rl.cx,
-    rl.yAgain,
-    rl.btnW,
-    rl.btnH,
+    ly.cx,
+    ly.yAgain,
+    ly.btnW,
+    ly.btnH,
     th.homeCards[0],
     false,
     'bear'
@@ -1417,10 +2245,10 @@ function drawResult() {
   ctx.strokeStyle = rs.secondaryStroke;
   ctx.lineWidth = 1.5;
   roundRect(
-    rl.cx - rl.btnW / 2,
-    rl.yHome - rl.btnH / 2,
-    rl.btnW,
-    rl.btnH,
+    ly.cx - ly.btnW / 2,
+    ly.yHome - ly.btnH / 2,
+    ly.btnW,
+    ly.btnH,
     22
   );
   ctx.fill();
@@ -1432,12 +2260,12 @@ function drawResult() {
   ctx.fillStyle = rs.secondaryText;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('返回首页', rl.cx, rl.yHome);
+  ctx.fillText('返回首页', ly.cx, ly.yHome);
   drawThemeChrome(th);
 }
 
 function hitResultButton(clientX, clientY) {
-  var rl = getResultLayout();
+  var rl = getResultOverlayLayout();
   var bw = rl.btnW / 2 + 12;
   var bh = rl.btnH / 2 + 12;
   if (
@@ -1472,6 +2300,7 @@ function drawHome() {
     sys.statusBarHeight || 0,
     tl.titleY + 22
   );
+  drawHomeTopLeftAvatar(th);
   var safeBottom =
     sys.safeArea && sys.safeArea.bottom != null ? sys.safeArea.bottom : 0;
   doodles.drawHomeBottomRightClouds(ctx, W, H, safeBottom);
@@ -1507,6 +2336,7 @@ function drawHome() {
     'sparkle'
   );
   drawThemeChrome(th);
+  drawRatingCardOverlay(th);
 }
 
 function drawMatching() {
@@ -1529,16 +2359,6 @@ function drawMatching() {
     15,
     th.subtitle
   );
-  render.drawText(
-    ctx,
-    '优先匹配真人，' +
-      Math.round(RANDOM_MATCH_TIMEOUT_MS / 1000) +
-      ' 秒内无对手则与人机对局',
-    W / 2,
-    H * 0.52,
-    12,
-    th.muted
-  );
 
   ctx.font =
     '15px "PingFang SC","Hiragino Sans GB",sans-serif';
@@ -1546,71 +2366,6 @@ function drawMatching() {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('取消', W / 2, H * 0.68);
-  drawThemeChrome(th);
-}
-
-function drawPvpSelect() {
-  fillCuteBackground();
-
-  var pl = getPvpLayout();
-  var th = getCurrentTheme();
-  render.drawText(ctx, '好友对战', W / 2, H * 0.16, 28, th.title);
-  render.drawText(
-    ctx,
-    '联机需先启动 Spring 服务；也可同桌或转发',
-    W / 2,
-    H * 0.225,
-    12,
-    th.subtitle
-  );
-
-  drawMacaronCard(
-    '联机对战',
-    pl.cx,
-    pl.yOnline,
-    pl.btnW,
-    pl.btnH,
-    th.homeCards[0],
-    false,
-    'sparkle'
-  );
-  drawMacaronCard(
-    '加入房间',
-    pl.cx,
-    pl.yJoin,
-    pl.btnW,
-    pl.btnH,
-    th.homeCards[1],
-    false,
-    'heart'
-  );
-  drawMacaronCard(
-    '同桌对战',
-    pl.cx,
-    pl.yLocal,
-    pl.btnW,
-    pl.btnH,
-    th.homeCards[2],
-    false,
-    'bear'
-  );
-  drawMacaronCard(
-    '转发邀请',
-    pl.cx,
-    pl.yShare,
-    pl.btnW,
-    pl.btnH,
-    th.homeCards[0],
-    false,
-    'cloud'
-  );
-
-  ctx.font =
-    '15px "PingFang SC","Hiragino Sans GB",sans-serif';
-  ctx.fillStyle = th.muted;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('返回', pl.cx, pl.backY);
   drawThemeChrome(th);
 }
 
@@ -1718,20 +2473,12 @@ function draw() {
     drawHome();
     return;
   }
-  if (screen === 'pvp_select') {
-    drawPvpSelect();
-    return;
-  }
   if (screen === 'pve_color') {
     drawPveColorSelect();
     return;
   }
   if (screen === 'matching') {
     drawMatching();
-    return;
-  }
-  if (screen === 'result') {
-    drawResult();
     return;
   }
 
@@ -1768,6 +2515,11 @@ function draw() {
       );
     }
   }
+  if (winningLineCells && winningLineCells.length >= 1) {
+    render.drawWinningLine(ctx, layout, winningLineCells);
+  }
+
+  drawBoardNameLabels(ctx, layout, th);
 
   render.drawText(
     ctx,
@@ -1781,7 +2533,13 @@ function draw() {
   var status = lastMsg;
   if (isPvpOnline) {
     var sideName = pvpOnlineYourColor === BLACK ? '黑' : '白';
-    if (!onlineBlackConnected || !onlineWhiteConnected) {
+    if (!onlineWsConnected) {
+      status = onlineWsEverOpened
+        ? '连接中断，正在重连…'
+        : '正在连接服务器…';
+    } else if (onlineOpponentLeft) {
+      status = '对方已离开房间';
+    } else if (!onlineBlackConnected || !onlineWhiteConnected) {
       status =
         pvpOnlineYourColor === BLACK && onlineRoomId
           ? '等待白方加入 · 房号 ' + onlineRoomId
@@ -1833,14 +2591,16 @@ function draw() {
       }
     }
   }
-  render.drawText(
-    ctx,
-    status,
-    W / 2,
-    layout.bottomY - 50,
-    15,
-    th.status
-  );
+  if (isPvpOnline || isPvpLocal) {
+    render.drawText(
+      ctx,
+      status,
+      W / 2,
+      layout.bottomY - 50,
+      15,
+      th.status
+    );
+  }
 
   var btnY = layout.bottomY;
   var undoLabel = '悔棋';
@@ -1878,6 +2638,15 @@ function draw() {
   }
 
   drawThemeChrome(th);
+
+  if (
+    showResultOverlay &&
+    (gameOver || onlineResultOverlaySticky)
+  ) {
+    drawResultOverlay();
+  }
+
+  drawRatingCardOverlay(th);
 }
 
 function drawButton(label, cx, cy, active) {
@@ -1943,40 +2712,6 @@ function hitHomeButton(clientX, clientY) {
 
 function hitMatchingCancel(clientX, clientY) {
   return Math.abs(clientX - W / 2) <= 100 && Math.abs(clientY - H * 0.68) <= 28;
-}
-
-function hitPvpSelectButton(clientX, clientY) {
-  var pl = getPvpLayout();
-  var bw = pl.btnW / 2 + 12;
-  var bh = pl.btnH / 2 + 10;
-  if (
-    Math.abs(clientX - pl.cx) <= bw &&
-    Math.abs(clientY - pl.yOnline) <= bh
-  ) {
-    return 'online';
-  }
-  if (
-    Math.abs(clientX - pl.cx) <= bw &&
-    Math.abs(clientY - pl.yJoin) <= bh
-  ) {
-    return 'join';
-  }
-  if (
-    Math.abs(clientX - pl.cx) <= bw &&
-    Math.abs(clientY - pl.yLocal) <= bh
-  ) {
-    return 'local';
-  }
-  if (
-    Math.abs(clientX - pl.cx) <= bw &&
-    Math.abs(clientY - pl.yShare) <= bh
-  ) {
-    return 'share';
-  }
-  if (Math.abs(clientX - pl.cx) <= 90 && Math.abs(clientY - pl.backY) <= 24) {
-    return 'back';
-  }
-  return null;
 }
 
 function hitPveColorButton(clientX, clientY) {
@@ -2182,9 +2917,7 @@ function applyAiMoveResult(mv) {
   pveMoveHistory.push({ r: mv.r, c: mv.c, color: ai });
   lastOpponentMove = { r: mv.r, c: mv.c };
   if (gomoku.checkWin(board, mv.r, mv.c, ai)) {
-    gameOver = true;
-    winner = ai;
-    openResult();
+    finishGameWithWin(mv.r, mv.c, ai);
     return;
   }
   if (gomoku.isBoardFull(board)) {
@@ -2195,6 +2928,10 @@ function applyAiMoveResult(mv) {
   }
   current = pveHumanColor;
   draw();
+}
+
+function openingOptionsForAi() {
+  return { rif: true };
 }
 
 function runAiMove() {
@@ -2212,13 +2949,14 @@ function runAiMove() {
       seq: aiWorkerSeq,
       gen: aiMoveGeneration,
       board: copyBoardForAiWorker(board),
-      aiColor: ai
+      aiColor: ai,
+      openingOptions: openingOptionsForAi()
     });
     return;
   }
   var mv;
   try {
-    mv = gomoku.aiMove(board, ai);
+    mv = gomoku.aiMove(board, ai, openingOptionsForAi());
   } catch (err) {
     console.error('aiMove', err);
     mv = null;
@@ -2251,10 +2989,12 @@ function tryPlace(r, c) {
     if (board[r][c] !== gomoku.EMPTY) {
       return;
     }
-    if (socketTask && typeof socketTask.send === 'function') {
+    if (onlineSocketCanSend()) {
       socketTask.send({
         data: JSON.stringify({ type: 'MOVE', r: r, c: c })
       });
+    } else {
+      wx.showToast({ title: '网络未连接', icon: 'none' });
     }
     return;
   }
@@ -2270,9 +3010,7 @@ function tryPlace(r, c) {
     lastOpponentMove = null;
   }
   if (gomoku.checkWin(board, r, c, current)) {
-    gameOver = true;
-    winner = current;
-    openResult();
+    finishGameWithWin(r, c, current);
     return;
   }
 
@@ -2305,6 +3043,50 @@ wx.onTouchStart(function (e) {
   var x = t.clientX;
   var y = t.clientY;
 
+  if (
+    (screen === 'home' || screen === 'game') &&
+    ratingCardVisible
+  ) {
+    if (hitRatingCardClose(x, y)) {
+      ratingCardVisible = false;
+      ratingCardData = null;
+      draw();
+      return;
+    }
+    if (!hitRatingCardInside(x, y)) {
+      ratingCardVisible = false;
+      ratingCardData = null;
+      draw();
+      return;
+    }
+    return;
+  }
+
+  if (screen === 'home' && hitHomeAvatar(x, y)) {
+    showMyRatingModal();
+    return;
+  }
+
+  var boardAv = hitWhichGameBoardNameAvatar(x, y);
+  if (boardAv === 'my') {
+    showMyRatingModal();
+    return;
+  }
+  if (boardAv === 'opp') {
+    if (isPvpOnline && onlineRoomId) {
+      showOpponentRatingModal();
+    } else if (isPvpLocal) {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: '本局无对方账号', icon: 'none' });
+      }
+    } else {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: '人机对战无对手天梯', icon: 'none' });
+      }
+    }
+    return;
+  }
+
   if (themeScreenShowsStyleEntry() && hitThemeEntry(x, y)) {
     cycleThemeNext();
     return;
@@ -2313,8 +3095,7 @@ wx.onTouchStart(function (e) {
   if (screen === 'home') {
     var homeBtn = hitHomeButton(x, y);
     if (homeBtn === 'pvp') {
-      screen = 'pvp_select';
-      draw();
+      startOnlineAsHost();
       return;
     }
     if (homeBtn === 'pve') {
@@ -2336,31 +3117,6 @@ wx.onTouchStart(function (e) {
     return;
   }
 
-  if (screen === 'pvp_select') {
-    var pvpBtn = hitPvpSelectButton(x, y);
-    if (pvpBtn === 'online') {
-      startOnlineAsHost();
-      return;
-    }
-    if (pvpBtn === 'join') {
-      tryManualJoinRoom();
-      return;
-    }
-    if (pvpBtn === 'local') {
-      startPvpLocal();
-      return;
-    }
-    if (pvpBtn === 'share') {
-      shareToWeChatFriend();
-      return;
-    }
-    if (pvpBtn === 'back') {
-      backToHome();
-      return;
-    }
-    return;
-  }
-
   if (screen === 'pve_color') {
     var colorBtn = hitPveColorButton(x, y);
     if (colorBtn === 'black') {
@@ -2378,7 +3134,11 @@ wx.onTouchStart(function (e) {
     return;
   }
 
-  if (screen === 'result') {
+  if (
+    screen === 'game' &&
+    showResultOverlay &&
+    (gameOver || onlineResultOverlaySticky)
+  ) {
     var rb = hitResultButton(x, y);
     if (rb === 'again') {
       resetGame();
@@ -2459,17 +3219,29 @@ if (typeof wx.onShow === 'function') {
   wx.onShow(function (res) {
     /** 每次进入小程序（冷启动或从后台切回）：无用户则插入，有则更新 last_login_at */
     authApi.silentLogin();
-    if (pendingFriendWaitAfterShare) {
-      pendingFriendWaitAfterShare = false;
-      startPvpLocal();
-      return;
-    }
     if (res && res.query && String(res.query.online) === '1' && res.query.roomId) {
       tryLaunchOnlineInvite(res.query);
+    }
+    if (shouldAutoReconnectOnline() && !onlineWsConnected) {
+      clearOnlineReconnectTimer();
+      scheduleOnlineReconnect(true);
     }
   });
 } else {
   authApi.silentLogin();
+}
+
+if (typeof wx.onNetworkStatusChange === 'function') {
+  wx.onNetworkStatusChange(function (res) {
+    if (
+      res.isConnected &&
+      shouldAutoReconnectOnline() &&
+      !onlineWsConnected
+    ) {
+      clearOnlineReconnectTimer();
+      scheduleOnlineReconnect(true);
+    }
+  });
 }
 
 function setupShareMessage() {
@@ -2508,6 +3280,10 @@ if (typeof wx.onWindowResize === 'function') {
     draw();
   });
 }
+
+defaultAvatars.preloadAll(function () {
+  draw();
+});
 
 draw();
 maybeFirstVisitProfileModal();
