@@ -417,7 +417,7 @@ var showResultOverlay = false;
 /** 联机：对方已重置开新局，本端仍显示上一局结算直至用户点「再来一局/返回首页」 */
 var onlineResultOverlaySticky = false;
 
-/** 对方胜：先高亮五连连线，约 2s 后再弹出结算 */
+/** 分出胜负：先高亮五连连线，约 2s 后再弹出结算 */
 var WIN_REVEAL_DELAY_MS = 2000;
 var winningLineCells = null;
 var winRevealTimerId = null;
@@ -474,6 +474,8 @@ var onlineWsEverOpened = false;
 var onlineInviteConsumed = false;
 /** 本局是否已请求 POST /api/games/settle（防重复；新局由 applyOnlineState 置 false） */
 var onlineSettleSent = false;
+/** 与 WS STATE.matchRound 一致：首局 1，再来一局后递增，用于结算上报 */
+var onlineMatchRound = 1;
 
 /** 联机对手：服务端头像与昵称（与占位默认图区分） */
 var onlineOppAvatarImg = null;
@@ -494,7 +496,12 @@ var matchingAnimTimer = null;
 var matchingDots = 0;
 /** 随机匹配：已为房主创建房间并等待真人对手（超时则人机） */
 var randomMatchHostWaiting = false;
+/** 房主首次 POST /match/random 的 blackToken：仅用于 cancel / fallback-bot；连 WS 须用 paired.yourToken */
+var randomMatchHostCancelToken = '';
+/** 房主轮询 GET /match/random/paired 直到 guestJoined */
+var randomMatchPairedPollTimer = null;
 var RANDOM_MATCH_TIMEOUT_MS = 5000;
+var RANDOM_MATCH_PAIRED_POLL_MS = 400;
 
 var FAKE_OPPONENT_NAMES = [
   '棋手甲',
@@ -521,7 +528,7 @@ var aiMoveGeneration = 0;
 /** 人机：走子栈（悔棋用） */
 var pveMoveHistory = [];
 
-/** 同桌：走子栈；localUndoRequest 非空表示待对方同意悔棋 */
+/** 同桌：走子栈；localUndoRequest 含 requesterColor、pendingPops(1|2) */
 var localMoveHistory = [];
 var localUndoRequest = null;
 
@@ -613,6 +620,8 @@ function disconnectOnline() {
   onlineUndoPending = false;
   onlineUndoRequesterColor = null;
   onlineSettleSent = false;
+  onlineMatchRound = 1;
+  randomMatchHostCancelToken = '';
   clearOnlineOpponentProfile();
 }
 
@@ -829,7 +838,42 @@ function syncLastOpponentMoveOnline(prevBoard, newBoard, yourColor) {
     lastOpponentMove = additions[0];
   } else if (boardIsEmpty(newBoard)) {
     lastOpponentMove = null;
+  } else {
+    /** 无新增对方棋子（例如己方落子、悔棋等）：清除对手上一手标记 */
+    lastOpponentMove = null;
   }
+}
+
+/**
+ * 仅在「当前轮到己方且标记落在对方棋子上」时绘制对手上一手标记；
+ * 己方下完后轮到对方时不再显示，避免对方棋子上的标记残留。
+ */
+function shouldShowOpponentLastMoveMarker() {
+  if (!lastOpponentMove) {
+    return false;
+  }
+  var lr = lastOpponentMove.r;
+  var lc = lastOpponentMove.c;
+  if (
+    lr < 0 ||
+    lr >= SIZE ||
+    lc < 0 ||
+    lc >= SIZE ||
+    board[lr][lc] === gomoku.EMPTY
+  ) {
+    return false;
+  }
+  var stoneColor = board[lr][lc];
+  if (isPvpOnline) {
+    return (
+      current === pvpOnlineYourColor &&
+      stoneColor === oppositeColor(pvpOnlineYourColor)
+    );
+  }
+  if (isPvpLocal) {
+    return stoneColor === oppositeColor(current);
+  }
+  return current === pveHumanColor && stoneColor === pveAiColor();
 }
 
 function oppositeColor(c) {
@@ -925,7 +969,25 @@ function tryLocalUndoRequest() {
   if (localUndoRequest) {
     return;
   }
-  localUndoRequest = { requesterColor: oppositeColor(current) };
+  var n = localMoveHistory.length;
+  var last = localMoveHistory[n - 1];
+  var pendingPops = 0;
+  var requesterColor;
+  if (last.color === oppositeColor(current)) {
+    pendingPops = 1;
+    requesterColor = last.color;
+  } else if (n >= 2) {
+    var secondLast = localMoveHistory[n - 2];
+    if (last.color !== current && secondLast.color === current) {
+      pendingPops = 2;
+      requesterColor = current;
+    }
+  }
+  if (pendingPops === 0) {
+    wx.showToast({ title: '没有可悔的棋', icon: 'none' });
+    return;
+  }
+  localUndoRequest = { requesterColor: requesterColor, pendingPops: pendingPops };
   draw();
 }
 
@@ -943,7 +1005,11 @@ function execLocalUndoAccept() {
   if (!localUndoRequest) {
     return;
   }
-  applyLocalUndoPops();
+  var pops = localUndoRequest.pendingPops || 1;
+  var i;
+  for (i = 0; i < pops; i++) {
+    applyLocalUndoPops();
+  }
   localUndoRequest = null;
   draw();
 }
@@ -991,26 +1057,9 @@ function clearWinRevealTimer() {
   }
 }
 
-/** 是否走「连线 → 延迟 → 结算」：对方胜（人机 AI、联机对手、同桌任一方胜） */
-function isOpponentWinForReveal(winnerColor) {
-  if (isPvpLocal) {
-    return true;
-  }
-  if (isPvpOnline) {
-    return winnerColor !== pvpOnlineYourColor;
-  }
-  return winnerColor === pveAiColor();
-}
-
 function finishGameWithWin(r, c, winnerColor) {
   gameOver = true;
   winner = winnerColor;
-  if (!isOpponentWinForReveal(winnerColor)) {
-    clearWinRevealTimer();
-    winningLineCells = null;
-    openResult();
-    return;
-  }
   var line = gomoku.getWinningLineCells(board, r, c, winnerColor);
   if (!line || line.length < 2) {
     winningLineCells = null;
@@ -1028,6 +1077,18 @@ function finishGameWithWin(r, c, winnerColor) {
   draw();
 }
 
+/**
+ * WebSocket STATE 里部分字段在个别环境下会变成字符串，与 BLACK/WHITE 数字比较会失败，
+ * 导致一直显示「对方思考中」、无法落子。
+ */
+function normalizeOnlineStoneInt(v, fallback) {
+  if (v === undefined || v === null) {
+    return fallback;
+  }
+  var n = Number(v);
+  return isNaN(n) ? fallback : n;
+}
+
 function applyOnlineState(data) {
   if (!data || data.type !== 'STATE') {
     return;
@@ -1037,24 +1098,30 @@ function applyOnlineState(data) {
   var wasOver = gameOver;
   var prevBoard = copyBoardFromServer(board);
   board = copyBoardFromServer(data.board);
-  current = data.current;
-  gameOver = data.gameOver;
+  current = normalizeOnlineStoneInt(data.current, BLACK);
+  gameOver = !!data.gameOver;
   if (!gameOver) {
     onlineSettleSent = false;
+  }
+  if (data.matchRound !== undefined && data.matchRound !== null) {
+    var mr = Number(data.matchRound);
+    if (!isNaN(mr) && mr >= 1) {
+      onlineMatchRound = mr;
+    }
   }
   if (data.winner === undefined || data.winner === null) {
     winner = null;
   } else {
-    winner = data.winner;
+    winner = normalizeOnlineStoneInt(data.winner, null);
   }
-  pvpOnlineYourColor = data.yourColor;
+  pvpOnlineYourColor = normalizeOnlineStoneInt(data.yourColor, BLACK);
   onlineBlackConnected = !!data.blackConnected;
   onlineWhiteConnected = !!data.whiteConnected;
   if (data.whiteIsBot !== undefined && data.whiteIsBot !== null) {
     onlineOpponentIsBot = !!data.whiteIsBot;
   }
   if (isPvpOnline && (screen === 'game' || screen === 'matching')) {
-    var yc = data.yourColor;
+    var yc = pvpOnlineYourColor;
     var oppWas = yc === BLACK ? prevWhite : prevBlack;
     var oppNow = yc === BLACK ? onlineWhiteConnected : onlineBlackConnected;
     if (oppNow) {
@@ -1063,23 +1130,21 @@ function applyOnlineState(data) {
       onlineOpponentLeft = true;
     }
   }
-  if (randomMatchHostWaiting && screen === 'matching' && data.whiteConnected) {
-    randomMatchHostWaiting = false;
-    cancelMatchingTimers();
-    screen = 'game';
-  }
   onlineUndoPending = !!data.undoPending;
   if (data.undoRequesterColor === undefined || data.undoRequesterColor === null) {
     onlineUndoRequesterColor = null;
   } else {
-    onlineUndoRequesterColor = data.undoRequesterColor;
+    onlineUndoRequesterColor = normalizeOnlineStoneInt(
+      data.undoRequesterColor,
+      null
+    );
   }
   lastMsg = '';
-  syncLastOpponentMoveOnline(prevBoard, board, data.yourColor);
+  syncLastOpponentMoveOnline(prevBoard, board, pvpOnlineYourColor);
 
   if (gameOver && !wasOver) {
     screen = 'game';
-    if (winner != null && isOpponentWinForReveal(winner)) {
+    if (winner != null) {
       var wm = findSingleNewStoneOfColor(prevBoard, board, winner);
       if (
         wm &&
@@ -1999,6 +2064,53 @@ function cancelMatchingTimers() {
     clearInterval(matchingAnimTimer);
     matchingAnimTimer = null;
   }
+  if (randomMatchPairedPollTimer) {
+    clearInterval(randomMatchPairedPollTimer);
+    randomMatchPairedPollTimer = null;
+  }
+}
+
+/** 房主：轮询 paired，对手加入后拿 yourToken 再连 WS（与随机先后手一致） */
+function pollRandomMatchPairedOnce() {
+  if (!randomMatchHostWaiting || screen !== 'matching' || !onlineRoomId) {
+    return;
+  }
+  wx.request(
+    Object.assign(roomApi.roomApiRandomMatchPairedOptions(onlineRoomId), {
+      success: function (res) {
+        if (!randomMatchHostWaiting || screen !== 'matching') {
+          return;
+        }
+        if (res.statusCode !== 200 || !res.data) {
+          return;
+        }
+        var p = res.data;
+        if (!p.guestJoined) {
+          return;
+        }
+        if (!p.yourToken) {
+          return;
+        }
+        cancelMatchingTimers();
+        onlineToken = p.yourToken;
+        pvpOnlineYourColor = p.yourColor === 'WHITE' ? WHITE : BLACK;
+        randomMatchHostCancelToken = '';
+        randomMatchHostWaiting = false;
+        isPvpLocal = false;
+        isRandomMatch = false;
+        screen = 'game';
+        lastOpponentMove = null;
+        board = gomoku.createBoard();
+        current = BLACK;
+        gameOver = false;
+        winner = null;
+        lastMsg = '';
+        startOnlineSocket();
+        draw();
+      },
+      fail: function () {}
+    })
+  );
 }
 
 function finishRandomMatch() {
@@ -2020,23 +2132,17 @@ function onRandomMatchHostTimeout() {
   if (!randomMatchHostWaiting) {
     return;
   }
-  if (onlineWhiteConnected) {
-    randomMatchHostWaiting = false;
-    cancelMatchingTimers();
-    screen = 'game';
-    draw();
-    return;
-  }
   wx.request(
     Object.assign(
-      roomApi.roomApiRandomMatchFallbackOptions(onlineRoomId, onlineToken),
+      roomApi.roomApiRandomMatchFallbackOptions(
+        onlineRoomId,
+        randomMatchHostCancelToken
+      ),
       {
         success: function (res) {
           if (res.statusCode === 409) {
-            randomMatchHostWaiting = false;
-            cancelMatchingTimers();
-            screen = 'game';
-            draw();
+            /* 已有白方：paired 轮询应很快成功；兜底再拉一次 */
+            pollRandomMatchPairedOnce();
             return;
           }
           if (res.statusCode === 200) {
@@ -2047,6 +2153,9 @@ function onRandomMatchHostTimeout() {
             onlineOppProfileFetched = false;
             onlineOppProfileRoomId = '';
             screen = 'game';
+            onlineToken = randomMatchHostCancelToken;
+            randomMatchHostCancelToken = '';
+            pvpOnlineYourColor = BLACK;
             closeSocketOnly();
             startOnlineSocket();
             draw();
@@ -2112,11 +2221,20 @@ function startRandomMatch() {
         if (role === 'guest') {
           cancelMatchingTimers();
           onlineRoomId = d.roomId;
-          onlineToken = d.whiteToken;
-          pvpOnlineYourColor = WHITE;
+          if (d.yourColor === 'BLACK') {
+            onlineToken = d.blackToken;
+            pvpOnlineYourColor = BLACK;
+          } else if (d.yourColor === 'WHITE') {
+            onlineToken = d.whiteToken;
+            pvpOnlineYourColor = WHITE;
+          } else {
+            onlineToken = d.whiteToken;
+            pvpOnlineYourColor = WHITE;
+          }
           isPvpLocal = false;
           isRandomMatch = false;
           randomMatchHostWaiting = false;
+          randomMatchHostCancelToken = '';
           screen = 'game';
           lastOpponentMove = null;
           board = gomoku.createBoard();
@@ -2130,7 +2248,8 @@ function startRandomMatch() {
         }
         if (role === 'host') {
           onlineRoomId = d.roomId;
-          onlineToken = d.blackToken;
+          onlineToken = '';
+          randomMatchHostCancelToken = d.blackToken || '';
           pvpOnlineYourColor = BLACK;
           isPvpLocal = false;
           isRandomMatch = false;
@@ -2141,7 +2260,11 @@ function startRandomMatch() {
           gameOver = false;
           winner = null;
           lastMsg = '';
-          startOnlineSocket();
+          pollRandomMatchPairedOnce();
+          randomMatchPairedPollTimer = setInterval(
+            pollRandomMatchPairedOnce,
+            RANDOM_MATCH_PAIRED_POLL_MS
+          );
           matchingTimer = setTimeout(function () {
             matchingTimer = null;
             onRandomMatchHostTimeout();
@@ -2174,10 +2297,16 @@ function startRandomMatch() {
 
 function cancelMatching() {
   cancelMatchingTimers();
-  if (randomMatchHostWaiting && onlineRoomId && onlineToken) {
-    wx.request(roomApi.roomApiRandomMatchCancelOptions(onlineRoomId, onlineToken));
+  if (randomMatchHostWaiting && onlineRoomId && randomMatchHostCancelToken) {
+    wx.request(
+      roomApi.roomApiRandomMatchCancelOptions(
+        onlineRoomId,
+        randomMatchHostCancelToken
+      )
+    );
   }
   randomMatchHostWaiting = false;
+  randomMatchHostCancelToken = '';
   disconnectOnline();
   screen = 'home';
   draw();
@@ -2251,6 +2380,7 @@ function maybeRequestOnlineGameSettle() {
     Object.assign(
       roomApi.gameSettleOptions({
         roomId: onlineRoomId,
+        matchRound: onlineMatchRound,
         outcome: outcome,
         totalSteps: steps
       }),
@@ -2687,25 +2817,17 @@ function draw() {
   );
   render.drawBoard(ctx, layout, th);
   render.drawPieces(ctx, board, layout, th);
-  if (lastOpponentMove) {
+  if (shouldShowOpponentLastMoveMarker()) {
     var lr = lastOpponentMove.r;
     var lc = lastOpponentMove.c;
-    if (
-      lr >= 0 &&
-      lr < SIZE &&
-      lc >= 0 &&
-      lc < SIZE &&
-      board[lr][lc] !== gomoku.EMPTY
-    ) {
-      render.drawOpponentLastMoveMarker(
-        ctx,
-        layout,
-        th,
-        lr,
-        lc,
-        board[lr][lc]
-      );
-    }
+    render.drawOpponentLastMoveMarker(
+      ctx,
+      layout,
+      th,
+      lr,
+      lc,
+      board[lr][lc]
+    );
   }
   if (winningLineCells && winningLineCells.length >= 1) {
     render.drawWinningLine(ctx, layout, winningLineCells);
@@ -3182,6 +3304,7 @@ function tryPlace(r, c) {
       return;
     }
     if (onlineSocketCanSend()) {
+      lastOpponentMove = null;
       socketTask.send({
         data: JSON.stringify({ type: 'MOVE', r: r, c: c })
       });

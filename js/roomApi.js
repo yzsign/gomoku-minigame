@@ -53,6 +53,18 @@ function roomApiRandomMatchOptions() {
   };
 }
 
+/** 房主：对手加入后 GET /api/match/random/paired?roomId= — 取最终 WebSocket token（含随机先后手交换） */
+function roomApiRandomMatchPairedOptions(roomId) {
+  return {
+    url:
+      GOMOKU_API_BASE +
+      '/api/match/random/paired?roomId=' +
+      encodeURIComponent(roomId),
+    method: 'GET',
+    header: withAuthHeaders({})
+  };
+}
+
 /** 房主取消随机匹配等待：POST /api/match/random/cancel */
 function roomApiRandomMatchCancelOptions(roomId, blackToken) {
   return {
@@ -119,7 +131,7 @@ function roomOpponentRatingOptions(roomId) {
 
 /**
  * POST /api/games/settle：联机对局结束上报，服务端更新天梯（须 Authorization）
- * body: { roomId, outcome: BLACK_WIN|WHITE_WIN|DRAW, totalSteps }
+ * body: { roomId, matchRound, outcome: BLACK_WIN|WHITE_WIN|DRAW, totalSteps }
  */
 function gameSettleOptions(body) {
   return {
@@ -137,6 +149,7 @@ module.exports = {
   roomApiCreateOptions: roomApiCreateOptions,
   roomApiJoinOptions: roomApiJoinOptions,
   roomApiRandomMatchOptions: roomApiRandomMatchOptions,
+  roomApiRandomMatchPairedOptions: roomApiRandomMatchPairedOptions,
   roomApiRandomMatchCancelOptions: roomApiRandomMatchCancelOptions,
   roomApiRandomMatchFallbackOptions: roomApiRandomMatchFallbackOptions,
   meRatingOptions: meRatingOptions,
