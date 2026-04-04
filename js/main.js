@@ -57,6 +57,9 @@ function getMyDisplayName() {
 }
 
 function getOpponentDisplayName() {
+  if (isPvpOnline && onlineOppNickname) {
+    return onlineOppNickname;
+  }
   if (isPvpOnline) {
     return '对手';
   }
@@ -111,8 +114,14 @@ function computeBoardNameLabelLayout(layout) {
     Math.min(20, Math.round(14 + layout.cell * 0.22))
   );
   var avR = Math.max(17, Math.min(30, Math.round(layout.cell * 0.46)));
-  var myImg = defaultAvatars.getMyAvatarImage();
-  var oppImg = defaultAvatars.getOpponentAvatarImage();
+  var myImg = getMyAvatarImageForUi();
+  var oppImg =
+    isPvpOnline &&
+    onlineOppAvatarImg &&
+    onlineOppAvatarImg.width &&
+    onlineOppAvatarImg.height
+      ? onlineOppAvatarImg
+      : defaultAvatars.getOpponentAvatarImage();
   var hasMyAv = myImg && myImg.width && myImg.height;
   var hasOppAv = oppImg && oppImg.width && oppImg.height;
   var myNameExtra = hasMyAv ? avR * 2 + 6 : 0;
@@ -434,6 +443,8 @@ function pveAiColor() {
 
 /** 是否由「随机匹配」进入的人机局（用于文案） */
 var isRandomMatch = false;
+/** 联机白方为数据库人机（随机匹配超时接入） */
+var onlineOpponentIsBot = false;
 
 /** 同桌好友对战：双方在同一设备轮流落子（无需服务端） */
 var isPvpLocal = false;
@@ -463,6 +474,17 @@ var onlineWsEverOpened = false;
 var onlineInviteConsumed = false;
 /** 本局是否已请求 POST /api/games/settle（防重复；新局由 applyOnlineState 置 false） */
 var onlineSettleSent = false;
+
+/** 联机对手：服务端头像与昵称（与占位默认图区分） */
+var onlineOppAvatarImg = null;
+var onlineOppNickname = '';
+var onlineOppProfileRoomId = '';
+var onlineOppProfileFetched = false;
+var onlineOppFetchInFlight = false;
+
+/** 本人：服务端 avatarUrl 加载的网络图（首页与棋盘共用） */
+var myNetworkAvatarImg = null;
+var myProfileAvatarFetched = false;
 
 /** 随机匹配到的假对手昵称 */
 var randomOpponentName = '';
@@ -587,9 +609,155 @@ function disconnectOnline() {
   pvpOnlineYourColor = BLACK;
   onlineBlackConnected = false;
   onlineWhiteConnected = false;
+  onlineOpponentIsBot = false;
   onlineUndoPending = false;
   onlineUndoRequesterColor = null;
   onlineSettleSent = false;
+  clearOnlineOpponentProfile();
+}
+
+function clearOnlineOpponentProfile() {
+  onlineOppAvatarImg = null;
+  onlineOppNickname = '';
+  onlineOppProfileRoomId = '';
+  onlineOppProfileFetched = false;
+  onlineOppFetchInFlight = false;
+}
+
+function loadMyNetworkAvatar(url) {
+  if (!url || typeof wx === 'undefined' || !wx.createImage) {
+    return;
+  }
+  var img = wx.createImage();
+  img.onload = function () {
+    myNetworkAvatarImg = img;
+    draw();
+  };
+  img.onerror = function () {
+    myNetworkAvatarImg = null;
+    draw();
+  };
+  img.src = url;
+}
+
+function loadOnlineOpponentAvatar(url) {
+  if (!url || typeof wx === 'undefined' || !wx.createImage) {
+    return;
+  }
+  var src = url;
+  if (src.indexOf('local:') === 0) {
+    src = src.slice('local:'.length);
+  }
+  var img = wx.createImage();
+  img.onload = function () {
+    onlineOppAvatarImg = img;
+    draw();
+  };
+  img.onerror = function () {
+    onlineOppAvatarImg = null;
+    draw();
+  };
+  img.src = src;
+}
+
+function applyOnlineOpponentProfilePayload(d) {
+  if (!d) {
+    return;
+  }
+  if (typeof d.nickname === 'string' && d.nickname.trim()) {
+    onlineOppNickname = d.nickname.trim();
+  } else {
+    onlineOppNickname = '';
+  }
+  if (typeof d.avatarUrl === 'string' && d.avatarUrl.trim()) {
+    loadOnlineOpponentAvatar(d.avatarUrl.trim());
+  } else {
+    onlineOppAvatarImg = null;
+    draw();
+  }
+}
+
+/** 双方已入座后拉取对手公开资料，使棋盘头像与对端资料一致 */
+function tryFetchOnlineOpponentProfile() {
+  if (!isPvpOnline || !onlineRoomId || !authApi.getSessionToken()) {
+    return;
+  }
+  if (!onlineBlackConnected || !onlineWhiteConnected) {
+    return;
+  }
+  if (onlineOppFetchInFlight) {
+    return;
+  }
+  if (onlineOppProfileRoomId === onlineRoomId && onlineOppProfileFetched) {
+    return;
+  }
+  onlineOppFetchInFlight = true;
+  wx.request(
+    Object.assign(roomApi.roomOpponentRatingOptions(onlineRoomId), {
+      success: function (res) {
+        onlineOppFetchInFlight = false;
+        if (res.statusCode !== 200 || !res.data) {
+          return;
+        }
+        var d = res.data;
+        if (d && typeof d === 'string') {
+          try {
+            d = JSON.parse(d);
+          } catch (e1) {
+            return;
+          }
+        }
+        if (!d) {
+          return;
+        }
+        onlineOppProfileRoomId = onlineRoomId;
+        onlineOppProfileFetched = true;
+        applyOnlineOpponentProfilePayload(d);
+      },
+      fail: function () {
+        onlineOppFetchInFlight = false;
+      }
+    })
+  );
+}
+
+function tryFetchMyProfileAvatar() {
+  if (myProfileAvatarFetched || !authApi.getSessionToken()) {
+    return;
+  }
+  wx.request(
+    Object.assign(roomApi.meRatingOptions(), {
+      success: function (res) {
+        if (res.statusCode !== 200 || !res.data) {
+          return;
+        }
+        myProfileAvatarFetched = true;
+        var d = res.data;
+        if (d && typeof d === 'string') {
+          try {
+            d = JSON.parse(d);
+          } catch (e2) {
+            return;
+          }
+        }
+        if (d && typeof d.avatarUrl === 'string' && d.avatarUrl.trim()) {
+          loadMyNetworkAvatar(d.avatarUrl.trim());
+        }
+      },
+      fail: function () {}
+    })
+  );
+}
+
+function getMyAvatarImageForUi() {
+  if (
+    myNetworkAvatarImg &&
+    myNetworkAvatarImg.width &&
+    myNetworkAvatarImg.height
+  ) {
+    return myNetworkAvatarImg;
+  }
+  return defaultAvatars.getMyAvatarImage();
 }
 
 function onlineSocketCanSend() {
@@ -882,6 +1050,9 @@ function applyOnlineState(data) {
   pvpOnlineYourColor = data.yourColor;
   onlineBlackConnected = !!data.blackConnected;
   onlineWhiteConnected = !!data.whiteConnected;
+  if (data.whiteIsBot !== undefined && data.whiteIsBot !== null) {
+    onlineOpponentIsBot = !!data.whiteIsBot;
+  }
   if (isPvpOnline && (screen === 'game' || screen === 'matching')) {
     var yc = data.yourColor;
     var oppWas = yc === BLACK ? prevWhite : prevBlack;
@@ -932,6 +1103,7 @@ function applyOnlineState(data) {
       winningLineCells = null;
     }
   }
+  tryFetchOnlineOpponentProfile();
   draw();
 }
 
@@ -1465,6 +1637,9 @@ function showMyRatingModal() {
         if (!d) {
           return;
         }
+        if (typeof d.avatarUrl === 'string' && d.avatarUrl.trim()) {
+          loadMyNetworkAvatar(d.avatarUrl.trim());
+        }
         fillRatingCardFromApiData(d, {});
         ratingCardVisible = true;
         draw();
@@ -1539,6 +1714,7 @@ function showOpponentRatingModal() {
         if (!d) {
           return;
         }
+        applyOnlineOpponentProfilePayload(d);
         fillRatingCardFromApiData(d, {
           cardTitle: '对手战绩',
           usePayloadNickname: true
@@ -1561,7 +1737,7 @@ function showOpponentRatingModal() {
 
 function drawHomeTopLeftAvatar(th) {
   var L = getHomeAvatarLayout();
-  var img = defaultAvatars.getMyAvatarImage();
+  var img = getMyAvatarImageForUi();
   defaultAvatars.drawCircleAvatar(ctx, img, L.cx, L.cy, L.r, th);
 }
 
@@ -1853,7 +2029,7 @@ function onRandomMatchHostTimeout() {
   }
   wx.request(
     Object.assign(
-      roomApi.roomApiRandomMatchCancelOptions(onlineRoomId, onlineToken),
+      roomApi.roomApiRandomMatchFallbackOptions(onlineRoomId, onlineToken),
       {
         success: function (res) {
           if (res.statusCode === 409) {
@@ -1862,6 +2038,22 @@ function onRandomMatchHostTimeout() {
             screen = 'game';
             draw();
             return;
+          }
+          if (res.statusCode === 200) {
+            randomMatchHostWaiting = false;
+            cancelMatchingTimers();
+            isRandomMatch = true;
+            onlineOpponentIsBot = true;
+            onlineOppProfileFetched = false;
+            onlineOppProfileRoomId = '';
+            screen = 'game';
+            closeSocketOnly();
+            startOnlineSocket();
+            draw();
+            return;
+          }
+          if (res.statusCode === 503) {
+            wx.showToast({ title: '暂无人机，已切换本地人机', icon: 'none' });
           }
           randomMatchHostWaiting = false;
           cancelMatchingTimers();
@@ -3219,6 +3411,9 @@ if (typeof wx.onShow === 'function') {
   wx.onShow(function (res) {
     /** 每次进入小程序（冷启动或从后台切回）：无用户则插入，有则更新 last_login_at */
     authApi.silentLogin();
+    setTimeout(function () {
+      tryFetchMyProfileAvatar();
+    }, 500);
     if (res && res.query && String(res.query.online) === '1' && res.query.roomId) {
       tryLaunchOnlineInvite(res.query);
     }
@@ -3290,3 +3485,6 @@ maybeFirstVisitProfileModal();
 
 /** 首屏再调一次：避免仅依赖 onShow 时，部分环境下首帧未触发或注册晚于首次 onShow */
 authApi.silentLogin();
+setTimeout(function () {
+  tryFetchMyProfileAvatar();
+}, 600);

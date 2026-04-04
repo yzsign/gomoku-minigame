@@ -69,6 +69,22 @@ function roomApiRandomMatchCancelOptions(roomId, blackToken) {
   };
 }
 
+/** 匹配超时：POST /api/match/random/fallback-bot — 从数据库随机人机作为白方 */
+function roomApiRandomMatchFallbackOptions(roomId, blackToken) {
+  return {
+    url: GOMOKU_API_BASE + '/api/match/random/fallback-bot',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/x-www-form-urlencoded'
+    }),
+    data:
+      'roomId=' +
+      encodeURIComponent(roomId) +
+      '&blackToken=' +
+      encodeURIComponent(blackToken)
+  };
+}
+
 function wsUrlFromApiBase() {
   var base = GOMOKU_API_BASE || '';
   if (base.indexOf('https://') === 0) {
@@ -122,6 +138,7 @@ module.exports = {
   roomApiJoinOptions: roomApiJoinOptions,
   roomApiRandomMatchOptions: roomApiRandomMatchOptions,
   roomApiRandomMatchCancelOptions: roomApiRandomMatchCancelOptions,
+  roomApiRandomMatchFallbackOptions: roomApiRandomMatchFallbackOptions,
   meRatingOptions: meRatingOptions,
   roomOpponentRatingOptions: roomOpponentRatingOptions,
   gameSettleOptions: gameSettleOptions,
