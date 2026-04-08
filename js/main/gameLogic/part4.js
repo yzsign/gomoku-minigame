@@ -852,7 +852,8 @@ app.openHistoryScreen = function() {
     }
     app.draw();
     var pending = 2;
-    var minLoadDisplayMs = 380;
+    /** 最短展示加载态时间（仅避免闪一下）；过大会拖慢体感 */
+    var minLoadDisplayMs = 120;
     function doneFetch() {
       pending--;
       if (pending > 0) {

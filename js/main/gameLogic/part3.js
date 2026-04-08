@@ -101,7 +101,7 @@ app.hitCheckinModalNextMonth = function(x, y) {
 
 /** 签到月历：左右切换箭头（圆底 + 折线） */
 app.drawCheckinMonthArrow = function(cx, cy, dir, ref, enabled) {
-  var rr = app.rpx(18);
+  var rr = app.rpx(21);
   app.ctx.save();
   app.ctx.beginPath();
   app.ctx.arc(cx, cy, rr, 0, Math.PI * 2);
@@ -115,10 +115,10 @@ app.drawCheckinMonthArrow = function(cx, cy, dir, ref, enabled) {
     app.ctx.globalAlpha = 1;
   }
   app.ctx.strokeStyle = enabled ? ref.navAccent : ref.dayMuted;
-  app.ctx.lineWidth = app.rpx(2.25);
+  app.ctx.lineWidth = app.rpx(2.5);
   app.ctx.lineCap = 'round';
   app.ctx.lineJoin = 'round';
-  var s = app.rpx(7);
+  var s = app.rpx(8);
   app.ctx.beginPath();
   if (dir < 0) {
     app.ctx.moveTo(cx + s * 0.25, cy - s * 0.75);
@@ -147,8 +147,8 @@ app.drawCheckinCalendarMonth = function(th, L, d, ref) {
   var navMidY = navTop + L.monthNavH * 0.5;
   var canPrev = app.checkinModalCanGoPrevMonth(viewYear, viewMonth);
   var canNext = app.checkinModalCanGoNextMonth(viewYear, viewMonth);
-  var leftAx = L.calLeft + L.calInnerPad + app.rpx(36);
-  var rightAx = L.calLeft + L.calW - L.calInnerPad - app.rpx(36);
+  var leftAx = L.calLeft + L.calInnerPad + app.rpx(38);
+  var rightAx = L.calLeft + L.calW - L.calInnerPad - app.rpx(38);
   app.drawCheckinMonthArrow(leftAx, navMidY, -1, ref, canPrev);
   app.drawCheckinMonthArrow(rightAx, navMidY, 1, ref, canNext);
 
@@ -156,7 +156,7 @@ app.drawCheckinCalendarMonth = function(th, L, d, ref) {
   app.ctx.textBaseline = 'middle';
   app.ctx.font =
     '600 ' +
-    app.rpx(30) +
+    app.rpx(33) +
     'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
   app.ctx.fillStyle = ref.dayNumStrong;
   app.ctx.fillText(
@@ -172,14 +172,14 @@ app.drawCheckinCalendarMonth = function(th, L, d, ref) {
     weekTop,
     L.calW - L.calInnerPad * 2,
     L.weekH,
-    app.rpx(8)
+    app.rpx(10)
   );
   app.ctx.fill();
 
   var labels = ['日', '一', '二', '三', '四', '五', '六'];
   app.ctx.font =
     '600 ' +
-    app.rpx(21) +
+    app.rpx(23) +
     'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
   app.ctx.fillStyle = ref.weekLabel;
   app.ctx.textBaseline = 'middle';
@@ -199,10 +199,10 @@ app.drawCheckinCalendarMonth = function(th, L, d, ref) {
   var first = new Date(viewYear, viewMonth - 1, 1);
   var firstSun0 = first.getDay();
   var dim = new Date(viewYear, viewMonth, 0).getDate();
-  var gridTop = weekTop + L.weekH + app.rpx(8);
+  var gridTop = weekTop + L.weekH + app.rpx(10);
   var slotW = L.cell;
   var slotH = L.cell - app.rpx(1);
-  var cellR = app.rpx(5);
+  var cellR = app.rpx(6);
   var dayNum = 1;
   var i;
   for (i = 0; i < 42; i++) {
@@ -236,7 +236,7 @@ app.drawCheckinCalendarMonth = function(th, L, d, ref) {
       app.ctx.fillStyle = ref.signedCellText;
       app.ctx.font =
         '600 ' +
-        app.rpx(24) +
+        app.rpx(27) +
         'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
       app.ctx.textAlign = 'center';
       app.ctx.textBaseline = 'middle';
@@ -245,7 +245,7 @@ app.drawCheckinCalendarMonth = function(th, L, d, ref) {
       app.ctx.fillStyle = isFuture ? ref.dayMuted : ref.dayNumStrong;
       app.ctx.font =
         '600 ' +
-        app.rpx(24) +
+        app.rpx(27) +
         'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
       app.ctx.textAlign = 'center';
       app.ctx.textBaseline = 'middle';
@@ -255,7 +255,7 @@ app.drawCheckinCalendarMonth = function(th, L, d, ref) {
     }
     if (isToday) {
       app.ctx.strokeStyle = ref.todayRing;
-      app.ctx.lineWidth = app.rpx(2.5);
+      app.ctx.lineWidth = app.rpx(2.75);
       app.roundRect(bx0 - app.rpx(1), by0 - app.rpx(1), bw + app.rpx(2), bh + app.rpx(2), cellR + app.rpx(1));
       app.ctx.stroke();
     }
@@ -340,11 +340,11 @@ app.drawCheckinModalOverlay = function(th) {
   cardG.addColorStop(0, ref.innerCard);
   cardG.addColorStop(1, ref.innerCardShade);
   app.ctx.fillStyle = cardG;
-  app.roundRect(L.calLeft, L.calTop, L.calW, L.calCardH, app.rpx(18));
+  app.roundRect(L.calLeft, L.calTop, L.calW, L.calCardH, app.rpx(20));
   app.ctx.fill();
   app.ctx.strokeStyle = ref.cardStroke;
   app.ctx.lineWidth = 1.25;
-  app.roundRect(L.calLeft, L.calTop, L.calW, L.calCardH, app.rpx(18));
+  app.roundRect(L.calLeft, L.calTop, L.calW, L.calCardH, app.rpx(20));
   app.ctx.stroke();
 
   app.drawCheckinCalendarMonth(th, L, d, ref);
