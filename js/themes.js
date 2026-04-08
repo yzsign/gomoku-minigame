@@ -171,8 +171,8 @@ var THEMES = {
   }
 };
 
-/** 檀木 / 青瓷 / 水墨 */
-var THEME_IDS = ['classic', 'mint', 'ink'];
+/** 当前仅开放檀木；青瓷 / 水墨暂不下发切换（THEMES 仍保留供后续启用） */
+var THEME_IDS = ['classic'];
 
 /**
  * 棋子皮肤：与「界面风格」正交，只覆盖 theme.pieces 的渐变与描边（及可选光照风格）。
@@ -376,16 +376,68 @@ var PIECE_SKINS_PER_PAGE = 6;
  */
 var tuanMoeUnlockedServerCache = false;
 
+/** 连续签到天数（与 CheckinService streak 一致），用于团团萌肤解锁提示 */
+var checkinStreakServerCache = 0;
+
+/** 解锁团团萌肤所需连续签到天数（与后端一致） */
+var TUAN_MOE_UNLOCK_STREAK_DAYS = 7;
+
 function setTuanMoeUnlockedFromServer(unlocked) {
   tuanMoeUnlockedServerCache = !!unlocked;
+}
+
+function setCheckinStreakFromServer(streak) {
+  if (typeof streak === 'number' && !isNaN(streak)) {
+    checkinStreakServerCache = Math.max(0, Math.floor(streak));
+  } else {
+    checkinStreakServerCache = 0;
+  }
 }
 
 function isTuanMoeUnlocked() {
   return tuanMoeUnlockedServerCache;
 }
 
+/** 未解锁时底部文案：有进度则显示「已连签X天，还需Y天」 */
+function tuanMoeLockedUnlockHint() {
+  var need = TUAN_MOE_UNLOCK_STREAK_DAYS;
+  var s = checkinStreakServerCache;
+  if (s > 0 && s < need) {
+    var rest = need - s;
+    return '已连签' + s + '天，还需' + rest + '天';
+  }
+  return '连签7天解锁';
+}
+
+/**
+ * 积分兑换类棋子皮肤：由 GET /api/me/rating 的 pieceSkinUnlockedIds 同步（不写本地解锁标记）。
+ */
+var pieceSkinUnlockedIdSet = {};
+
+/** 与 PieceSkinRedeemService 中定价一致 */
+var PIECE_SKIN_QINGTAO_LIBAI_COST_POINTS = 200;
+
+function setPieceSkinUnlockedIdsFromServer(ids) {
+  pieceSkinUnlockedIdSet = {};
+  if (!Array.isArray(ids)) {
+    return;
+  }
+  var i;
+  for (i = 0; i < ids.length; i++) {
+    var sid = ids[i];
+    if (sid) {
+      pieceSkinUnlockedIdSet[String(sid)] = true;
+    }
+  }
+}
+
+function isPieceSkinUnlockedOnServer(skinId) {
+  return !!(skinId && pieceSkinUnlockedIdSet[skinId]);
+}
+
 function getPieceSkinCatalog() {
   var tuanOk = isTuanMoeUnlocked();
+  var qingOk = isPieceSkinUnlockedOnServer('qingtao_libai');
   return [
     { id: 'basic', locked: false, label: '基础黑白', rowStatus: 'owned' },
     {
@@ -393,9 +445,15 @@ function getPieceSkinCatalog() {
       locked: !tuanOk,
       label: '团团萌肤',
       rowStatus: tuanOk ? 'owned' : 'locked',
-      unlockHint: '连签7天解锁'
+      unlockHint: tuanOk ? undefined : tuanMoeLockedUnlockHint()
     },
-    { id: 'qingtao_libai', locked: false, label: '青萄荔白', rowStatus: 'owned' }
+    {
+      id: 'qingtao_libai',
+      locked: !qingOk,
+      label: '青萄荔白',
+      rowStatus: qingOk ? 'owned' : 'points',
+      costPoints: qingOk ? 0 : PIECE_SKIN_QINGTAO_LIBAI_COST_POINTS
+    }
   ];
 }
 
@@ -533,8 +591,10 @@ function loadSavedThemeId() {
   try {
     if (typeof wx !== 'undefined' && wx.getStorageSync) {
       var v = wx.getStorageSync(STORAGE_KEY);
-      if (v && THEMES[v]) {
-        return v;
+      if (v === 'mint' || v === 'ink') {
+        try {
+          wx.setStorageSync(STORAGE_KEY, 'classic');
+        } catch (e2) {}
       }
     }
   } catch (e) {}
@@ -542,12 +602,12 @@ function loadSavedThemeId() {
 }
 
 function saveThemeId(id) {
-  if (!THEMES[id]) {
+  if (id !== 'classic' || !THEMES.classic) {
     return;
   }
   try {
     if (typeof wx !== 'undefined' && wx.setStorageSync) {
-      wx.setStorageSync(STORAGE_KEY, id);
+      wx.setStorageSync(STORAGE_KEY, 'classic');
     }
   } catch (e) {}
 }
@@ -562,6 +622,9 @@ var themesExports = {
   getPieceSkinCatalogLabel: getPieceSkinCatalogLabel,
   isTuanMoeUnlocked: isTuanMoeUnlocked,
   setTuanMoeUnlockedFromServer: setTuanMoeUnlockedFromServer,
+  setCheckinStreakFromServer: setCheckinStreakFromServer,
+  setPieceSkinUnlockedIdsFromServer: setPieceSkinUnlockedIdsFromServer,
+  isPieceSkinUnlockedOnServer: isPieceSkinUnlockedOnServer,
   getTheme: getTheme,
   loadSavedThemeId: loadSavedThemeId,
   saveThemeId: saveThemeId,

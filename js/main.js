@@ -368,9 +368,13 @@ function tryOneShotInvisibleUserInfoButton() {
   });
 }
 
+themes.setTuanMoeUnlockedFromServer(false);
+if (typeof themes.setCheckinStreakFromServer === 'function') {
+  themes.setCheckinStreakFromServer(0);
+}
+themes.setPieceSkinUnlockedIdsFromServer([]);
 var themeId = themes.loadSavedThemeId();
 var pieceSkinId = themes.loadSavedPieceSkinId();
-themes.setTuanMoeUnlockedFromServer(false);
 
 /** 首页「棋子换肤」弹窗：居中缩放 + 遮罩 */
 var pieceSkinModalVisible = false;
@@ -379,6 +383,7 @@ var pieceSkinModalAnimRafId = null;
 /** 分页与当前选中（catalog 全局下标） */
 var pieceSkinModalPage = 0;
 var pieceSkinModalPendingIdx = 0;
+var pieceSkinRedeemInFlight = false;
 
 /** 棋子换肤：设计稿基准宽度 rpx（304×0.8×1.1） */
 var PIECE_SKIN_CARD_W_RPX = 304 * 0.88;
@@ -397,6 +402,164 @@ var homeDrawerOpen = false;
 var homePressedButton = null;
 /** 首页底部 Dock 按下列：0～3 或 null（与 hitHomeBottomNav 一致） */
 var homePressedDockCol = null;
+
+/** 历史战绩页：本机最近对局 + 滚动 */
+var MATCH_HISTORY_STORAGE_KEY = 'gomoku_match_history_v1';
+var PEAK_ELO_STORAGE_KEY = 'gomoku_peak_elo_v1';
+var matchHistoryList = [];
+var historyStatsSnapshot = null;
+var historyScrollY = 0;
+var historyFilterTab = 0;
+var historyScrollTouchId = null;
+var historyScrollLastY = 0;
+var historyPeakEloCached = 0;
+/** GET /api/me/game-history 返回的 items；与本地人机记录合并展示 */
+var historyServerItems = [];
+
+function loadPeakEloFromStorage() {
+  try {
+    if (typeof wx === 'undefined' || !wx.getStorageSync) {
+      historyPeakEloCached = 0;
+      return;
+    }
+    var v = wx.getStorageSync(PEAK_ELO_STORAGE_KEY);
+    var n = Number(v);
+    historyPeakEloCached = !isNaN(n) && n > 0 ? Math.floor(n) : 0;
+  } catch (e) {
+    historyPeakEloCached = 0;
+  }
+}
+
+function savePeakEloIfHigher(elo) {
+  if (typeof elo !== 'number' || isNaN(elo)) {
+    return;
+  }
+  loadPeakEloFromStorage();
+  var e = Math.floor(elo);
+  if (e > historyPeakEloCached) {
+    historyPeakEloCached = e;
+    try {
+      if (typeof wx !== 'undefined' && wx.setStorageSync) {
+        wx.setStorageSync(PEAK_ELO_STORAGE_KEY, String(historyPeakEloCached));
+      }
+    } catch (e2) {}
+  }
+}
+
+function loadMatchHistoryList() {
+  try {
+    if (typeof wx === 'undefined' || !wx.getStorageSync) {
+      matchHistoryList = [];
+      return;
+    }
+    var raw = wx.getStorageSync(MATCH_HISTORY_STORAGE_KEY);
+    if (!raw) {
+      matchHistoryList = [];
+      return;
+    }
+    var arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    matchHistoryList = Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    matchHistoryList = [];
+  }
+}
+
+function persistMatchHistoryList() {
+  try {
+    if (typeof wx === 'undefined' || !wx.setStorageSync) {
+      return;
+    }
+    var cap = matchHistoryList.slice(0, 100);
+    wx.setStorageSync(MATCH_HISTORY_STORAGE_KEY, JSON.stringify(cap));
+    matchHistoryList = cap;
+  } catch (e) {}
+}
+
+function appendMatchHistoryRecord(entry) {
+  loadMatchHistoryList();
+  matchHistoryList.unshift(entry);
+  if (matchHistoryList.length > 100) {
+    matchHistoryList.length = 100;
+  }
+  persistMatchHistoryList();
+}
+
+function formatHistoryDateTime(ts) {
+  var d = new Date(ts);
+  var mo = d.getMonth() + 1;
+  var day = d.getDate();
+  var hh = d.getHours();
+  var mm = d.getMinutes();
+  return (
+    mo +
+    '/' +
+    day +
+    ' ' +
+    (hh < 10 ? '0' : '') +
+    hh +
+    ':' +
+    (mm < 10 ? '0' : '') +
+    mm
+  );
+}
+
+function mapServerHistoryItem(it) {
+  var mr = String(it.myResult || '').toUpperCase();
+  var res = 'draw';
+  if (mr === 'WIN') {
+    res = 'win';
+  } else if (mr === 'LOSS') {
+    res = 'lose';
+  }
+  return {
+    t: typeof it.endedAt === 'number' ? it.endedAt : 0,
+    res: res,
+    opp: String(it.opponentNickname != null ? it.opponentNickname : '对手'),
+    steps: typeof it.totalSteps === 'number' ? it.totalSteps : 0,
+    mode: 'server',
+    gameId: it.gameId
+  };
+}
+
+/**
+ * 服务端已结算联机 + 本机人机（mode===pve），按时间倒序。
+ */
+function getDisplayMatchHistoryList() {
+  var fromServer = [];
+  var i;
+  if (historyServerItems && historyServerItems.length) {
+    for (i = 0; i < historyServerItems.length; i++) {
+      fromServer.push(mapServerHistoryItem(historyServerItems[i]));
+    }
+  }
+  var pveLocal = [];
+  for (i = 0; i < matchHistoryList.length; i++) {
+    var e = matchHistoryList[i];
+    if (e && e.mode === 'pve') {
+      pveLocal.push(e);
+    }
+  }
+  var merged = fromServer.concat(pveLocal);
+  merged.sort(function (a, b) {
+    return (b.t || 0) - (a.t || 0);
+  });
+  return merged;
+}
+
+function getFilteredMatchHistory() {
+  var list = getDisplayMatchHistoryList();
+  if (historyFilterTab === 1) {
+    return list.filter(function (x) {
+      return x && x.res === 'win';
+    });
+  }
+  if (historyFilterTab === 2) {
+    return list.filter(function (x) {
+      return x && x.res === 'lose';
+    });
+  }
+  return list.slice();
+}
 
 /** 首页顶栏积分：null 表示尚未从 /api/me/rating 同步 */
 var homeRatingEloCache = null;
@@ -451,6 +614,9 @@ function getThemeForPieces(baseTheme) {
 function getUiTheme() {
   if (screen === 'matching') {
     return themes.getTheme('classic');
+  }
+  if (screen === 'history') {
+    return getCurrentTheme();
   }
   if (screen === 'game' && (isPvpOnline || isRandomMatch)) {
     return themes.getTheme('classic');
@@ -520,7 +686,7 @@ function snapPx(x) {
 
 /* ---------- 界面与对局状态 ---------- */
 
-/** 'home' | 'pve_color' | 'matching' | 'game' */
+/** 'home' | 'pve_color' | 'matching' | 'game' | 'history' | 'replay' */
 var screen = 'home';
 
 /** 对局结束：在棋盘页上以半透明弹层展示（不再切全屏 result） */
@@ -629,7 +795,7 @@ var homeMascotSheetImg = null;
 var MASCOT_SHEET_FRAME_COUNT = 41;
 var MASCOT_SHEET_FPS = 8;
 /** 修改首页 PNG 或路径时递增，避免热重载仍认为「已加载」而跳过 */
-var HOME_UI_ASSETS_REV = 21;
+var HOME_UI_ASSETS_REV = 23;
 /** 吉祥物资源所在分包（见 game.json）；wx.loadSubpackage 成功后再加载大图 */
 var HOME_SUBPACKAGE_NAME = 'res-mascot';
 /** 分包内吉祥物路径前缀；失败时回退主包 images/ui/ */
@@ -1055,6 +1221,35 @@ function countStonesOnBoard(b) {
     }
   }
   return n;
+}
+
+/**
+ * 终局后写入本机历史：仅人机/同桌（联机战绩由服务端 /api/me/game-history 提供）。
+ */
+function recordMatchHistoryFromGameEnd() {
+  if (!gameOver || isPvpOnline) {
+    return;
+  }
+  var rk = resultKind;
+  var res = null;
+  if (rk === 'pve_win') {
+    res = 'win';
+  } else if (rk === 'pve_lose') {
+    res = 'lose';
+  } else if (rk === 'pvp_draw' || rk === 'pve_draw') {
+    res = 'draw';
+  } else {
+    return;
+  }
+  var steps = countStonesOnBoard(board);
+  var opp = String(getOpponentDisplayName() || '对手');
+  appendMatchHistoryRecord({
+    t: Date.now(),
+    res: res,
+    opp: opp,
+    steps: steps,
+    mode: 'pve'
+  });
 }
 
 function stopReplayAuto() {
@@ -2175,6 +2370,17 @@ function drawHomeNavBar(th) {
   ctx.restore();
 }
 
+/** 多于一种界面风格时显示侧栏「界面风格」；当前仅檀木则不显示 */
+function homeDrawerShowsThemeRow() {
+  return themes.THEME_IDS.length > 1;
+}
+
+function getHomeDrawerMenuItems() {
+  return homeDrawerShowsThemeRow()
+    ? ['界面风格', '棋子皮肤', '游戏反馈', '关于团团五子棋']
+    : ['棋子皮肤', '游戏反馈', '关于团团五子棋'];
+}
+
 function drawHomeDrawer(th) {
   if (!homeDrawerOpen) {
     return;
@@ -2208,7 +2414,7 @@ function drawHomeDrawer(th) {
 
   var rowY = insetTop + rpx(110);
   var rowH = rpx(96);
-  var items = ['界面风格', '棋子皮肤', '游戏反馈', '关于团团五子棋'];
+  var items = getHomeDrawerMenuItems();
   var i;
   ctx.font =
     rpx(30) +
@@ -2265,8 +2471,9 @@ function hitHomeDrawerRow(clientX, clientY) {
   );
   var rowY = insetTop + rpx(110);
   var rowH = rpx(96);
+  var n = getHomeDrawerMenuItems().length;
   var i;
-  for (i = 0; i < 4; i++) {
+  for (i = 0; i < n; i++) {
     var ry = rowY + i * rowH;
     if (
       clientY >= ry - rowH * 0.48 &&
@@ -2755,7 +2962,7 @@ function getHomeLayout() {
 
 function getRatingCardLayout() {
   var w = Math.min(W - 48, 300);
-  var h = 228;
+  var h = 212;
   var cx = W / 2;
   var cy = H * 0.42;
   return { cx: cx, cy: cy, w: w, h: h, r: 18 };
@@ -2770,12 +2977,13 @@ function hitRatingCardInside(x, y) {
 
 function hitRatingCardClose(x, y) {
   var L = getRatingCardLayout();
+  var x0 = L.cx - L.w / 2;
   var y0 = L.cy - L.h / 2;
-  var btnW = 128;
-  var btnH = 36;
-  var btnX = L.cx - btnW / 2;
-  var btnY = y0 + L.h - 52;
-  return x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH;
+  var cr = rpx(36);
+  var padClose = rpx(32);
+  var cx = x0 + L.w - padClose - cr / 2;
+  var cy = y0 + padClose + cr / 2;
+  return Math.abs(x - cx) <= cr * 0.72 && Math.abs(y - cy) <= cr * 0.72;
 }
 
 function getLocalCalendarYmd() {
@@ -2805,6 +3013,9 @@ function syncCheckinStateFromServerPayload(d) {
   if (typeof d.tuanMoeUnlocked === 'boolean') {
     themes.setTuanMoeUnlockedFromServer(d.tuanMoeUnlocked);
   }
+  if (Array.isArray(d.pieceSkinUnlockedIds)) {
+    themes.setPieceSkinUnlockedIdsFromServer(d.pieceSkinUnlockedIds);
+  }
   var hist = {};
   if (Array.isArray(d.checkinHistory)) {
     var hi;
@@ -2828,12 +3039,38 @@ function syncCheckinStateFromServerPayload(d) {
     pts = d.totalPoints;
   }
   var lastYmd = d.checkinLastYmd != null ? String(d.checkinLastYmd) : '';
+  var streakClamped = Math.max(0, streak);
+  if (typeof themes.setCheckinStreakFromServer === 'function') {
+    themes.setCheckinStreakFromServer(streakClamped);
+  }
   checkinStateCache = {
     lastYmd: lastYmd,
-    streak: Math.max(0, streak),
+    streak: streakClamped,
     tuanPoints: Math.max(0, pts),
     historySet: hist
   };
+  if (typeof d.eloScore === 'number' && !isNaN(d.eloScore)) {
+    savePeakEloIfHigher(d.eloScore);
+  }
+}
+
+/**
+ * POST /api/me/piece-skins/redeem 成功后合并积分与解锁列表。
+ * @param {object} d
+ */
+function mergePieceSkinRedeemResponseToCache(d) {
+  if (!d || typeof d !== 'object') {
+    return;
+  }
+  if (typeof d.activityPoints === 'number' && !isNaN(d.activityPoints)) {
+    var ap = Math.max(0, Math.floor(d.activityPoints));
+    if (checkinStateCache) {
+      checkinStateCache.tuanPoints = ap;
+    }
+  }
+  if (Array.isArray(d.pieceSkinUnlockedIds)) {
+    themes.setPieceSkinUnlockedIdsFromServer(d.pieceSkinUnlockedIds);
+  }
 }
 
 /**
@@ -2961,9 +3198,6 @@ function checkinModalThemePalette(th) {
     primaryShine: 'rgba(255,255,255,0.42)',
     primaryDisabled: primaryDis,
     primaryDisabledText: 'rgba(255,255,255,0.95)',
-    ghostFill: th.btnGhostFill,
-    ghostBorder: th.btnGhostStroke,
-    ghostText: th.btnGhostText,
     modalShadow: th.btnShadow || 'rgba(0,0,0,0.18)',
     arrowFillHi: 'rgba(255,255,255,0.88)',
     arrowFillLo: 'rgba(255,255,255,0.42)'
@@ -2983,9 +3217,7 @@ function getCheckinModalLayout() {
   var calCardH = calInnerPad * 2 + monthNavH + weekH + gridH;
   var gapCalPrimary = rpx(16);
   var primaryBtnH = rpx(52);
-  var gapGhost = rpx(14);
-  var ghostBtnH = rpx(42);
-  var bottomPad = rpx(18);
+  var bottomPad = rpx(20);
   var w = Math.min(W - rpx(28), rpx(618));
   var innerH =
     topPad +
@@ -2994,8 +3226,6 @@ function getCheckinModalLayout() {
     calCardH +
     gapCalPrimary +
     primaryBtnH +
-    gapGhost +
-    ghostBtnH +
     bottomPad;
   var h = innerH;
   var cx = W / 2;
@@ -3013,8 +3243,6 @@ function getCheckinModalLayout() {
   var hitR = rpx(26);
   var primaryBtnW = w - rpx(48);
   var primaryY = calTop + calCardH + gapCalPrimary;
-  var ghostY = primaryY + primaryBtnH + gapGhost;
-  var ghostBtnW = Math.min(w - rpx(80), rpx(320));
   var headCloseCx = x0 + w - rpx(34);
   var headCloseCy = y0 + topPad + headerBandH * 0.5;
   return {
@@ -3040,9 +3268,6 @@ function getCheckinModalLayout() {
     primaryY: primaryY,
     primaryBtnH: primaryBtnH,
     primaryBtnW: primaryBtnW,
-    ghostY: ghostY,
-    ghostBtnH: ghostBtnH,
-    ghostBtnW: ghostBtnW,
     headCloseCx: headCloseCx,
     headCloseCy: headCloseCy,
     monthNavY: monthNavY,
@@ -3123,17 +3348,6 @@ function hitCheckinModalPrimaryBtn(x, y) {
     x <= bx + L.primaryBtnW &&
     y >= L.primaryY &&
     y <= L.primaryY + L.primaryBtnH
-  );
-}
-
-function hitCheckinModalGhostClose(x, y) {
-  var L = getCheckinModalLayout();
-  var bx = L.cx - L.ghostBtnW / 2;
-  return (
-    x >= bx &&
-    x <= bx + L.ghostBtnW &&
-    y >= L.ghostY &&
-    y <= L.ghostY + L.ghostBtnH
   );
 }
 
@@ -3449,22 +3663,6 @@ function drawCheckinModalOverlay(th) {
     snapPx(py0 + L.primaryBtnH * 0.5)
   );
 
-  var gx0 = L.cx - L.ghostBtnW / 2;
-  var gy0 = L.ghostY;
-  ctx.fillStyle = ref.ghostFill;
-  roundRect(gx0, gy0, L.ghostBtnW, L.ghostBtnH, L.ghostBtnH * 0.5);
-  ctx.fill();
-  ctx.strokeStyle = ref.ghostBorder;
-  ctx.lineWidth = rpx(2);
-  roundRect(gx0, gy0, L.ghostBtnW, L.ghostBtnH, L.ghostBtnH * 0.5);
-  ctx.stroke();
-  ctx.font =
-    '500 ' +
-    rpx(26) +
-    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
-  ctx.fillStyle = ref.ghostText;
-  ctx.fillText('关闭', snapPx(L.cx), snapPx(gy0 + L.ghostBtnH * 0.5));
-
   ctx.restore();
 }
 
@@ -3495,94 +3693,130 @@ function drawRatingCardOverlay(th) {
   roundRect(x, y, L.w, L.h, L.r);
   ctx.stroke();
 
+  var apVal =
+    typeof d.activityPoints === 'number' && !isNaN(d.activityPoints)
+      ? Math.max(0, Math.floor(d.activityPoints))
+      : 0;
+
+  var crClose = rpx(36);
+  var padClose = rpx(32);
+  var closeCx = x + L.w - padClose - crClose / 2;
+  var closeCy = y + padClose + crClose / 2;
+
   var titleBlock = 0;
+  var titleCx = L.cx;
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
+  ctx.textBaseline = 'middle';
   if (d.cardTitle) {
     ctx.font =
       'bold 15px "PingFang SC","Hiragino Sans GB",sans-serif';
     ctx.fillStyle = th.title;
-    ctx.fillText(d.cardTitle, snapPx(L.cx), snapPx(y + 14));
-    titleBlock += 26;
+    ctx.fillText(d.cardTitle, snapPx(titleCx), snapPx(closeCy));
+    titleBlock = closeCy - y + 12;
   }
   if (d.nicknameLine) {
     ctx.font = '12px "PingFang SC","Hiragino Sans GB",sans-serif';
     ctx.fillStyle = th.muted;
-    ctx.fillText(d.nicknameLine, snapPx(L.cx), snapPx(y + 14 + titleBlock));
-    titleBlock += 18;
+    var nickCy = d.cardTitle ? closeCy + 18 : closeCy;
+    ctx.fillText(d.nicknameLine, snapPx(titleCx), snapPx(nickCy));
+    titleBlock = nickCy - y + 10;
   }
 
-  var btnTop = y + L.h - 52;
-  var gapAboveBtn = 14;
-  var availH = btnTop - gapAboveBtn - y - titleBlock;
-  var contentBlockH = 67;
+  var contentBottomPad = 18;
+  var gapAboveContent = 14;
+  var availH =
+    y + L.h - contentBottomPad - gapAboveContent - y - titleBlock;
+  var row1H = 28;
+  var sectGap = 9;
+  var threeColInnerH = 48;
+  var contentBlockH = row1H + sectGap * 2 + threeColInnerH;
   var rowTop = y + titleBlock + (availH - contentBlockH) / 2;
   if (rowTop < y + 10 + titleBlock) {
     rowTop = y + 10 + titleBlock;
   }
-  var colL = x + L.w / 6;
-  var colM = x + L.w / 2;
-  var colR = x + (5 * L.w) / 6;
+  /** 横线分隔团团积分与三列统计；首行标签与分数左排 */
+  var accent =
+    th.homeCards && th.homeCards[0] ? String(th.homeCards[0]) : '#6b4a38';
+  var padX = 16;
+  var lineX0 = x + 14;
+  var lineX1 = x + L.w - 14;
 
-  ctx.font = '12px "PingFang SC","Hiragino Sans GB",sans-serif';
-  ctx.fillStyle = th.muted;
-  ctx.fillText('得分', snapPx(colL), snapPx(rowTop));
-  ctx.fillText('胜率', snapPx(colM), snapPx(rowTop));
-  ctx.fillText('称号', snapPx(colR), snapPx(rowTop));
-
-  ctx.font = 'bold 20px "PingFang SC","Hiragino Sans GB",sans-serif';
-  ctx.fillStyle = th.title;
-  ctx.fillText(String(d.elo), snapPx(colL), snapPx(rowTop + 20));
-  ctx.fillText(d.winPctDisplay, snapPx(colM), snapPx(rowTop + 20));
-  ctx.font = 'bold 18px "PingFang SC","Hiragino Sans GB",sans-serif';
-  ctx.fillText(d.titleName, snapPx(colR), snapPx(rowTop + 20));
-
-  var statY = rowTop + 56;
-  ctx.font = '11px "PingFang SC","Hiragino Sans GB",sans-serif';
-  ctx.fillStyle = th.muted;
-  if (!d.noGames && d.total > 0) {
-    ctx.fillText(
-      '胜 ' + d.win + ' · 共 ' + d.total + ' 局',
-      snapPx(L.cx),
-      snapPx(statY)
-    );
-  } else {
-    ctx.fillText('暂无对局', snapPx(L.cx), snapPx(statY));
+  function drawRatingCardHLine(yLine) {
+    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(snapPx(lineX0), snapPx(yLine));
+    ctx.lineTo(snapPx(lineX1), snapPx(yLine));
+    ctx.stroke();
   }
 
-  ctx.strokeStyle = 'rgba(0,0,0,0.05)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(x + L.w / 3 - 0.5, rowTop + 6);
-  ctx.lineTo(x + L.w / 3 - 0.5, rowTop + 48);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(x + (2 * L.w) / 3 - 0.5, rowTop + 6);
-  ctx.lineTo(x + (2 * L.w) / 3 - 0.5, rowTop + 48);
-  ctx.stroke();
-
-  var btnW = 128;
-  var btnH = 36;
-  var btnX = L.cx - btnW / 2;
-  var btnY = y + L.h - 52;
-  ctx.fillStyle = th.homeCards && th.homeCards[0] ? th.homeCards[0] : '#FFB6C1';
-  roundRect(btnX, btnY, btnW, btnH, btnH / 2);
-  ctx.fill();
-  ctx.font = '15px "PingFang SC","Hiragino Sans GB",sans-serif';
-  ctx.fillStyle = '#fff';
+  var r1Mid = rowTop + row1H * 0.5;
+  var labelX = x + padX;
+  var gapLabelToPoints = 10;
+  ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText('知道了', snapPx(L.cx), snapPx(btnY + btnH / 2));
+  ctx.font = '600 12px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = accent;
+  var tuanLabelW = ctx.measureText('团团积分').width;
+  ctx.fillText('团团积分', snapPx(labelX), snapPx(r1Mid));
+  ctx.font = 'bold 17px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = th.title;
+  ctx.fillText(
+    String(apVal),
+    snapPx(labelX + tuanLabelW + gapLabelToPoints),
+    snapPx(r1Mid)
+  );
+
+  var line1Y = rowTop + row1H + sectGap;
+  drawRatingCardHLine(line1Y);
+
+  var threeTop = line1Y + sectGap;
+  var c1 = x + L.w / 6;
+  var c2 = x + L.w / 2;
+  var c3 = x + (5 * L.w) / 6;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.font = '12px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = th.muted;
+  ctx.fillText('得分', snapPx(c1), snapPx(threeTop));
+  ctx.fillText('胜率', snapPx(c2), snapPx(threeTop));
+  ctx.fillText('称号', snapPx(c3), snapPx(threeTop));
+
+  ctx.font = 'bold 17px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = th.title;
+  ctx.fillText(String(d.elo), snapPx(c1), snapPx(threeTop + 20));
+  ctx.fillText(d.winPctDisplay, snapPx(c2), snapPx(threeTop + 20));
+  ctx.font = 'bold 15px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillText(d.titleName, snapPx(c3), snapPx(threeTop + 20));
+
+  ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+  ctx.lineWidth = 1;
+  var divTop = threeTop + 6;
+  var divBot = threeTop + 42;
+  for (var dx = 1; dx <= 2; dx++) {
+    ctx.beginPath();
+    ctx.moveTo(x + (dx * L.w) / 3 - 0.5, divTop);
+    ctx.lineTo(x + (dx * L.w) / 3 - 0.5, divBot);
+    ctx.stroke();
+  }
+
+  ctx.font = 'bold ' + rpx(34) + 'px ' + PIECE_SKIN_FONT_UI;
+  ctx.fillStyle = 'rgba(92,75,58,0.38)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('×', snapPx(closeCx), snapPx(closeCy));
 
   ctx.restore();
 }
 
 /**
  * 将 /api/me/rating 或 /api/rooms/opponent-rating 的 JSON 填入战绩卡片
- * opts: { cardTitle, nicknameLine, usePayloadNickname }
+ * opts: { cardTitle（默认「信息看板」）, nicknameLine, usePayloadNickname }
  */
 function fillRatingCardFromApiData(d, opts) {
   opts = opts || {};
-  var cardTitle = opts.cardTitle || '';
+  var cardTitle =
+    (opts.cardTitle && String(opts.cardTitle).trim()) || '信息看板';
   var nicknameLine = opts.nicknameLine;
   if (nicknameLine === undefined) {
     if (opts.usePayloadNickname) {
@@ -3595,6 +3829,7 @@ function fillRatingCardFromApiData(d, opts) {
     }
   }
   var elo = typeof d.eloScore === 'number' ? d.eloScore : 0;
+  savePeakEloIfHigher(elo);
   var total = typeof d.totalGames === 'number' ? d.totalGames : 0;
   var win = typeof d.winCount === 'number' ? d.winCount : 0;
   var rt = ratingTitle.getRankAndTitleByElo(elo);
@@ -3606,6 +3841,10 @@ function fillRatingCardFromApiData(d, opts) {
     var pct = Math.round((win * 1000) / total) / 10;
     winPctDisplay = pct + '%';
   }
+  var ap =
+    typeof d.activityPoints === 'number' && !isNaN(d.activityPoints)
+      ? Math.max(0, Math.floor(d.activityPoints))
+      : 0;
   ratingCardData = {
     cardTitle: cardTitle,
     nicknameLine: nicknameLine,
@@ -3614,7 +3853,8 @@ function fillRatingCardFromApiData(d, opts) {
     winPctDisplay: winPctDisplay,
     win: win,
     total: total,
-    noGames: noGames
+    noGames: noGames,
+    activityPoints: ap
   };
   homeRatingEloCache = elo;
 }
@@ -3924,9 +4164,12 @@ function startThemeBubbleFadeAnim() {
   themeBubbleRafId = themeBubbleRaf(frame);
 }
 
-/** 当前界面是否绘制了「风格」入口（与气泡动画、点击区域一致）；对局页、人机选色、随机匹配页不显示，棋盘固定檀木 */
+/**
+ * 是否参与「风格」气泡/点击逻辑；右上角胶囊仅在非首页且此处为 true 时绘制。
+ * 回放页不显示风格按钮（棋盘固定檀木，与界面主题切换无关）。
+ */
 function themeScreenShowsStyleEntry() {
-  return screen === 'home' || screen === 'replay';
+  return screen === 'home';
 }
 
 function drawThemeChrome(th) {
@@ -4423,6 +4666,7 @@ function openResult() {
   }
   onlineResultOverlaySticky = false;
   showResultOverlay = true;
+  recordMatchHistoryFromGameEnd();
   screen = 'game';
   draw();
 }
@@ -4982,6 +5226,474 @@ function drawMatching() {
   ctx.fillText('取消', snapPx(W / 2), snapPx(H * 0.68));
 }
 
+function getHistoryPageLayout() {
+  var insetTop = Math.max(
+    sys.statusBarHeight || 24,
+    sys.safeArea && sys.safeArea.top != null ? sys.safeArea.top : 0
+  );
+  var padX = rpx(28);
+  var backCy = insetTop + rpx(44);
+  var backCx = rpx(44);
+  var titleCy = backCy;
+  var statsTop = titleCy + rpx(42);
+  var statsH = rpx(108);
+  var statsW = W - padX * 2;
+  var statsX = padX;
+  var tabY = statsTop + statsH + rpx(18);
+  var tabH = rpx(56);
+  var tabW = W - padX * 2;
+  var listTop = tabY + tabH + rpx(18);
+  var safeBottom =
+    sys.safeArea && sys.safeArea.bottom != null ? sys.safeArea.bottom : H;
+  var listBottom = safeBottom - rpx(12);
+  var listH = Math.max(rpx(160), listBottom - listTop);
+  return {
+    insetTop: insetTop,
+    padX: padX,
+    backCx: backCx,
+    backCy: backCy,
+    titleCy: titleCy,
+    statsX: statsX,
+    statsTop: statsTop,
+    statsW: statsW,
+    statsH: statsH,
+    tabX: padX,
+    tabY: tabY,
+    tabW: tabW,
+    tabH: tabH,
+    listTop: listTop,
+    listBottom: listBottom,
+    listH: listH
+  };
+}
+
+function hitHistoryInteract(clientX, clientY) {
+  var L = getHistoryPageLayout();
+  if (
+    Math.abs(clientX - L.backCx) <= rpx(40) &&
+    Math.abs(clientY - L.backCy) <= rpx(40)
+  ) {
+    return 'back';
+  }
+  var chevLeft = L.tabX + L.tabW - rpx(44);
+  if (
+    clientX >= chevLeft &&
+    clientX <= L.tabX + L.tabW &&
+    clientY >= L.tabY &&
+    clientY <= L.tabY + L.tabH
+  ) {
+    return 'chevron';
+  }
+  if (
+    clientX >= L.tabX &&
+    clientX < chevLeft &&
+    clientY >= L.tabY &&
+    clientY <= L.tabY + L.tabH
+  ) {
+    var rel = (clientX - L.tabX) / (chevLeft - L.tabX);
+    var ti = Math.floor(rel * 3);
+    if (ti < 0) {
+      ti = 0;
+    }
+    if (ti > 2) {
+      ti = 2;
+    }
+    return 'tab' + ti;
+  }
+  return null;
+}
+
+function hitHistoryListZone(clientX, clientY) {
+  var L = getHistoryPageLayout();
+  return (
+    clientX >= L.padX &&
+    clientX <= W - L.padX &&
+    clientY >= L.listTop &&
+    clientY <= L.listBottom
+  );
+}
+
+function openHistoryScreen() {
+  historyScrollY = 0;
+  historyFilterTab = 0;
+  loadMatchHistoryList();
+  loadPeakEloFromStorage();
+  historyStatsSnapshot = null;
+  historyServerItems = [];
+  screen = 'history';
+  draw();
+  authApi.ensureSession(function (sessOk) {
+    if (!sessOk || !authApi.getSessionToken()) {
+      draw();
+      return;
+    }
+    var pending = 2;
+    function doneFetch() {
+      pending--;
+      if (pending <= 0) {
+        draw();
+      }
+    }
+    wx.request(
+      Object.assign(roomApi.meRatingOptions(), {
+        complete: function () {
+          doneFetch();
+        },
+        success: function (res) {
+          if (res.statusCode === 200 && res.data) {
+            var d = res.data;
+            if (d && typeof d === 'string') {
+              try {
+                d = JSON.parse(d);
+              } catch (eParse) {
+                d = null;
+              }
+            }
+            if (d) {
+              syncCheckinStateFromServerPayload(d);
+              var elo = typeof d.eloScore === 'number' ? d.eloScore : 0;
+              savePeakEloIfHigher(elo);
+              var total = typeof d.totalGames === 'number' ? d.totalGames : 0;
+              var win = typeof d.winCount === 'number' ? d.winCount : 0;
+              var winPct =
+                total <= 0
+                  ? '—'
+                  : String(Math.round((win * 1000) / total) / 10) + '%';
+              var peakE = historyPeakEloCached > 0 ? historyPeakEloCached : elo;
+              var peakShort = ratingTitle.getHomeBadgeShortLabel(peakE);
+              historyStatsSnapshot = {
+                totalGames: total,
+                winPct: winPct,
+                peakRankShort: peakShort
+              };
+            }
+          }
+        },
+        fail: function () {}
+      })
+    );
+    wx.request(
+      Object.assign(roomApi.meGameHistoryOptions(50, 0), {
+        complete: function () {
+          doneFetch();
+        },
+        success: function (res) {
+          historyServerItems = [];
+          if (res.statusCode === 200 && res.data) {
+            var body = res.data;
+            if (body && typeof body === 'string') {
+              try {
+                body = JSON.parse(body);
+              } catch (eH) {
+                body = null;
+              }
+            }
+            if (body && Array.isArray(body.items)) {
+              historyServerItems = body.items;
+            }
+          }
+        },
+        fail: function () {
+          historyServerItems = [];
+        }
+      })
+    );
+  });
+}
+
+/**
+ * 历史战绩：暖色羊皮纸、统计卡、筛选胶囊、对局列表（与首页「檀木」系协调）
+ */
+function drawHistory() {
+  fillAmbientBackground();
+  var th = getUiTheme();
+  var L = getHistoryPageLayout();
+  var parchment = '#FDF5E6';
+  var cardFill0 = '#FFF9F0';
+  var cardFill1 = '#FFF3E4';
+  var accentBrown = th.homeFriend != null ? th.homeFriend : '#7B5E3F';
+  var tabBg = 'rgba(255, 252, 246, 0.95)';
+  var ink = th.title;
+  var sub = th.subtitle;
+  var muted = th.muted;
+
+  ctx.save();
+  ctx.fillStyle = parchment;
+  ctx.globalAlpha = 0.45;
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = sub;
+  ctx.lineWidth = Math.max(1.2, rpx(2));
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  var bx = L.backCx - rpx(8);
+  var by = L.backCy;
+  ctx.beginPath();
+  ctx.moveTo(bx + rpx(10), by - rpx(12));
+  ctx.lineTo(bx - rpx(2), by);
+  ctx.lineTo(bx + rpx(10), by + rpx(12));
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font =
+    '700 ' +
+    rpx(34) +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  ctx.fillStyle = ink;
+  var titleCx = W * 0.5;
+  if (
+    sys.safeArea &&
+    sys.safeArea.width != null &&
+    sys.safeArea.left != null
+  ) {
+    titleCx = sys.safeArea.left + sys.safeArea.width * 0.5;
+  }
+  ctx.fillText('五子棋历史战绩', snapPx(titleCx), snapPx(L.titleCy));
+  ctx.restore();
+
+  var sx = L.statsX;
+  var sy = L.statsTop;
+  var sw = L.statsW;
+  var sh = L.statsH;
+  var sr = rpx(20);
+  ctx.save();
+  ctx.shadowColor = 'rgba(60, 48, 38, 0.12)';
+  ctx.shadowBlur = rpx(18);
+  ctx.shadowOffsetY = rpx(6);
+  var statG = ctx.createLinearGradient(sx, sy, sx, sy + sh);
+  statG.addColorStop(0, cardFill0);
+  statG.addColorStop(1, cardFill1);
+  ctx.fillStyle = statG;
+  roundRect(sx, sy, sw, sh, sr);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+  ctx.strokeStyle = 'rgba(92, 75, 58, 0.14)';
+  ctx.lineWidth = Math.max(1, rpx(1));
+  roundRect(sx + 0.5, sy + 0.5, sw - 1, sh - 1, sr - 0.5);
+  ctx.stroke();
+
+  var totalStr = '—';
+  var winStr = '—';
+  var peakStr = '—';
+  if (historyStatsSnapshot) {
+    totalStr = String(historyStatsSnapshot.totalGames);
+    winStr = historyStatsSnapshot.winPct;
+    peakStr = historyStatsSnapshot.peakRankShort;
+  }
+  var col1 = sx + sw / 6;
+  var col2 = sx + sw / 2;
+  var col3 = sx + (5 * sw) / 6;
+  var statMidY = sy + sh * 0.5;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font =
+    '600 ' +
+    rpx(26) +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  ctx.fillStyle = ink;
+  ctx.fillText('总场次：' + totalStr, snapPx(col1), snapPx(statMidY));
+  ctx.fillText('胜率：' + winStr, snapPx(col2), snapPx(statMidY));
+  ctx.fillText('最高阶位：' + peakStr, snapPx(col3), snapPx(statMidY));
+
+  var divTop = sy + sh * 0.22;
+  var divBot = sy + sh * 0.78;
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.08)';
+  ctx.lineWidth = 1;
+  var dx;
+  for (dx = 1; dx <= 2; dx++) {
+    ctx.beginPath();
+    ctx.moveTo(sx + (dx * sw) / 3 - 0.5, divTop);
+    ctx.lineTo(sx + (dx * sw) / 3 - 0.5, divBot);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  var tx = L.tabX;
+  var ty = L.tabY;
+  var tw = L.tabW;
+  var thh = L.tabH;
+  var tr = thh / 2;
+  var chevW = rpx(44);
+  var tabAreaW = tw - chevW;
+  ctx.save();
+  ctx.fillStyle = tabBg;
+  roundRect(tx, ty, tw, thh, tr);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(92, 75, 58, 0.12)';
+  ctx.lineWidth = 1;
+  roundRect(tx + 0.5, ty + 0.5, tw - 1, thh - 1, tr - 0.5);
+  ctx.stroke();
+
+  var labels = ['全部', '胜利', '失败'];
+  var ti;
+  for (ti = 0; ti < 3; ti++) {
+    var tcx = tx + (ti + 0.5) * (tabAreaW / 3);
+    var active = historyFilterTab === ti;
+    ctx.font =
+      '600 ' +
+      rpx(28) +
+      'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = active ? accentBrown : sub;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(labels[ti], snapPx(tcx), snapPx(ty + thh * 0.48));
+    if (active) {
+      var ux0 = tcx - tabAreaW / 6 + rpx(8);
+      var ux1 = tcx + tabAreaW / 6 - rpx(8);
+      ctx.strokeStyle = accentBrown;
+      ctx.lineWidth = rpx(4);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(snapPx(ux0), snapPx(ty + thh - rpx(14)));
+      ctx.lineTo(snapPx(ux1), snapPx(ty + thh - rpx(14)));
+      ctx.stroke();
+    }
+  }
+
+  var chevCx = tx + tw - chevW / 2;
+  var chevCy = ty + thh / 2;
+  ctx.strokeStyle = muted;
+  ctx.lineWidth = Math.max(1.2, rpx(2.2));
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(chevCx - rpx(5), chevCy - rpx(10));
+  ctx.lineTo(chevCx + rpx(5), chevCy);
+  ctx.lineTo(chevCx - rpx(5), chevCy + rpx(10));
+  ctx.stroke();
+  ctx.restore();
+
+  var rows = getFilteredMatchHistory();
+  var rowH = rpx(100);
+  var rowGap = rpx(14);
+  var innerPad = rpx(22);
+  var contentH =
+    rows.length === 0
+      ? rpx(120)
+      : rows.length * (rowH + rowGap) - rowGap + rpx(16);
+  var maxScroll = Math.max(0, contentH - L.listH);
+  if (historyScrollY > maxScroll) {
+    historyScrollY = maxScroll;
+  }
+  if (historyScrollY < 0) {
+    historyScrollY = 0;
+  }
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(L.padX, L.listTop, W - L.padX * 2, L.listH);
+  ctx.clip();
+
+  var yBase = L.listTop - historyScrollY + rpx(8);
+  if (rows.length === 0) {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font =
+      rpx(26) +
+      'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = muted;
+    ctx.fillText(
+      '暂无对局记录',
+      snapPx(W * 0.5),
+      snapPx(L.listTop + L.listH * 0.38)
+    );
+    ctx.font = rpx(22) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
+    ctx.fillStyle = 'rgba(92, 78, 68, 0.55)';
+    ctx.fillText(
+      '完成联机或人机对局后将显示在此',
+      snapPx(W * 0.5),
+      snapPx(L.listTop + L.listH * 0.55)
+    );
+  } else {
+    var ri;
+    for (ri = 0; ri < rows.length; ri++) {
+      var rec = rows[ri];
+      var ry = yBase + ri * (rowH + rowGap);
+      if (ry > L.listBottom + rowH) {
+        break;
+      }
+      if (ry + rowH < L.listTop - 8) {
+        continue;
+      }
+      var rx = L.padX;
+      var rw = W - L.padX * 2;
+      ctx.save();
+      ctx.shadowColor = 'rgba(60, 48, 38, 0.08)';
+      ctx.shadowBlur = rpx(12);
+      ctx.shadowOffsetY = rpx(4);
+      ctx.fillStyle = 'rgba(255, 250, 242, 0.96)';
+      roundRect(rx, ry, rw, rowH, rpx(16));
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(92, 75, 58, 0.1)';
+      ctx.lineWidth = 1;
+      roundRect(rx + 0.5, ry + 0.5, rw - 1, rowH - 1, rpx(15.5));
+      ctx.stroke();
+
+      var timeStr = formatHistoryDateTime(rec.t);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.font =
+        rpx(22) +
+        'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+      ctx.fillStyle = muted;
+      ctx.fillText(timeStr, snapPx(rx + innerPad), snapPx(ry + rpx(28)));
+
+      ctx.font =
+        '600 ' +
+        rpx(28) +
+        'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+      var oppStr = truncateNameToWidth(
+        ctx,
+        String(rec.opp || '对手'),
+        rw - innerPad * 2 - rpx(100)
+      );
+      var resStr =
+        rec.res === 'win' ? '胜利' : rec.res === 'lose' ? '失败' : '和棋';
+      var resCol =
+        rec.res === 'win'
+          ? accentBrown
+          : rec.res === 'lose'
+          ? '#9B4B4B'
+          : sub;
+
+      ctx.fillStyle = ink;
+      ctx.fillText(oppStr, snapPx(rx + innerPad), snapPx(ry + rpx(62)));
+
+      ctx.textAlign = 'right';
+      ctx.font =
+        '600 ' +
+        rpx(26) +
+        'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+      ctx.fillStyle = resCol;
+      ctx.fillText(resStr, snapPx(rx + rw - innerPad), snapPx(ry + rpx(36)));
+
+      var stepStr =
+        typeof rec.steps === 'number' ? String(rec.steps) + ' 手' : '';
+      if (stepStr) {
+        ctx.fillStyle = muted;
+        ctx.font = rpx(22) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
+        ctx.fillText(
+          stepStr,
+          snapPx(rx + rw - innerPad),
+          snapPx(ry + rpx(68))
+        );
+      }
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+
+  drawThemeChrome(th);
+}
+
 function drawPveColorSelect() {
   fillAmbientBackground();
 
@@ -5422,6 +6134,61 @@ function hitPieceSkinModalGridCatalogIndex(tx, ty) {
   return -1;
 }
 
+/**
+ * 积分兑换卡底部「兑换」按钮区域（逻辑坐标，与 drawPieceSkinModalOneCard 一致）
+ */
+function pieceSkinModalPointsRedeemButtonRect(gx, gy, cellW, cellH) {
+  var cardPad = rpx(18);
+  var innerBottom = gy + cellH - cardPad;
+  var rowMidY = innerBottom - rpx(20);
+  var btnH = rpx(26);
+  var btnW = rpx(76);
+  var btnLeft = gx + cellW - cardPad - btnW;
+  var btnTop = rowMidY - btnH / 2;
+  return { x0: btnLeft, y0: btnTop, w: btnW, h: btnH };
+}
+
+/** @returns {number} 命中则返回 catalog 下标，否则 -1 */
+function hitPieceSkinModalRedeemButton(tx, ty) {
+  var L = getPieceSkinModalLayout();
+  var p = pieceSkinModalTouchToLogical(tx, ty);
+  var cat = themes.getPieceSkinCatalog();
+  var per = themes.PIECE_SKINS_PER_PAGE;
+  var start = pieceSkinModalPage * per;
+  var row;
+  var col;
+  for (row = 0; row < 3; row++) {
+    for (col = 0; col < 2; col++) {
+      var slot = row * 2 + col;
+      var gx = L.gridX0 + col * (L.cellW + L.cellGapX);
+      var gy = L.gridY0 + row * (L.cellH + L.cellGapY);
+      var gIdx = start + slot;
+      if (gIdx >= cat.length) {
+        continue;
+      }
+      var ent = cat[gIdx];
+      if (
+        !ent ||
+        ent.rowStatus !== 'points' ||
+        !ent.costPoints ||
+        ent.costPoints <= 0
+      ) {
+        continue;
+      }
+      var r = pieceSkinModalPointsRedeemButtonRect(gx, gy, L.cellW, L.cellH);
+      if (
+        p.x >= r.x0 &&
+        p.x <= r.x0 + r.w &&
+        p.y >= r.y0 &&
+        p.y <= r.y0 + r.h
+      ) {
+        return gIdx;
+      }
+    }
+  }
+  return -1;
+}
+
 function getCurrentPieceSkinWearTitle() {
   var meta = themes.PIECE_SKINS[pieceSkinId];
   if (meta && meta.name) {
@@ -5445,22 +6212,101 @@ function pieceSkinModalCardStatusStyle(entry) {
     return { text: '未解锁', fill: '#909090' };
   }
   if (entry.rowStatus === 'points' && entry.costPoints) {
-    return { text: entry.costPoints + '积分兑换', fill: '#c77b28' };
+    return { text: '', fill: '#c77b28' };
   }
   return { text: '敬请期待', fill: '#8a7a68' };
 }
 
+/**
+ * 仅由积分卡「兑换」按钮触发；点选格子其它区域不会调用本函数。
+ */
+function redeemPieceSkinWithPoints() {
+  var cat = themes.getPieceSkinCatalog();
+  var entry = cat[pieceSkinModalPendingIdx];
+  if (!entry) {
+    return;
+  }
+  if (
+    entry.rowStatus !== 'points' ||
+    !entry.costPoints ||
+    entry.costPoints <= 0
+  ) {
+    return;
+  }
+  if (!authApi.getSessionToken()) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '请先登录', icon: 'none' });
+    }
+    draw();
+    return;
+  }
+  if (pieceSkinRedeemInFlight) {
+    return;
+  }
+  pieceSkinRedeemInFlight = true;
+  wx.request(
+    Object.assign(roomApi.mePieceSkinRedeemOptions(entry.id), {
+      success: function (res) {
+        pieceSkinRedeemInFlight = false;
+        var d = res.data;
+        if (d && typeof d === 'string') {
+          try {
+            d = JSON.parse(d);
+          } catch (eParse) {
+            d = null;
+          }
+        }
+        if (res.statusCode === 401) {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '请先登录', icon: 'none' });
+          }
+          draw();
+          return;
+        }
+        if (res.statusCode === 200 && d) {
+          mergePieceSkinRedeemResponseToCache(d);
+          pieceSkinId = entry.id;
+          themes.savePieceSkinId(entry.id);
+          closePieceSkinModal();
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({
+              title: d.alreadyOwned ? '已拥有该皮肤' : '兑换成功',
+              icon: 'none'
+            });
+          }
+          draw();
+          return;
+        }
+        var msg = '兑换失败';
+        if (res.statusCode === 409 && d && d.code === 'INSUFFICIENT_POINTS') {
+          msg = '积分不足';
+        } else if (res.statusCode === 400 && d && d.code === 'INVALID_SKIN') {
+          msg = '无法兑换';
+        }
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: msg, icon: 'none' });
+        }
+        draw();
+      },
+      fail: function () {
+        pieceSkinRedeemInFlight = false;
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '网络错误', icon: 'none' });
+        }
+        draw();
+      }
+    })
+  );
+}
+
+/** 佩戴已拥有皮肤，或对未解锁项提示；积分兑换请用 redeemPieceSkinWithPoints（仅按钮） */
 function applyPieceSkinWear() {
   var cat = themes.getPieceSkinCatalog();
   var entry = cat[pieceSkinModalPendingIdx];
   if (!entry) {
     return;
   }
-  if (entry.rowStatus === 'points' || (entry.costPoints && entry.costPoints > 0)) {
-    if (typeof wx.showToast === 'function') {
-      wx.showToast({ title: '积分兑换敬请期待', icon: 'none' });
-    }
-    draw();
+  if (entry.rowStatus === 'points' && entry.costPoints && entry.costPoints > 0) {
     return;
   }
   if (entry.rowStatus === 'locked' || !entry.id) {
@@ -5507,7 +6353,12 @@ function drawPieceSkinModalOneCard(rx, ry, rw, rh, entry, gidx, baseClassic) {
   var statusFont = rpx(22);
   var gapStoneTitle = rpx(10);
   var titleLineH = rpx(32);
-  var statusReserve = rpx(38);
+  var isPointsRedeem =
+    entry &&
+    entry.rowStatus === 'points' &&
+    entry.costPoints &&
+    entry.costPoints > 0;
+  var statusReserve = isPointsRedeem ? rpx(40) : rpx(38);
   var innerTop = ry + cardPad;
   var innerBottom = ry + rh - cardPad;
   var statusBandTop = innerBottom - statusReserve;
@@ -5536,6 +6387,9 @@ function drawPieceSkinModalOneCard(rx, ry, rw, rh, entry, gidx, baseClassic) {
   ctx.restore();
 
   var pr = rpx(21);
+  if (entry.id === 'tuan_moe' || entry.id === 'qingtao_libai') {
+    pr = rpx(26);
+  }
   var gapBw = rpx(18);
   var cyPv = cyRegion - clusterShift;
   var nameY = cyPv + pr + gapStoneTitle + titleLineH / 2;
@@ -5597,12 +6451,55 @@ function drawPieceSkinModalOneCard(rx, ry, rw, rh, entry, gidx, baseClassic) {
   ctx.lineTo(snapPx(rx + rw - cardPad), snapPx(statusBandTop));
   ctx.stroke();
 
-  var st = pieceSkinModalCardStatusStyle(entry);
-  ctx.font = statusFont + 'px ' + PIECE_SKIN_FONT_UI;
-  ctx.fillStyle = st.fill;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(st.text, snapPx(midX), snapPx(statusY));
+  if (isPointsRedeem) {
+    var rowMidY = innerBottom - rpx(20);
+    var btnH = rpx(26);
+    var btnW = rpx(76);
+    var btnL = rx + rw - cardPad - btnW;
+    var btnTop = rowMidY - btnH / 2;
+    var gapBeforeBtn = rpx(8);
+    var pointsSlotLeft = rx + cardPad;
+    var pointsSlotRight = btnL - gapBeforeBtn;
+    var pointsTextCx = (pointsSlotLeft + pointsSlotRight) / 2;
+    ctx.font = rpx(18) + 'px ' + PIECE_SKIN_FONT_UI;
+    ctx.fillStyle = '#b08040';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(
+      entry.costPoints + '积分',
+      snapPx(pointsTextCx),
+      snapPx(rowMidY)
+    );
+    var gBtn = ctx.createLinearGradient(btnL, btnTop, btnL, btnTop + btnH);
+    gBtn.addColorStop(0, '#f0a030');
+    gBtn.addColorStop(1, '#d97820');
+    ctx.fillStyle = gBtn;
+    roundRect(btnL, btnTop, btnW, btnH, rpx(6));
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(180, 120, 40, 0.35)';
+    ctx.lineWidth = rpx(1);
+    roundRect(btnL, btnTop, btnW, btnH, rpx(6));
+    ctx.stroke();
+    ctx.font = '600 ' + rpx(18) + 'px ' + PIECE_SKIN_FONT_UI;
+    ctx.fillStyle = '#fffef9';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(
+      '兑换',
+      snapPx(btnL + btnW / 2),
+      snapPx(rowMidY)
+    );
+  } else {
+    var st = pieceSkinModalCardStatusStyle(entry);
+    var statusLine = st && st.text != null ? String(st.text) : '';
+    ctx.font = statusFont + 'px ' + PIECE_SKIN_FONT_UI;
+    ctx.fillStyle = st && st.fill ? st.fill : '#8a7a68';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if (statusLine) {
+      ctx.fillText(statusLine, snapPx(midX), snapPx(statusY));
+    }
+  }
 }
 
 function drawPieceSkinModalOverlay(th) {
@@ -5704,6 +6601,10 @@ function draw() {
   if (screen === 'home') {
     drawHome();
     ensureHomeMascotAnimLoop();
+    return;
+  }
+  if (screen === 'history') {
+    drawHistory();
     return;
   }
   if (screen === 'pve_color') {
@@ -6313,6 +7214,36 @@ wx.onTouchStart(function (e) {
   lastTouchDownX = x;
   lastTouchDownY = y;
 
+  if (screen === 'history') {
+    var hi = hitHistoryInteract(x, y);
+    if (hi === 'back') {
+      screen = 'home';
+      historyScrollTouchId = null;
+      draw();
+      return;
+    }
+    if (typeof hi === 'string' && hi.indexOf('tab') === 0) {
+      var tn = parseInt(hi.slice(3), 10);
+      if (!isNaN(tn) && tn >= 0 && tn <= 2) {
+        historyFilterTab = tn;
+        historyScrollY = 0;
+        draw();
+      }
+      return;
+    }
+    if (hi === 'chevron') {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: '更多筛选 敬请期待', icon: 'none' });
+      }
+      return;
+    }
+    if (e.touches && e.touches[0] && hitHistoryListZone(x, y)) {
+      historyScrollTouchId = e.touches[0].identifier;
+      historyScrollLastY = y;
+    }
+    return;
+  }
+
   if (
     (screen === 'home' || screen === 'game') &&
     ratingCardVisible
@@ -6334,12 +7265,6 @@ wx.onTouchStart(function (e) {
 
   if (screen === 'home' && checkinModalVisible) {
     if (hitCheckinModalHeaderClose(x, y)) {
-      checkinModalVisible = false;
-      checkinModalData = null;
-      draw();
-      return;
-    }
-    if (hitCheckinModalGhostClose(x, y)) {
       checkinModalVisible = false;
       checkinModalData = null;
       draw();
@@ -6467,9 +7392,26 @@ wx.onTouchStart(function (e) {
       closePieceSkinModal();
       return;
     }
+    var redeemHit = hitPieceSkinModalRedeemButton(x, y);
+    if (redeemHit >= 0) {
+      pieceSkinModalPendingIdx = redeemHit;
+      redeemPieceSkinWithPoints();
+      return;
+    }
     var cg = hitPieceSkinModalGridCatalogIndex(x, y);
     if (cg >= 0) {
       pieceSkinModalPendingIdx = cg;
+      var catPick = themes.getPieceSkinCatalog();
+      var entPick = catPick[cg];
+      if (
+        entPick &&
+        entPick.rowStatus === 'points' &&
+        entPick.costPoints &&
+        entPick.costPoints > 0
+      ) {
+        draw();
+        return;
+      }
       applyPieceSkinWear();
       return;
     }
@@ -6487,33 +7429,61 @@ wx.onTouchStart(function (e) {
       return;
     }
     var dr = hitHomeDrawerRow(x, y);
-    if (dr === 0) {
-      cycleThemeNext();
-      homeDrawerOpen = false;
-      draw();
+    if (dr === null) {
       return;
     }
-    if (dr === 1) {
-      homeDrawerOpen = false;
-      openPieceSkinModal();
-      draw();
-      return;
-    }
-    if (dr === 2) {
-      if (typeof wx.showToast === 'function') {
-        wx.showToast({ title: '敬请期待', icon: 'none' });
+    if (homeDrawerShowsThemeRow()) {
+      if (dr === 0) {
+        cycleThemeNext();
+        homeDrawerOpen = false;
+        draw();
+        return;
       }
-      homeDrawerOpen = false;
-      draw();
-      return;
-    }
-    if (dr === 3) {
-      if (typeof wx.showToast === 'function') {
-        wx.showToast({ title: '团团五子棋', icon: 'none' });
+      if (dr === 1) {
+        homeDrawerOpen = false;
+        openPieceSkinModal();
+        draw();
+        return;
       }
-      homeDrawerOpen = false;
-      draw();
-      return;
+      if (dr === 2) {
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '敬请期待', icon: 'none' });
+        }
+        homeDrawerOpen = false;
+        draw();
+        return;
+      }
+      if (dr === 3) {
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '团团五子棋', icon: 'none' });
+        }
+        homeDrawerOpen = false;
+        draw();
+        return;
+      }
+    } else {
+      if (dr === 0) {
+        homeDrawerOpen = false;
+        openPieceSkinModal();
+        draw();
+        return;
+      }
+      if (dr === 1) {
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '敬请期待', icon: 'none' });
+        }
+        homeDrawerOpen = false;
+        draw();
+        return;
+      }
+      if (dr === 2) {
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '团团五子棋', icon: 'none' });
+        }
+        homeDrawerOpen = false;
+        draw();
+        return;
+      }
     }
     return;
   }
@@ -6603,10 +7573,6 @@ wx.onTouchStart(function (e) {
   }
 
   if (screen === 'replay') {
-    if (themeScreenShowsStyleEntry() && hitThemeEntry(x, y)) {
-      cycleThemeNext();
-      return;
-    }
     var rc = hitReplayControl(x, y);
     if (rc === 'close') {
       exitReplayScreen();
@@ -6722,9 +7688,59 @@ wx.onTouchStart(function (e) {
   tryPlace(cell.r, cell.c);
 });
 
+if (typeof wx.onTouchMove === 'function') {
+  wx.onTouchMove(function (e) {
+    if (screen !== 'history' || historyScrollTouchId == null) {
+      return;
+    }
+    var touches = e.touches;
+    if (!touches || !touches.length) {
+      return;
+    }
+    var t = null;
+    var i;
+    for (i = 0; i < touches.length; i++) {
+      if (touches[i].identifier === historyScrollTouchId) {
+        t = touches[i];
+        break;
+      }
+    }
+    if (!t) {
+      return;
+    }
+    var dy = t.clientY - historyScrollLastY;
+    historyScrollLastY = t.clientY;
+    historyScrollY -= dy;
+    var Lh = getHistoryPageLayout();
+    var rows = getFilteredMatchHistory();
+    var rowH = rpx(100);
+    var rowGap = rpx(14);
+    var contentH =
+      rows.length === 0
+        ? rpx(120)
+        : rows.length * (rowH + rowGap) - rowGap + rpx(16);
+    var maxScroll = Math.max(0, contentH - Lh.listH);
+    if (historyScrollY > maxScroll) {
+      historyScrollY = maxScroll;
+    }
+    if (historyScrollY < 0) {
+      historyScrollY = 0;
+    }
+    draw();
+  });
+}
+
 if (typeof wx.onTouchEnd === 'function') {
   wx.onTouchEnd(function (e) {
     var t = e.changedTouches && e.changedTouches[0];
+    if (
+      screen === 'history' &&
+      historyScrollTouchId !== null &&
+      t &&
+      t.identifier === historyScrollTouchId
+    ) {
+      historyScrollTouchId = null;
+    }
     if (screen === 'home' && homePressedButton) {
       if (
         !t ||
@@ -6849,13 +7865,12 @@ if (typeof wx.onTouchEnd === 'function') {
           });
           return;
         }
-        var dockMsgs = [
-          '',
-          '对战排行 敬请期待',
-          '历史战绩 敬请期待'
-        ];
-        if (typeof wx.showToast === 'function') {
-          wx.showToast({ title: dockMsgs[pdc], icon: 'none' });
+        if (pdc === 2) {
+          openHistoryScreen();
+          return;
+        }
+        if (pdc === 1 && typeof wx.showToast === 'function') {
+          wx.showToast({ title: '对战排行 敬请期待', icon: 'none' });
         }
       }
       return;
@@ -6901,6 +7916,9 @@ if (typeof wx.onTouchEnd === 'function') {
 
 if (typeof wx.onTouchCancel === 'function') {
   wx.onTouchCancel(function () {
+    if (screen === 'history') {
+      historyScrollTouchId = null;
+    }
     if (homePressedButton || homePressedDockCol !== null) {
       homePressedButton = null;
       homePressedDockCol = null;

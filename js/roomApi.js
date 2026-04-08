@@ -117,6 +117,31 @@ function meRatingOptions() {
   };
 }
 
+/** GET /api/me/game-history?limit=&offset=：已结算联机对局列表（需 Authorization） */
+function meGameHistoryOptions(limit, offset) {
+  var lim =
+    limit !== undefined && limit !== null ? Number(limit) : 50;
+  var off =
+    offset !== undefined && offset !== null ? Number(offset) : 0;
+  if (isNaN(lim) || lim < 1) {
+    lim = 50;
+  }
+  if (isNaN(off) || off < 0) {
+    off = 0;
+  }
+  return {
+    url:
+      GOMOKU_API_BASE +
+      '/api/me/game-history?limit=' +
+      encodeURIComponent(String(lim)) +
+      '&offset=' +
+      encodeURIComponent(String(off)),
+    /** 与 GET 等价；部分运行环境对 GET 返回 405，服务端已同时注册 POST */
+    method: 'POST',
+    header: withAuthHeaders({})
+  };
+}
+
 /** POST /api/me/checkin：每日签到（服务端 streak/积分/团团萌肤解锁，需 Authorization） */
 function meCheckinOptions() {
   return {
@@ -126,6 +151,18 @@ function meCheckinOptions() {
       'content-type': 'application/json'
     }),
     data: '{}'
+  };
+}
+
+/** POST /api/me/piece-skins/redeem：积分兑换棋子皮肤（body: { skinId }） */
+function mePieceSkinRedeemOptions(skinId) {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/piece-skins/redeem',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify({ skinId: skinId })
   };
 }
 
@@ -193,7 +230,9 @@ module.exports = {
   roomApiRandomMatchCancelOptions: roomApiRandomMatchCancelOptions,
   roomApiRandomMatchFallbackOptions: roomApiRandomMatchFallbackOptions,
   meRatingOptions: meRatingOptions,
+  meGameHistoryOptions: meGameHistoryOptions,
   meCheckinOptions: meCheckinOptions,
+  mePieceSkinRedeemOptions: mePieceSkinRedeemOptions,
   roomOpponentRatingOptions: roomOpponentRatingOptions,
   gameSettleOptions: gameSettleOptions,
   gameReplayByRoomOptions: gameReplayByRoomOptions,
