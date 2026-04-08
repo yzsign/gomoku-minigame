@@ -1,5 +1,5 @@
 /**
- * 简约手绘风小插画（Canvas 矢量，无需 PNG）
+ * 卡片角标与背景弱装饰（低对比，不抢主界面）
  * kind: 'bear' | 'cloud' | 'sparkle' | 'heart'
  */
 
@@ -10,6 +10,8 @@ function drawCardCornerDoodle(ctx, kind, cx, cy, bw, bh) {
   if (!kind) {
     return;
   }
+  ctx.save();
+  ctx.globalAlpha = 0.45;
   var s = Math.min(30, bh * 0.42, bw * 0.14);
   var brX = cx + bw / 2 - 6;
   var brY = cy + bh / 2 - 4;
@@ -22,6 +24,7 @@ function drawCardCornerDoodle(ctx, kind, cx, cy, bw, bh) {
   } else if (kind === 'heart') {
     drawMiniHeart(ctx, brX, brY, s);
   }
+  ctx.restore();
 }
 
 /** 底部偏右为锚点，形象向左上延伸 */
@@ -134,6 +137,7 @@ function drawHomeTopLeftClouds(ctx, W, H, statusBarPad, cloudsTop) {
       : Math.max(14, (statusBarPad || 0) + 8);
   var left = 16;
   ctx.save();
+  ctx.globalAlpha = 0.35;
   drawMiniCloud(ctx, left + 32, base + 22, 20);
   drawMiniCloud(ctx, left + 56, base + 6, 14);
   ctx.restore();
@@ -148,16 +152,88 @@ function drawHomeBottomRightClouds(ctx, W, H, safeBottom) {
   var brX = W - 12;
   var brY = H - sb - 36;
   ctx.save();
+  ctx.globalAlpha = 0.32;
   drawMiniCloud(ctx, brX, brY, 18);
   drawMiniCloud(ctx, brX - 28, brY - 18, 14);
   ctx.restore();
 }
 
-/** 匹配页角落小插画，避免挡中央文案 */
+/**
+ * 首页中央吉祥物：圆润奶油色团子 + 萌芽 + 简笔手脚（参考稿风格）
+ */
+function drawHomeHeroMascot(ctx, cx, cy, scale) {
+  var s = scale || 1;
+  var r = 46 * s;
+  ctx.save();
+  ctx.shadowColor = 'rgba(42, 34, 26, 0.12)';
+  ctx.shadowBlur = 16 * s;
+  ctx.shadowOffsetY = 6 * s;
+  ctx.fillStyle = '#F7F0E8';
+  ctx.strokeStyle = 'rgba(190, 172, 150, 0.32)';
+  ctx.lineWidth = 1.2 * s;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  ctx.fillStyle = '#2A2A2A';
+  ctx.beginPath();
+  ctx.arc(cx - 14 * s, cy - 6 * s, 4.2 * s, 0, Math.PI * 2);
+  ctx.arc(cx + 14 * s, cy - 6 * s, 4.2 * s, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(92, 75, 58, 0.85)';
+  ctx.lineWidth = 1.8 * s;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(cx, cy + 8 * s, 10 * s, 0.12 * Math.PI, 0.88 * Math.PI);
+  ctx.stroke();
+
+  ctx.strokeStyle = '#6DAA4A';
+  ctx.lineWidth = 2.2 * s;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - r + 1 * s);
+  ctx.quadraticCurveTo(
+    cx + 10 * s,
+    cy - r - 18 * s,
+    cx + 2 * s,
+    cy - r - 26 * s
+  );
+  ctx.stroke();
+  ctx.fillStyle = '#8BC34A';
+  ctx.beginPath();
+  ctx.arc(cx + 2 * s, cy - r - 26 * s, 5 * s, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(92, 75, 58, 0.5)';
+  ctx.lineWidth = 2 * s;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.55, cy + 8 * s);
+  ctx.lineTo(cx - r * 0.75, cy + 22 * s);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx + r * 0.55, cy + 8 * s);
+  ctx.lineTo(cx + r * 0.75, cy + 22 * s);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+/** 匹配页：极淡弧线角标，不抢中央文案 */
 function drawMatchingDecoration(ctx, W, H) {
   ctx.save();
-  drawMiniCloud(ctx, 44, Math.max(56, H * 0.14), 20);
-  drawMiniBear(ctx, W - 40, Math.max(72, H * 0.17), 22);
+  ctx.globalAlpha = 0.2;
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(28, Math.max(64, H * 0.15), 36, -Math.PI * 0.15, Math.PI * 0.55);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(W - 28, Math.max(78, H * 0.18), 40, Math.PI * 0.45, Math.PI * 1.12);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -172,6 +248,7 @@ function drawGameBoardCornerClouds(ctx, W, H, layout, statusBarPad) {
     Math.min(layout.originY - 20, layout.topBar + 10)
   );
   ctx.save();
+  ctx.globalAlpha = 0.28;
   drawMiniCloud(ctx, 36, topY + 16, 18);
   var brX = W - 14;
   var brY = Math.min(layout.bottomY - 58, H - 30);
@@ -183,6 +260,7 @@ module.exports = {
   drawCardCornerDoodle: drawCardCornerDoodle,
   drawHomeTopLeftClouds: drawHomeTopLeftClouds,
   drawHomeBottomRightClouds: drawHomeBottomRightClouds,
+  drawHomeHeroMascot: drawHomeHeroMascot,
   drawMatchingDecoration: drawMatchingDecoration,
   drawGameBoardCornerClouds: drawGameBoardCornerClouds
 };

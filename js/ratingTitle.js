@@ -40,6 +40,51 @@ function getRankAndTitleByElo(elo) {
   return { rankLabel: '职业五段', titleName: '棋鬼王' };
 }
 
+/**
+ * 首页 48×24 徽章用两字段位（与 getRankAndTitleByElo 分段一致；未知/null 时显示「青铜」）
+ */
+function getHomeBadgeShortLabel(elo) {
+  if (elo == null || typeof elo !== 'number' || isNaN(elo)) {
+    return '青铜';
+  }
+  var e = elo;
+  if (e < 1000) {
+    return '青铜';
+  }
+  if (e < 1200) {
+    return '初段';
+  }
+  if (e < 1400) {
+    return '二段';
+  }
+  if (e < 1600) {
+    return '三段';
+  }
+  if (e < 1800) {
+    return '四段';
+  }
+  if (e < 2000) {
+    return '五段';
+  }
+  if (e < 2200) {
+    return '六段';
+  }
+  if (e < 2350) {
+    return '职初';
+  }
+  if (e < 2500) {
+    return '职二';
+  }
+  if (e < 2700) {
+    return '职三';
+  }
+  if (e < 2900) {
+    return '职四';
+  }
+  return '棋王';
+}
+
 module.exports = {
   getRankAndTitleByElo: getRankAndTitleByElo,
+  getHomeBadgeShortLabel: getHomeBadgeShortLabel,
 };

@@ -117,6 +117,18 @@ function meRatingOptions() {
   };
 }
 
+/** POST /api/me/checkin：每日签到（服务端 streak/积分/团团萌肤解锁，需 Authorization） */
+function meCheckinOptions() {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/checkin',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: '{}'
+  };
+}
+
 /** GET /api/rooms/opponent-rating?roomId=：当前房间对手的公开天梯（须为双方玩家之一） */
 function roomOpponentRatingOptions(roomId) {
   return {
@@ -144,6 +156,34 @@ function gameSettleOptions(body) {
   };
 }
 
+/** GET /api/games/replay?roomId=&matchRound= */
+function gameReplayByRoomOptions(roomId, matchRound) {
+  var mr =
+    matchRound !== undefined && matchRound !== null ? Number(matchRound) : 1;
+  if (isNaN(mr) || mr < 1) {
+    mr = 1;
+  }
+  return {
+    url:
+      GOMOKU_API_BASE +
+      '/api/games/replay?roomId=' +
+      encodeURIComponent(roomId) +
+      '&matchRound=' +
+      encodeURIComponent(String(mr)),
+    method: 'GET',
+    header: withAuthHeaders({})
+  };
+}
+
+/** GET /api/games/{gameId}/replay */
+function gameReplayByIdOptions(gameId) {
+  return {
+    url: GOMOKU_API_BASE + '/api/games/' + encodeURIComponent(String(gameId)) + '/replay',
+    method: 'GET',
+    header: withAuthHeaders({})
+  };
+}
+
 module.exports = {
   GOMOKU_API_BASE: GOMOKU_API_BASE,
   roomApiCreateOptions: roomApiCreateOptions,
@@ -153,7 +193,10 @@ module.exports = {
   roomApiRandomMatchCancelOptions: roomApiRandomMatchCancelOptions,
   roomApiRandomMatchFallbackOptions: roomApiRandomMatchFallbackOptions,
   meRatingOptions: meRatingOptions,
+  meCheckinOptions: meCheckinOptions,
   roomOpponentRatingOptions: roomOpponentRatingOptions,
   gameSettleOptions: gameSettleOptions,
+  gameReplayByRoomOptions: gameReplayByRoomOptions,
+  gameReplayByIdOptions: gameReplayByIdOptions,
   wsUrlFromApiBase: wsUrlFromApiBase
 };

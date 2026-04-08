@@ -1,5 +1,11 @@
 {
   "workers": "workers",
+  "subpackages": [
+    {
+      "name": "res-mascot",
+      "root": "subpackages/res-mascot/"
+    }
+  ],
   "deviceOrientation": "portrait",
   "showStatusBar": false,
   "networkTimeout": {

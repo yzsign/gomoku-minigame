@@ -1,134 +1,86 @@
 /**
- * 界面风格：马卡龙 pastel / 大圆角卡片 / 白字主操作（参考小组件可爱风）
+ * 界面风格：柔和渐变底 / 深色主按钮 / 高对比标题（棋院质感；背景略偏明快）
+ * 设计稿宽度 750rpx（与 main 中 rpx() 一致）。
+ * 檀木 classic 与青瓷 mint、水墨 ink 各有一套色板，互不覆盖。
  */
 var STORAGE_KEY = 'gomoku_theme_id';
 
 var THEMES = {
   mint: {
     id: 'mint',
-    name: '薄荷清新',
-    bg: ['#fff9f5', '#f5fbfa', '#f8f6ff'],
-    title: '#5a5a62',
-    subtitle: '#8a8a96',
-    muted: '#9a9aa8',
-    homeCards: ['#8fd4c8', '#b5e0a5', '#b8c4f0'],
-    btnPrimary: '#8fd4c8',
-    btnPrimaryStroke: 'rgba(255,255,255,0.45)',
-    btnShadow: 'rgba(0,0,0,0.07)',
-    btnGhostFill: 'rgba(255,255,255,0.75)',
-    btnGhostStroke: 'rgba(255,255,255,0.95)',
-    btnGhostText: '#6a6a78',
+    name: '青瓷',
+    /** 偏青绿湖水感，略提高饱和更轻快 */
+    bg: ['#dff5f4', '#d5f0f4', '#ecf8fb'],
+    title: '#153d52',
+    subtitle: '#3d5f78',
+    muted: '#5f7a90',
+    homeCards: ['#1d5f74', '#2f7f94', '#4a93a5'],
+    /** 首页「人机 / 好友」主按钮（与 homeCards 前两色一致，单列避免与其它用途混淆） */
+    homePve: '#1d5f74',
+    homeFriend: '#2f7f94',
+    btnPrimary: '#1d5f74',
+    btnPrimaryStroke: 'rgba(255,255,255,0.4)',
+    btnShadow: 'rgba(18, 72, 92, 0.2)',
+    btnGhostFill: 'rgba(255,255,255,0.82)',
+    btnGhostStroke: 'rgba(255,255,255,0.94)',
+    btnGhostText: '#4a6278',
     result: {
-      defaultEnd: '#f7f7fb',
-      win: { bg: '#d8f0e4', title: '#2d6a4f' },
-      lose: { bg: '#e4eaf5', title: '#4a5f78' },
-      draw: { bg: '#f2efe6', title: '#7a6a48' },
-      sub: '#7a7a86',
-      secondaryFill: 'rgba(255,255,255,0.6)',
-      secondaryStroke: 'rgba(255,255,255,0.9)',
-      secondaryText: '#5a5a62'
+      defaultEnd: '#f2f8f9',
+      win: { bg: '#d0e8ec', title: '#145a68' },
+      lose: { bg: '#e2eaf0', title: '#2d4a62' },
+      draw: { bg: '#eef2f0', title: '#6a6048' },
+      sub: '#6a7890',
+      secondaryFill: 'rgba(255,255,255,0.62)',
+      secondaryStroke: 'rgba(255,255,255,0.92)',
+      secondaryText: '#4a5870'
     },
+    /* 盘面：乳白青釉；格线/星位与首页主色同系 */
     board: {
-      g0: '#fafcfa',
-      g1: '#f3f6f4',
-      line: '#c5cec9',
-      star: '#9eb0a6'
+      g0: '#f0f7f7',
+      g1: '#dce8ea',
+      line: '#7a9ea8',
+      star: '#3d7584',
+      gridLineWidth: 1
     },
     pieces: {
-      black: { g0: '#6a6a82', g1: '#3d3d52', stroke: '#5a5a70' },
-      white: { g0: '#fffefb', g1: '#eef6f2', stroke: '#c8e0d8' }
+      black: {
+        g0: '#4a5058',
+        gm: '#1a1c22',
+        g1: '#060608',
+        stroke: 'rgba(255,255,255,0.22)'
+      },
+      white: {
+        g0: '#fffffc',
+        gm: '#e8ecf2',
+        g1: '#c8d0dc',
+        stroke: '#7a8ca0'
+      }
     },
-    status: '#6a6a72',
-    hint: '#a0a0ac'
-  },
-  lilac: {
-    id: 'lilac',
-    name: '香芋软萌',
-    bg: ['#faf8ff', '#f3f0fc', '#fef8fb'],
-    title: '#5a4a68',
-    subtitle: '#8a7a96',
-    muted: '#a898b0',
-    homeCards: ['#c4b8e8', '#dcb8e0', '#e8c0d4'],
-    btnPrimary: '#c4b8e8',
-    btnPrimaryStroke: 'rgba(255,255,255,0.45)',
-    btnShadow: 'rgba(0,0,0,0.07)',
-    btnGhostFill: 'rgba(255,255,255,0.75)',
-    btnGhostStroke: 'rgba(255,255,255,0.95)',
-    btnGhostText: '#6a5a72',
-    result: {
-      defaultEnd: '#f8f6fc',
-      win: { bg: '#d8f0e4', title: '#2d6a4f' },
-      lose: { bg: '#ebe4f5', title: '#5a4a78' },
-      draw: { bg: '#f5f0f2', title: '#8a7a58' },
-      sub: '#8a7a96',
-      secondaryFill: 'rgba(255,255,255,0.6)',
-      secondaryStroke: 'rgba(255,255,255,0.9)',
-      secondaryText: '#5a4a68'
-    },
-    board: {
-      g0: '#faf9fc',
-      g1: '#f4f2f8',
-      line: '#d8d2e4',
-      star: '#b0a8c8'
-    },
-    pieces: {
-      black: { g0: '#6b6b82', g1: '#3d3d52', stroke: '#5a5a70' },
-      white: { g0: '#fffefb', g1: '#f5f0ff', stroke: '#dcc8e8' }
-    },
-    status: '#6a5a72',
-    hint: '#b0a0b8'
-  },
-  ocean: {
-    id: 'ocean',
-    name: '海盐气泡',
-    bg: ['#f5fcff', '#eef8fc', '#f7fbfa'],
-    title: '#3a5a68',
-    subtitle: '#7a8a96',
-    muted: '#8aa8b0',
-    homeCards: ['#7cc8dc', '#94d8ec', '#a8e0e8'],
-    btnPrimary: '#7cc8dc',
-    btnPrimaryStroke: 'rgba(255,255,255,0.45)',
-    btnShadow: 'rgba(0,0,0,0.07)',
-    btnGhostFill: 'rgba(255,255,255,0.75)',
-    btnGhostStroke: 'rgba(255,255,255,0.95)',
-    btnGhostText: '#4a6a78',
-    result: {
-      defaultEnd: '#f2f9fc',
-      win: { bg: '#d4f0e4', title: '#1d6a50' },
-      lose: { bg: '#e4eef8', title: '#3a5a78' },
-      draw: { bg: '#eef5f0', title: '#7a7a50' },
-      sub: '#7a8a96',
-      secondaryFill: 'rgba(255,255,255,0.6)',
-      secondaryStroke: 'rgba(255,255,255,0.9)',
-      secondaryText: '#3a5a68'
-    },
-    board: {
-      g0: '#f8fafb',
-      g1: '#f0f3f5',
-      line: '#bcc8d0',
-      star: '#8ca8b8'
-    },
-    pieces: {
-      black: { g0: '#5a6a78', g1: '#2d3d4a', stroke: '#4a5a68' },
-      white: { g0: '#fffefb', g1: '#e8f4fa', stroke: '#b8d8e4' }
-    },
-    status: '#5a6a6a',
-    hint: '#98b8c0'
+    status: '#2d5060',
+    hint: '#5f7a8a'
   },
   classic: {
     id: 'classic',
-    name: '木纹经典',
-    bg: ['#faf6f0', '#f2ebe2', '#faf8f4'],
-    title: '#4a3828',
-    subtitle: '#8a7868',
-    muted: '#9a8878',
-    homeCards: ['#d4b896', '#c9a878', '#a8b898'],
-    btnPrimary: '#c9a878',
-    btnPrimaryStroke: 'rgba(255,255,255,0.35)',
-    btnShadow: 'rgba(0,0,0,0.08)',
-    btnGhostFill: 'rgba(255,255,255,0.72)',
-    btnGhostStroke: 'rgba(255,255,255,0.9)',
-    btnGhostText: '#5a4838',
+    name: '檀木',
+    /**
+     * 页面背景：暖杏米渐变（比纯灰米更活泼，与棕色按钮仍同色系）
+     */
+    bg: ['#FFF0E4', '#FFF6ED', '#FFFCF9'],
+    title: '#2c2620',
+    subtitle: '#5c4e42',
+    muted: '#948878',
+    /** 设计稿：随机 #F5F3F2 / #5E524D；好友 #7B5E3F；人机 #5C4738 */
+    homeCards: ['#5C4738', '#7B5E3F', '#6A5545'],
+    homePve: '#5C4738',
+    homeFriend: '#7B5E3F',
+    btnPrimary: '#5C4738',
+    btnPrimaryStroke: 'rgba(255,255,255,0.36)',
+    btnShadow: 'rgba(60, 48, 38, 0.16)',
+    btnGhostFill: '#F5F3F2',
+    btnGhostStroke: 'rgba(94, 82, 77, 0.18)',
+    btnGhostText: '#5E524D',
+    /** 分页/加载指示（如匹配页动画点） */
+    pageIndicator: '#E0B896',
     result: {
       defaultEnd: '#faf6f0',
       win: { bg: '#e0edd8', title: '#1b5e20' },
@@ -139,61 +91,438 @@ var THEMES = {
       secondaryStroke: 'rgba(255,255,255,0.88)',
       secondaryText: '#4a3828'
     },
-    /* 浅蜜棕木纹感（tan/burlywood），低饱和护眼；细黑线 + 黑星位，贴近参考图 */
+    /* 蜜棕实木盘（略深）；格线浅暖灰棕 */
     board: {
-      g0: '#e8d4b8',
-      g1: '#d2b48c',
-      line: '#000000',
-      star: '#000000'
+      g0: '#e0d4c0',
+      g1: '#b09068',
+      line: '#8f8072',
+      star: '#8f8072',
+      gridLineWidth: 1.4
     },
     pieces: {
-      black: { g0: '#666666', g1: '#111111', stroke: '#222222' },
-      white: { g0: '#ffffff', g1: '#c8c8c8', stroke: '#999999' }
+      black: {
+        g0: '#4a4e52',
+        gm: '#222428',
+        g1: '#060608',
+        stroke: 'rgba(255,255,255,0.15)'
+      },
+      white: {
+        g0: '#fffffe',
+        gm: '#ece8e4',
+        g1: '#b8b4b0',
+        stroke: '#8a7a70'
+      }
     },
-    status: '#4a3828',
-    hint: '#9a8878'
+    status: '#3a3028',
+    hint: '#887868'
   },
-  sakura: {
-    id: 'sakura',
-    name: '樱花豆沙',
-    bg: ['#fff8fa', '#faf0f5', '#fff9f6'],
-    title: '#7a5868',
-    subtitle: '#a898a4',
-    muted: '#c0a8b4',
-    homeCards: ['#e8b8c8', '#f0c8d8', '#f8d0d8'],
-    btnPrimary: '#e8b8c8',
-    btnPrimaryStroke: 'rgba(255,255,255,0.45)',
-    btnShadow: 'rgba(0,0,0,0.07)',
-    btnGhostFill: 'rgba(255,255,255,0.75)',
-    btnGhostStroke: 'rgba(255,255,255,0.95)',
-    btnGhostText: '#8a5868',
+  ink: {
+    id: 'ink',
+    name: '水墨',
+    /* 暖宣纸：带浅杏色，避免发灰发闷 */
+    bg: ['#fff9f2', '#f4ebe0', '#e9dfd2'],
+    title: '#242018',
+    subtitle: '#585046',
+    muted: '#857a70',
+    /** 人机深墨、好友浅赭灰，层次拉开 */
+    homeCards: ['#221c18', '#8f8578', '#5a524a'],
+    homePve: '#221c18',
+    homeFriend: '#8f8578',
+    btnPrimary: '#221c18',
+    btnPrimaryStroke: 'rgba(255,255,255,0.3)',
+    btnShadow: 'rgba(28, 20, 14, 0.16)',
+    btnGhostFill: 'rgba(255,252,246,0.88)',
+    btnGhostStroke: 'rgba(255,255,255,0.92)',
+    btnGhostText: '#524a42',
     result: {
-      defaultEnd: '#fff8fa',
-      win: { bg: '#e0f5e8', title: '#2d8a5a' },
-      lose: { bg: '#f5e8f0', title: '#a05070' },
-      draw: { bg: '#faf0e8', title: '#b87a50' },
-      sub: '#a898a4',
-      secondaryFill: 'rgba(255,255,255,0.6)',
+      defaultEnd: '#f2ede4',
+      win: { bg: '#e0e4dc', title: '#2d3d32' },
+      lose: { bg: '#ebe4de', title: '#5a4038' },
+      draw: { bg: '#eee8e0', title: '#5a5048' },
+      sub: '#6a625c',
+      secondaryFill: 'rgba(255,255,255,0.62)',
       secondaryStroke: 'rgba(255,255,255,0.9)',
-      secondaryText: '#7a5868'
+      secondaryText: '#4a433e'
     },
+    /* 格线/星位：暖灰墨，贴近 render 中水墨盘外框 rgba(42,38,34) 系 */
     board: {
-      g0: '#fdf9fa',
-      g1: '#f7f0f3',
-      line: '#dcc8d0',
-      star: '#c4a8b4'
+      g0: '#f4f0e8',
+      g1: '#e8e2d8',
+      line: '#726c64',
+      star: '#4f4840',
+      gridLineWidth: 1
     },
     pieces: {
-      black: { g0: '#6b6b7a', g1: '#3d3d50', stroke: '#5a5a68' },
-      white: { g0: '#fffefb', g1: '#fceff4', stroke: '#f0c8d8' }
+      black: {
+        g0: '#4a4542',
+        gm: '#262422',
+        g1: '#0c0c0a',
+        stroke: 'rgba(255,255,255,0.08)'
+      },
+      white: {
+        g0: '#faf8f4',
+        gm: '#ebe6de',
+        g1: '#d4cec4',
+        stroke: '#8a8478'
+      }
     },
-    status: '#7a5868',
-    hint: '#c8a8b4'
+    status: '#3a3632',
+    hint: '#7a7268'
   }
 };
 
-/** 切换顺序：默认木纹经典为首项 */
-var THEME_IDS = ['classic', 'mint', 'lilac', 'ocean', 'sakura'];
+/** 檀木 / 青瓷 / 水墨 */
+var THEME_IDS = ['classic', 'mint', 'ink'];
+
+/**
+ * 棋子皮肤：与「界面风格」正交，只覆盖 theme.pieces 的渐变与描边（及可选光照风格）。
+ * default=沿用当前界面主题自带的 pieces；其余套在基底主题之上合并。
+ */
+var PIECE_SKIN_STORAGE_KEY = 'gomoku_piece_skin_id';
+
+var PIECE_SKINS = {
+  default: {
+    id: 'default',
+    name: '随界面',
+    followTheme: true
+  },
+  /** 标准围棋风：纯渐变黑白子，无贴图 */
+  basic: {
+    id: 'basic',
+    name: '基础黑白',
+    black: {
+      g0: '#3d3d3d',
+      gm: '#1a1a1a',
+      g1: '#050505',
+      stroke: 'rgba(255,255,255,0.14)'
+    },
+    white: {
+      g0: '#ffffff',
+      gm: '#f2f2f2',
+      g1: '#d8d8d8',
+      stroke: '#888888'
+    }
+  },
+  /** 偏蓝灰胎、黑子厚实透亮 */
+  yunzi: {
+    id: 'yunzi',
+    name: '云子',
+    black: {
+      g0: '#5a5e66',
+      gm: '#2c3038',
+      g1: '#0c0e12',
+      stroke: 'rgba(255,255,255,0.22)'
+    },
+    white: {
+      g0: '#fffffc',
+      gm: '#eef1f6',
+      g1: '#c4cad4',
+      stroke: '#6a7a8a'
+    }
+  },
+  /** 黑子微青绿、白子偏暖玉 */
+  jade: {
+    id: 'jade',
+    name: '翠玉',
+    black: {
+      g0: '#3d524c',
+      gm: '#1a2a24',
+      g1: '#060c0a',
+      stroke: 'rgba(200,230,215,0.2)'
+    },
+    white: {
+      g0: '#f9fbf9',
+      gm: '#e6ebe7',
+      g1: '#b8c4bc',
+      stroke: '#5a7268'
+    }
+  },
+  /** 哑光墨感，与水墨界面协调；强制 ink 光照分支 */
+  inkstone: {
+    id: 'inkstone',
+    name: '墨玉',
+    stoneShading: 'ink',
+    black: {
+      g0: '#454240',
+      gm: '#242220',
+      g1: '#0c0c0a',
+      stroke: 'rgba(255,255,255,0.08)'
+    },
+    white: {
+      g0: '#faf8f4',
+      gm: '#ebe6de',
+      g1: '#d4cec4',
+      stroke: '#8a8478'
+    }
+  },
+  /**
+   * 贴图棋子：黑白各一张 PNG（images/pieces/tuan-black.png / tuan-white.png）
+   * 资源未加载时回退为下方渐变 + 描边
+   */
+  tuan_moe: {
+    id: 'tuan_moe',
+    name: '团团萌肤',
+    /** 棋盘：尽量占满格距；贴图放大使角色贴近裁切圆，减少格内「缝隙感」 */
+    pieceBoardRadiusCell: 0.495,
+    pieceTextureDrawScale: 2.05,
+    pieceTextureBlack: 'images/pieces/tuan-black.png',
+    pieceTextureWhite: 'images/pieces/tuan-white.png',
+    black: {
+      g0: '#2a2826',
+      gm: '#141210',
+      g1: '#080604',
+      stroke: 'rgba(255,235,210,0.18)'
+    },
+    white: {
+      g0: '#faf8f4',
+      gm: '#eeeae6',
+      g1: '#dcd6d0',
+      stroke: 'rgba(120, 98, 78, 0.35)'
+    },
+    /**
+     * 对手上一手：环半径按「角色可视外轮廓」取 pr 的比例（非裁切圆边缘）。
+     * 贴图在圆内有留白时，0.98 会环在角色外造成缝隙，需明显小于 1。
+     */
+    opponentLastMoveMarker: {
+      ringRadiusMul: 0.79,
+      lineWidthPr: 0.088,
+      blackStroke: '#6ec8ff',
+      whiteStroke: '#0f7ae8',
+      shadowBlack: 'rgba(90, 170, 255, 0.55)',
+      shadowWhite: 'rgba(20, 110, 220, 0.35)'
+    },
+    /**
+     * 五子连珠胜：半径按角色轮廓（小于 pr 倍率贴近贴图），光晕外扩缩小以免五子连成一片糊带
+     */
+    winningLineHighlight: {
+      glowOuterMul: 1.18,
+      glowGradientInnerMul: 0.76,
+      ringPrimaryMul: 0.86,
+      ringSecondaryMul: 0.8,
+      primaryLineWidthPr: 0.092,
+      secondaryLineWidthPr: 0.05,
+      primaryShadowBlurPr: 0.2
+    }
+  },
+  /**
+   * 贴图棋子：黑=青萄、白=荔白；其余与 tuan_moe 一致（半径/缩放/回退渐变/标记/胜线）
+   */
+  qingtao_libai: {
+    id: 'qingtao_libai',
+    name: '青萄荔白',
+    pieceBoardRadiusCell: 0.495,
+    /**
+     * 贴图内球体占画布比例小于 tuan 图（约 0.30 vs 0.41），同 2.05 会显小；
+     * 提高缩放使与团团萌肤棋子视觉大小一致。
+     */
+    pieceTextureDrawScale: 2.83,
+    pieceTextureBlack: 'images/pieces/fruit1.png',
+    pieceTextureWhite: 'images/pieces/fruit2.png',
+    black: {
+      g0: '#2a2826',
+      gm: '#141210',
+      g1: '#080604',
+      stroke: 'rgba(255,235,210,0.18)'
+    },
+    white: {
+      g0: '#faf8f4',
+      gm: '#eeeae6',
+      g1: '#dcd6d0',
+      stroke: 'rgba(120, 98, 78, 0.35)'
+    },
+    /**
+     * 环半径：按「圆形裁切内」不透明像素相对质心的最大距离 / pr ≈ 0.88，
+     * 使蓝环与果子外轮廓贴合（此前 ~0.55 环落在果子内侧）。
+     * 质心：裁切圆内加权质心（与棋盘贴图可见区域一致）。
+     */
+    opponentLastMoveMarker: {
+      ringRadiusMul: 0.87,
+      /** 质心相对交点有位移，环过大时会画出棋子圆外；黑子偏移更大故上限略低 */
+      ringRadiusMulBlack: 0.868,
+      ringRadiusMulWhite: 0.888,
+      markerCenterOffsetXMulBlack: -0.010695,
+      markerCenterOffsetYMulBlack: -0.045484,
+      markerCenterOffsetXMulWhite: -0.001757,
+      markerCenterOffsetYMulWhite: -0.038548,
+      lineWidthPr: 0.055,
+      blackStroke: '#6ec8ff',
+      whiteStroke: '#0f7ae8',
+      shadowBlack: 'rgba(90, 170, 255, 0.42)',
+      shadowWhite: 'rgba(20, 110, 220, 0.28)',
+      shadowBlurBlackPr: 0.1,
+      shadowBlurWhitePr: 0.072
+    },
+    winningLineHighlight: {
+      glowOuterMul: 1.12,
+      glowGradientInnerMul: 0.72,
+      ringPrimaryMul: 0.868,
+      ringSecondaryMul: 0.805,
+      primaryLineWidthPr: 0.092,
+      secondaryLineWidthPr: 0.05,
+      primaryShadowBlurPr: 0.2
+    }
+  }
+};
+
+/** 已开放可持久化的皮肤 id；与目录中 rowStatus: owned 一致 */
+var PIECE_SKIN_IDS = ['basic', 'tuan_moe', 'qingtao_libai'];
+
+/** 皮肤弹窗列表（双列分页，每页 6 格） */
+var PIECE_SKINS_PER_PAGE = 6;
+
+/**
+ * 「团团萌肤」是否已解锁：由服务端 users.piece_skin_tuan_moe_unlocked 决定，
+ * 经 GET /api/me/rating 或 POST /api/me/checkin 同步到内存（不写本地解锁标记）。
+ */
+var tuanMoeUnlockedServerCache = false;
+
+function setTuanMoeUnlockedFromServer(unlocked) {
+  tuanMoeUnlockedServerCache = !!unlocked;
+}
+
+function isTuanMoeUnlocked() {
+  return tuanMoeUnlockedServerCache;
+}
+
+function getPieceSkinCatalog() {
+  var tuanOk = isTuanMoeUnlocked();
+  return [
+    { id: 'basic', locked: false, label: '基础黑白', rowStatus: 'owned' },
+    {
+      id: 'tuan_moe',
+      locked: !tuanOk,
+      label: '团团萌肤',
+      rowStatus: tuanOk ? 'owned' : 'locked',
+      unlockHint: '连签7天解锁'
+    },
+    { id: 'qingtao_libai', locked: false, label: '青萄荔白', rowStatus: 'owned' }
+  ];
+}
+
+function getPieceSkinCatalogLabel(entry) {
+  if (!entry) {
+    return '';
+  }
+  if (entry.label) {
+    return entry.label;
+  }
+  if (entry.id && PIECE_SKINS[entry.id]) {
+    return PIECE_SKINS[entry.id].name || entry.id;
+  }
+  return '敬请期待';
+}
+
+/** 仅「已拥有」且可选择的皮肤可写入本地，避免锁位/占位 id 被保存 */
+function pieceSkinIdIsPersistable(id) {
+  if (!id || !PIECE_SKINS[id] || PIECE_SKINS[id].followTheme) {
+    return false;
+  }
+  var cat = getPieceSkinCatalog();
+  var i;
+  for (i = 0; i < cat.length; i++) {
+    var e = cat[i];
+    if (e.id === id && e.rowStatus === 'owned' && !e.locked) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function shallowCopyTheme(t) {
+  var out = {};
+  var k;
+  for (k in t) {
+    if (Object.prototype.hasOwnProperty.call(t, k)) {
+      out[k] = t[k];
+    }
+  }
+  return out;
+}
+
+function mergePieceDef(base, over) {
+  if (!over) {
+    return base;
+  }
+  return {
+    g0: over.g0 != null ? over.g0 : base.g0,
+    gm: over.gm != null ? over.gm : base.gm,
+    g1: over.g1 != null ? over.g1 : base.g1,
+    stroke: over.stroke != null ? over.stroke : base.stroke
+  };
+}
+
+/**
+ * @param {object} baseTheme themes.THEMES 中的一项
+ * @param {string} skinId PIECE_SKINS 的 id
+ * @returns {object} 新对象；followTheme 时直接返回 baseTheme
+ */
+function applyPieceSkin(baseTheme, skinId) {
+  var skin = PIECE_SKINS[skinId];
+  if (!skin || skin.followTheme) {
+    return baseTheme;
+  }
+  var out = shallowCopyTheme(baseTheme);
+  out.pieces = {
+    black: mergePieceDef(baseTheme.pieces.black, skin.black),
+    white: mergePieceDef(baseTheme.pieces.white, skin.white)
+  };
+  if (skin.stoneShading) {
+    out.stoneShading = skin.stoneShading;
+  }
+  if (skin.textureUV) {
+    out.textureUV = skin.textureUV;
+  }
+  if (typeof skin.pieceBoardRadiusCell === 'number') {
+    out.pieceBoardRadiusCell = skin.pieceBoardRadiusCell;
+  }
+  if (typeof skin.pieceTextureDrawScale === 'number') {
+    out.pieceTextureDrawScale = skin.pieceTextureDrawScale;
+  }
+  if (skin.opponentLastMoveMarker) {
+    out.opponentLastMoveMarker = skin.opponentLastMoveMarker;
+  }
+  if (skin.winningLineHighlight) {
+    out.winningLineHighlight = skin.winningLineHighlight;
+  }
+  return out;
+}
+
+function getPieceSkin(id) {
+  return PIECE_SKINS[id] || PIECE_SKINS.default;
+}
+
+function loadSavedPieceSkinId() {
+  try {
+    if (typeof wx !== 'undefined' && wx.getStorageSync) {
+      var v = wx.getStorageSync(PIECE_SKIN_STORAGE_KEY);
+      if (pieceSkinIdIsPersistable(v)) {
+        return v;
+      }
+    }
+  } catch (e) {}
+  return 'basic';
+}
+
+function savePieceSkinId(id) {
+  if (!pieceSkinIdIsPersistable(id)) {
+    return;
+  }
+  try {
+    if (typeof wx !== 'undefined' && wx.setStorage) {
+      wx.setStorage({ key: PIECE_SKIN_STORAGE_KEY, data: id });
+      return;
+    }
+  } catch (e) {}
+  try {
+    if (typeof wx !== 'undefined' && wx.setStorageSync) {
+      setTimeout(function () {
+        try {
+          wx.setStorageSync(PIECE_SKIN_STORAGE_KEY, id);
+        } catch (e2) {}
+      }, 0);
+    }
+  } catch (e3) {}
+}
 
 function getTheme(id) {
   var t = THEMES[id] || THEMES.classic;
@@ -223,10 +552,30 @@ function saveThemeId(id) {
   } catch (e) {}
 }
 
-module.exports = {
+var themesExports = {
   THEMES: THEMES,
   THEME_IDS: THEME_IDS,
+  PIECE_SKINS: PIECE_SKINS,
+  PIECE_SKIN_IDS: PIECE_SKIN_IDS,
+  PIECE_SKINS_PER_PAGE: PIECE_SKINS_PER_PAGE,
+  getPieceSkinCatalog: getPieceSkinCatalog,
+  getPieceSkinCatalogLabel: getPieceSkinCatalogLabel,
+  isTuanMoeUnlocked: isTuanMoeUnlocked,
+  setTuanMoeUnlockedFromServer: setTuanMoeUnlockedFromServer,
   getTheme: getTheme,
   loadSavedThemeId: loadSavedThemeId,
-  saveThemeId: saveThemeId
+  saveThemeId: saveThemeId,
+  applyPieceSkin: applyPieceSkin,
+  getPieceSkin: getPieceSkin,
+  loadSavedPieceSkinId: loadSavedPieceSkinId,
+  savePieceSkinId: savePieceSkinId
 };
+
+Object.defineProperty(themesExports, 'PIECE_SKIN_CATALOG', {
+  get: function () {
+    return getPieceSkinCatalog();
+  },
+  enumerable: true
+});
+
+module.exports = themesExports;

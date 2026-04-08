@@ -52,6 +52,17 @@ function getImageForGender(g) {
   return g === 'girl' ? imgGirl : imgBoy;
 }
 
+/** 本地默认图未就绪时，文字占位与「当前绘制的头像图」一致（本人/对手） */
+function genderForAvatarImage(img) {
+  if (img === imgGirl) {
+    return 'girl';
+  }
+  if (img === imgBoy) {
+    return 'boy';
+  }
+  return getGender();
+}
+
 function getMyAvatarImage() {
   return getImageForGender(getGender());
 }
@@ -72,15 +83,21 @@ function drawCircleAvatar(ctx, img, cx, cy, r, th) {
     var sw = Math.min(img.width, img.height);
     var sx = (img.width - sw) / 2;
     var sy = (img.height - sw) / 2;
+    var dx = Math.round(cx - r);
+    var dy = Math.round(cy - r);
+    var dw = Math.round(r * 2);
+    var rcx = dx + dw * 0.5;
+    var rcy = dy + dw * 0.5;
+    var rr = dw * 0.5;
     ctx.save();
     ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.arc(rcx, rcy, rr, 0, Math.PI * 2);
     ctx.clip();
-    ctx.drawImage(img, sx, sy, sw, sw, cx - r, cy - r, r * 2, r * 2);
+    ctx.drawImage(img, sx, sy, sw, sw, dx, dy, dw, dw);
     ctx.restore();
     ctx.save();
     ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.arc(rcx, rcy, rr, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(255,255,255,0.92)';
     ctx.lineWidth = 1.5;
     ctx.stroke();
@@ -95,7 +112,11 @@ function drawCircleAvatar(ctx, img, cx, cy, r, th) {
     ctx.font = 'bold 12px "PingFang SC",sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(getGender() === 'girl' ? '女' : '男', cx, cy);
+    ctx.fillText(
+      genderForAvatarImage(img) === 'girl' ? '女' : '男',
+      Math.round(cx),
+      Math.round(cy)
+    );
     ctx.restore();
   }
 }
