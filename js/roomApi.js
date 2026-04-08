@@ -178,6 +178,20 @@ function roomOpponentRatingOptions(roomId) {
   };
 }
 
+/** GET /api/users/rating?userId=：按用户 id 查询公开天梯（需登录；战绩页点头像） */
+function userRatingByUserIdOptions(userId) {
+  var id =
+    userId !== undefined && userId !== null ? Number(userId) : 0;
+  return {
+    url:
+      GOMOKU_API_BASE +
+      '/api/users/rating?userId=' +
+      encodeURIComponent(String(id)),
+    method: 'GET',
+    header: withAuthHeaders({})
+  };
+}
+
 /**
  * POST /api/games/settle：联机对局结束上报，服务端更新天梯（须 Authorization）
  * body: { roomId, matchRound, outcome: BLACK_WIN|WHITE_WIN|DRAW, totalSteps }
@@ -234,6 +248,7 @@ module.exports = {
   meCheckinOptions: meCheckinOptions,
   mePieceSkinRedeemOptions: mePieceSkinRedeemOptions,
   roomOpponentRatingOptions: roomOpponentRatingOptions,
+  userRatingByUserIdOptions: userRatingByUserIdOptions,
   gameSettleOptions: gameSettleOptions,
   gameReplayByRoomOptions: gameReplayByRoomOptions,
   gameReplayByIdOptions: gameReplayByIdOptions,
