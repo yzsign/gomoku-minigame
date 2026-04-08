@@ -7,6 +7,7 @@
  */
 
 var roomApi = require('./roomApi.js');
+var defaultAvatars = require('./defaultAvatars.js');
 
 var SESSION_TOKEN_KEY = 'gomoku_session_token';
 
@@ -92,6 +93,12 @@ function silentLogin(optionalProfile, onDone) {
         if (optionalProfile.avatarUrl) {
           data.avatarUrl = optionalProfile.avatarUrl;
         }
+        if (typeof optionalProfile.gender === 'number') {
+          data.gender = optionalProfile.gender;
+        }
+      }
+      if (typeof data.gender !== 'number') {
+        data.gender = defaultAvatars.getWeChatGenderForApi();
       }
       wx.request({
         url: roomApi.GOMOKU_API_BASE + '/api/auth/silent-login',

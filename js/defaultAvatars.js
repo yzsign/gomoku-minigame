@@ -1,6 +1,6 @@
 /**
  * 本地默认头像：images/default/girl.png（女）、images/default/boy.png（男）
- * 性别来自微信 userInfo.gender（授权后）：0 未知 → boy，1 男 → boy，2 女 → girl
+ * 展示用性别优先使用服务端 users.gender（经 GET /api/me/rating 等写入）；未同步时用本地微信授权缓存。
  */
 
 var PATH_GIRL = 'images/default/girl.png';
@@ -9,6 +9,11 @@ var STORAGE_KEY = 'gomoku_user_gender';
 
 var imgGirl = null;
 var imgBoy = null;
+
+/** 本人：GET /api/me/rating 的 gender（微信 0/1/2）；null 表示尚未从库同步 */
+var serverMyWeChatGender = null;
+/** 联机对手：GET .../opponent-rating；离开房间应清空 */
+var serverOppWeChatGender = null;
 
 function getGender() {
   try {
@@ -48,6 +53,35 @@ function setGenderFromUserInfo(userInfo) {
   }
 }
 
+function setMyGenderFromServer(g) {
+  if (typeof g === 'number' && g >= 0 && g <= 2) {
+    serverMyWeChatGender = g;
+    return;
+  }
+  serverMyWeChatGender = null;
+}
+
+function setOpponentGenderFromServer(g) {
+  if (typeof g === 'number' && g >= 0 && g <= 2) {
+    serverOppWeChatGender = g;
+    return;
+  }
+  serverOppWeChatGender = null;
+}
+
+/** 本人默认头像用：库优先，否则本地 boy/girl */
+function effectiveWeChatGender() {
+  if (typeof serverMyWeChatGender === 'number') {
+    return serverMyWeChatGender;
+  }
+  return getGender() === 'girl' ? 2 : 1;
+}
+
+/** 静默登录 body.gender 上报 */
+function getWeChatGenderForApi() {
+  return effectiveWeChatGender();
+}
+
 function getImageForGender(g) {
   return g === 'girl' ? imgGirl : imgBoy;
 }
@@ -60,16 +94,36 @@ function genderForAvatarImage(img) {
   if (img === imgBoy) {
     return 'boy';
   }
-  return getGender();
+  return effectiveWeChatGender() === 2 ? 'girl' : 'boy';
 }
 
 function getMyAvatarImage() {
-  return getImageForGender(getGender());
+  return getImageForWeChatGender(effectiveWeChatGender());
 }
 
-/** 棋盘旁对手占位：与「我」性别相反，便于区分 */
+/**
+ * 微信 userInfo.gender：0 未知、1 男、2 女；未知按男。
+ */
+function getImageForWeChatGender(weChatGender) {
+  if (weChatGender === 2) {
+    return getImageForGender('girl');
+  }
+  return getImageForGender('boy');
+}
+
+/** 棋盘旁对手占位：与本人展示性别相反（本人性别来自库优先） */
 function getOpponentAvatarImage() {
-  return getImageForGender(getGender() === 'girl' ? 'boy' : 'girl');
+  var eg = effectiveWeChatGender();
+  var oppCode = eg === 2 ? 1 : 2;
+  return getImageForWeChatGender(oppCode);
+}
+
+/** 联机对手：有服务端 gender 时用其，否则同 getOpponentAvatarImage */
+function getOnlineOpponentDefaultAvatarImage() {
+  if (typeof serverOppWeChatGender === 'number') {
+    return getImageForWeChatGender(serverOppWeChatGender);
+  }
+  return getOpponentAvatarImage();
 }
 
 /**
@@ -150,8 +204,13 @@ module.exports = {
   PATH_BOY: PATH_BOY,
   getGender: getGender,
   setGenderFromUserInfo: setGenderFromUserInfo,
+  setMyGenderFromServer: setMyGenderFromServer,
+  setOpponentGenderFromServer: setOpponentGenderFromServer,
+  getWeChatGenderForApi: getWeChatGenderForApi,
   getMyAvatarImage: getMyAvatarImage,
+  getImageForWeChatGender: getImageForWeChatGender,
   getOpponentAvatarImage: getOpponentAvatarImage,
+  getOnlineOpponentDefaultAvatarImage: getOnlineOpponentDefaultAvatarImage,
   drawCircleAvatar: drawCircleAvatar,
   preloadAll: preloadAll,
 };

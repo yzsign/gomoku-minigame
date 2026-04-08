@@ -145,7 +145,7 @@ function computeBoardNameLabelLayout(layout) {
     onlineOppAvatarImg.width &&
     onlineOppAvatarImg.height
       ? onlineOppAvatarImg
-      : defaultAvatars.getOpponentAvatarImage();
+      : defaultAvatars.getOnlineOpponentDefaultAvatarImage();
   var hasMyAv = myImg && myImg.width && myImg.height;
   var hasOppAv = oppImg && oppImg.width && oppImg.height;
   var myNameExtra = hasMyAv ? avR * 2 + 6 : 0;
@@ -194,7 +194,7 @@ function drawBoardNameLabels(ctx, layout, th) {
     myName,
     Math.max(40, L.maxW - (L.hasMyAv ? L.avR * 2 + 6 : 0))
   );
-  /** 对手：棋盘右上角外侧；右侧为与「我」性别相反的默认头像 */
+  /** 对手：棋盘右上角外侧；无网络图时用服务端性别或「与本人相反」默认 */
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
   ctx.fillText(oppName, snapPx(L.oppNameRightX), snapPx(L.oppCy));
@@ -208,7 +208,7 @@ function drawBoardNameLabels(ctx, layout, th) {
       th
     );
   }
-  /** 我：棋盘左下角外侧；左侧为默认头像（女/男） */
+  /** 我：棋盘左下角外侧；无网络图时用服务端 users.gender 对应默认 */
   if (L.hasMyAv) {
     defaultAvatars.drawCircleAvatar(
       ctx,
@@ -416,6 +416,14 @@ var historyPeakEloCached = 0;
 /** GET /api/me/game-history 返回的 items；与本地人机记录合并展示 */
 var historyServerItems = [];
 
+function historyListRowHeightRpx() {
+  return rpx(112);
+}
+
+function historyListRowGapRpx() {
+  return rpx(16);
+}
+
 function loadPeakEloFromStorage() {
   try {
     if (typeof wx === 'undefined' || !wx.getStorageSync) {
@@ -486,13 +494,18 @@ function appendMatchHistoryRecord(entry) {
 
 function formatHistoryDateTime(ts) {
   var d = new Date(ts);
+  var y = d.getFullYear();
   var mo = d.getMonth() + 1;
   var day = d.getDate();
   var hh = d.getHours();
   var mm = d.getMinutes();
   return (
+    y +
+    '-' +
+    (mo < 10 ? '0' : '') +
     mo +
-    '/' +
+    '-' +
+    (day < 10 ? '0' : '') +
     day +
     ' ' +
     (hh < 10 ? '0' : '') +
@@ -511,14 +524,97 @@ function mapServerHistoryItem(it) {
   } else if (mr === 'LOSS') {
     res = 'lose';
   }
+  var av = '';
+  if (typeof it.opponentAvatarUrl === 'string' && it.opponentAvatarUrl.trim()) {
+    av = it.opponentAvatarUrl.trim();
+  }
+  var og = null;
+  if (typeof it.opponentGender === 'number') {
+    og = it.opponentGender;
+  }
   return {
     t: typeof it.endedAt === 'number' ? it.endedAt : 0,
     res: res,
     opp: String(it.opponentNickname != null ? it.opponentNickname : '对手'),
     steps: typeof it.totalSteps === 'number' ? it.totalSteps : 0,
     mode: 'server',
-    gameId: it.gameId
+    gameId: it.gameId,
+    opponentBot: !!it.opponentBot,
+    oppAvatarUrl: av,
+    oppGender: og
   };
+}
+
+/** 历史列表对手网络头像缓存：url → Image | false（失败）| 'loading' */
+var historyOppAvatarImgCache = {};
+
+function getOrLoadHistoryOpponentAvatar(url) {
+  if (!url || typeof wx === 'undefined' || !wx.createImage) {
+    return null;
+  }
+  var cached = historyOppAvatarImgCache[url];
+  if (cached && cached.width && cached.height) {
+    return cached;
+  }
+  if (cached === false) {
+    return null;
+  }
+  if (cached === 'loading') {
+    return null;
+  }
+  historyOppAvatarImgCache[url] = 'loading';
+  var img = wx.createImage();
+  img.onload = function () {
+    historyOppAvatarImgCache[url] = img;
+    if (screen === 'history') {
+      try {
+        draw();
+      } catch (e) {}
+    }
+  };
+  img.onerror = function () {
+    historyOppAvatarImgCache[url] = false;
+    if (screen === 'history') {
+      try {
+        draw();
+      } catch (e) {}
+    }
+  };
+  var src = url.indexOf('local:') === 0 ? url.slice('local:'.length) : url;
+  img.src = src;
+  return null;
+}
+
+/**
+ * 历史行头像：仅在网络图已成功解码时使用；无 URL、人机、PVE、加载中或失败时用默认头像。
+ * 服务端联机：有 opponentGender（微信 0/1/2）时用其选默认图（含人机库内随机性别），未知按男；无该字段时回退本人默认。
+ */
+function resolveHistoryRowAvatarImage(rec) {
+  function defaultForRow() {
+    if (rec && rec.mode === 'server' && typeof rec.oppGender === 'number') {
+      return defaultAvatars.getImageForWeChatGender(rec.oppGender);
+    }
+    return defaultAvatars.getMyAvatarImage();
+  }
+  if (!rec) {
+    return defaultAvatars.getMyAvatarImage();
+  }
+  var def = defaultForRow();
+  if (rec.mode === 'pve') {
+    return def;
+  }
+  if (rec.mode !== 'server') {
+    return def;
+  }
+  var url = rec.oppAvatarUrl;
+  if (!url || typeof url !== 'string' || !url.trim()) {
+    return def;
+  }
+  var net = getOrLoadHistoryOpponentAvatar(url.trim());
+  if (net && net.width && net.height) {
+    return net;
+  }
+  return def;
 }
 
 /**
@@ -955,6 +1051,14 @@ function clearOnlineOpponentProfile() {
   onlineOppProfileRoomId = '';
   onlineOppProfileFetched = false;
   onlineOppFetchInFlight = false;
+  defaultAvatars.setOpponentGenderFromServer(null);
+}
+
+/** GET /api/me/rating 等返回的 gender 同步到默认头像逻辑（users.gender） */
+function applyMyGenderFromRatingPayload(d) {
+  if (d && typeof d.gender === 'number' && d.gender >= 0 && d.gender <= 2) {
+    defaultAvatars.setMyGenderFromServer(d.gender);
+  }
 }
 
 function loadMyNetworkAvatar(url) {
@@ -1001,6 +1105,11 @@ function applyOnlineOpponentProfilePayload(d) {
     onlineOppNickname = d.nickname.trim();
   } else {
     onlineOppNickname = '';
+  }
+  if (typeof d.gender === 'number' && d.gender >= 0 && d.gender <= 2) {
+    defaultAvatars.setOpponentGenderFromServer(d.gender);
+  } else {
+    defaultAvatars.setOpponentGenderFromServer(null);
   }
   if (typeof d.avatarUrl === 'string' && d.avatarUrl.trim()) {
     loadOnlineOpponentAvatar(d.avatarUrl.trim());
@@ -1077,6 +1186,7 @@ function tryFetchMyProfileAvatar() {
           homeRatingEloCache = d.eloScore;
         }
         syncCheckinStateFromServerPayload(d);
+        applyMyGenderFromRatingPayload(d);
         if (d && typeof d.avatarUrl === 'string' && d.avatarUrl.trim()) {
           loadMyNetworkAvatar(d.avatarUrl.trim());
         }
@@ -3099,6 +3209,7 @@ function syncMeRatingIfAuthed(onDone) {
           }
           if (d) {
             syncCheckinStateFromServerPayload(d);
+            applyMyGenderFromRatingPayload(d);
             if (typeof d.eloScore === 'number' && !isNaN(d.eloScore)) {
               homeRatingEloCache = d.eloScore;
             }
@@ -3905,6 +4016,7 @@ function showMyRatingModal() {
           return;
         }
         syncCheckinStateFromServerPayload(d);
+        applyMyGenderFromRatingPayload(d);
         if (typeof d.avatarUrl === 'string' && d.avatarUrl.trim()) {
           loadMyNetworkAvatar(d.avatarUrl.trim());
         }
@@ -5236,11 +5348,11 @@ function getHistoryPageLayout() {
   var backCx = rpx(44);
   var titleCy = backCy;
   var statsTop = titleCy + rpx(42);
-  var statsH = rpx(108);
+  var statsH = rpx(124);
   var statsW = W - padX * 2;
   var statsX = padX;
-  var tabY = statsTop + statsH + rpx(18);
-  var tabH = rpx(56);
+  var tabY = statsTop + statsH + rpx(20);
+  var tabH = rpx(58);
   var tabW = W - padX * 2;
   var listTop = tabY + tabH + rpx(18);
   var safeBottom =
@@ -5275,22 +5387,13 @@ function hitHistoryInteract(clientX, clientY) {
   ) {
     return 'back';
   }
-  var chevLeft = L.tabX + L.tabW - rpx(44);
   if (
-    clientX >= chevLeft &&
+    clientX >= L.tabX &&
     clientX <= L.tabX + L.tabW &&
     clientY >= L.tabY &&
     clientY <= L.tabY + L.tabH
   ) {
-    return 'chevron';
-  }
-  if (
-    clientX >= L.tabX &&
-    clientX < chevLeft &&
-    clientY >= L.tabY &&
-    clientY <= L.tabY + L.tabH
-  ) {
-    var rel = (clientX - L.tabX) / (chevLeft - L.tabX);
+    var rel = (clientX - L.tabX) / L.tabW;
     var ti = Math.floor(rel * 3);
     if (ti < 0) {
       ti = 0;
@@ -5351,6 +5454,7 @@ function openHistoryScreen() {
             }
             if (d) {
               syncCheckinStateFromServerPayload(d);
+              applyMyGenderFromRatingPayload(d);
               var elo = typeof d.eloScore === 'number' ? d.eloScore : 0;
               savePeakEloIfHigher(elo);
               var total = typeof d.totalGames === 'number' ? d.totalGames : 0;
@@ -5360,11 +5464,11 @@ function openHistoryScreen() {
                   ? '—'
                   : String(Math.round((win * 1000) / total) / 10) + '%';
               var peakE = historyPeakEloCached > 0 ? historyPeakEloCached : elo;
-              var peakShort = ratingTitle.getHomeBadgeShortLabel(peakE);
+              var peakRt = ratingTitle.getRankAndTitleByElo(peakE);
               historyStatsSnapshot = {
                 totalGames: total,
                 winPct: winPct,
-                peakRankShort: peakShort
+                peakRankLabel: peakRt.rankLabel
               };
             }
           }
@@ -5412,14 +5516,16 @@ function drawHistory() {
   var cardFill0 = '#FFF9F0';
   var cardFill1 = '#FFF3E4';
   var accentBrown = th.homeFriend != null ? th.homeFriend : '#7B5E3F';
-  var tabBg = 'rgba(255, 252, 246, 0.95)';
+  var tabBg = 'rgba(255, 252, 246, 0.97)';
   var ink = th.title;
   var sub = th.subtitle;
   var muted = th.muted;
+  var winGold = '#A67C3D';
+  var loseRose = '#B06060';
 
   ctx.save();
   ctx.fillStyle = parchment;
-  ctx.globalAlpha = 0.45;
+  ctx.globalAlpha = 0.32;
   ctx.fillRect(0, 0, W, H);
   ctx.globalAlpha = 1;
   ctx.restore();
@@ -5485,26 +5591,45 @@ function drawHistory() {
   if (historyStatsSnapshot) {
     totalStr = String(historyStatsSnapshot.totalGames);
     winStr = historyStatsSnapshot.winPct;
-    peakStr = historyStatsSnapshot.peakRankShort;
+    peakStr = historyStatsSnapshot.peakRankLabel;
   }
   var col1 = sx + sw / 6;
   var col2 = sx + sw / 2;
   var col3 = sx + (5 * sw) / 6;
-  var statMidY = sy + sh * 0.5;
+  var labY = sy + sh * 0.34;
+  var valY = sy + sh * 0.66;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font =
+    rpx(22) +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  ctx.fillStyle = muted;
+  ctx.fillText('总场次', snapPx(col1), snapPx(labY));
+  ctx.fillText('胜率', snapPx(col2), snapPx(labY));
+  ctx.fillText('最高段位', snapPx(col3), snapPx(labY));
+  ctx.font =
     '600 ' +
-    rpx(26) +
+    rpx(30) +
     'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
   ctx.fillStyle = ink;
-  ctx.fillText('总场次：' + totalStr, snapPx(col1), snapPx(statMidY));
-  ctx.fillText('胜率：' + winStr, snapPx(col2), snapPx(statMidY));
-  ctx.fillText('最高阶位：' + peakStr, snapPx(col3), snapPx(statMidY));
+  ctx.fillText(totalStr, snapPx(col1), snapPx(valY));
+  ctx.fillText(winStr, snapPx(col2), snapPx(valY));
+  var peakFs = rpx(30);
+  var peakMaxW = sw / 3 - rpx(20);
+  var peakFace =
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  while (peakFs >= rpx(20)) {
+    ctx.font = '600 ' + peakFs + peakFace;
+    if (ctx.measureText(peakStr).width <= peakMaxW) {
+      break;
+    }
+    peakFs -= 1;
+  }
+  ctx.fillText(peakStr, snapPx(col3), snapPx(valY));
 
-  var divTop = sy + sh * 0.22;
-  var divBot = sy + sh * 0.78;
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.08)';
+  var divTop = sy + sh * 0.2;
+  var divBot = sy + sh * 0.8;
+  ctx.strokeStyle = 'rgba(92, 75, 58, 0.12)';
   ctx.lineWidth = 1;
   var dx;
   for (dx = 1; dx <= 2; dx++) {
@@ -5520,60 +5645,72 @@ function drawHistory() {
   var tw = L.tabW;
   var thh = L.tabH;
   var tr = thh / 2;
-  var chevW = rpx(44);
-  var tabAreaW = tw - chevW;
+  var tabAreaW = tw;
   ctx.save();
   ctx.fillStyle = tabBg;
   roundRect(tx, ty, tw, thh, tr);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(92, 75, 58, 0.12)';
+  ctx.strokeStyle = 'rgba(92, 75, 58, 0.1)';
   ctx.lineWidth = 1;
   roundRect(tx + 0.5, ty + 0.5, tw - 1, thh - 1, tr - 0.5);
   ctx.stroke();
+  ctx.save();
+  roundRect(tx, ty, tw, thh, tr);
+  ctx.clip();
+  var tabSheen = ctx.createLinearGradient(tx, ty, tx, ty + thh * 0.55);
+  tabSheen.addColorStop(0, 'rgba(255, 255, 255, 0.45)');
+  tabSheen.addColorStop(0.5, 'rgba(255, 255, 255, 0.08)');
+  tabSheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = tabSheen;
+  ctx.fillRect(tx, ty, tw, thh);
+  ctx.restore();
 
   var labels = ['全部', '胜利', '失败'];
+  var slotW = tabAreaW / 3;
+  var phPad = rpx(5);
+  var pvPad = rpx(6);
   var ti;
   for (ti = 0; ti < 3; ti++) {
-    var tcx = tx + (ti + 0.5) * (tabAreaW / 3);
+    var tcx = tx + (ti + 0.5) * slotW;
+    var slotL = tx + ti * slotW;
     var active = historyFilterTab === ti;
+    if (active) {
+      var pillX = slotL + phPad;
+      var pillY = ty + pvPad;
+      var pillW = slotW - phPad * 2;
+      var pillH = thh - pvPad * 2;
+      var pr = pillH / 2;
+      ctx.save();
+      ctx.fillStyle = accentBrown;
+      ctx.globalAlpha = 0.22;
+      roundRect(pillX, pillY, pillW, pillH, pr);
+      ctx.fill();
+      ctx.globalAlpha = 0.45;
+      ctx.strokeStyle = accentBrown;
+      ctx.lineWidth = Math.max(1, rpx(1.5));
+      roundRect(pillX + 0.5, pillY + 0.5, pillW - 1, pillH - 1, pr - 0.5);
+      ctx.stroke();
+      ctx.restore();
+    }
     ctx.font =
       '600 ' +
       rpx(28) +
       'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
     ctx.fillStyle = active ? accentBrown : sub;
+    ctx.globalAlpha = active ? 1 : 0.78;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(labels[ti], snapPx(tcx), snapPx(ty + thh * 0.48));
-    if (active) {
-      var ux0 = tcx - tabAreaW / 6 + rpx(8);
-      var ux1 = tcx + tabAreaW / 6 - rpx(8);
-      ctx.strokeStyle = accentBrown;
-      ctx.lineWidth = rpx(4);
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(snapPx(ux0), snapPx(ty + thh - rpx(14)));
-      ctx.lineTo(snapPx(ux1), snapPx(ty + thh - rpx(14)));
-      ctx.stroke();
-    }
+    ctx.fillText(labels[ti], snapPx(tcx), snapPx(ty + thh * 0.5));
+    ctx.globalAlpha = 1;
   }
 
-  var chevCx = tx + tw - chevW / 2;
-  var chevCy = ty + thh / 2;
-  ctx.strokeStyle = muted;
-  ctx.lineWidth = Math.max(1.2, rpx(2.2));
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.beginPath();
-  ctx.moveTo(chevCx - rpx(5), chevCy - rpx(10));
-  ctx.lineTo(chevCx + rpx(5), chevCy);
-  ctx.lineTo(chevCx - rpx(5), chevCy + rpx(10));
-  ctx.stroke();
   ctx.restore();
 
   var rows = getFilteredMatchHistory();
-  var rowH = rpx(100);
-  var rowGap = rpx(14);
-  var innerPad = rpx(22);
+  var rowH = historyListRowHeightRpx();
+  var rowGap = historyListRowGapRpx();
+  var innerPad = rpx(24);
+  var cardR = rpx(18);
   var contentH =
     rows.length === 0
       ? rpx(120)
@@ -5625,67 +5762,103 @@ function drawHistory() {
       var rx = L.padX;
       var rw = W - L.padX * 2;
       ctx.save();
-      ctx.shadowColor = 'rgba(60, 48, 38, 0.08)';
-      ctx.shadowBlur = rpx(12);
-      ctx.shadowOffsetY = rpx(4);
-      ctx.fillStyle = 'rgba(255, 250, 242, 0.96)';
-      roundRect(rx, ry, rw, rowH, rpx(16));
+      ctx.shadowColor = 'rgba(60, 48, 38, 0.1)';
+      ctx.shadowBlur = rpx(14);
+      ctx.shadowOffsetY = rpx(5);
+      var cardFill = ctx.createLinearGradient(rx, ry, rx, ry + rowH);
+      cardFill.addColorStop(0, 'rgba(255, 252, 248, 0.99)');
+      cardFill.addColorStop(1, 'rgba(255, 248, 238, 0.98)');
+      ctx.fillStyle = cardFill;
+      roundRect(rx, ry, rw, rowH, cardR);
       ctx.fill();
       ctx.shadowBlur = 0;
-      ctx.strokeStyle = 'rgba(92, 75, 58, 0.1)';
+      ctx.strokeStyle = 'rgba(92, 75, 58, 0.09)';
       ctx.lineWidth = 1;
-      roundRect(rx + 0.5, ry + 0.5, rw - 1, rowH - 1, rpx(15.5));
+      roundRect(rx + 0.5, ry + 0.5, rw - 1, rowH - 1, cardR - 0.5);
       ctx.stroke();
+      ctx.save();
+      roundRect(rx, ry, rw, rowH, cardR);
+      ctx.clip();
+      var rowSheen = ctx.createLinearGradient(rx, ry, rx, ry + rowH * 0.55);
+      rowSheen.addColorStop(0, 'rgba(255, 255, 255, 0.35)');
+      rowSheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = rowSheen;
+      ctx.fillRect(rx, ry, rw, rowH * 0.5);
+      ctx.restore();
 
       var timeStr = formatHistoryDateTime(rec.t);
-      ctx.textAlign = 'left';
+      var line1Y = ry + rowH * 0.5;
+      var innerW = rw - innerPad * 2;
+      /** 左约 28% / 中约 44% / 右约 28%，时间在中间列水平居中 */
+      var midColCenterX = rx + innerPad + innerW * 0.5;
+      var avR = rpx(24);
+      var avCx = rx + innerPad + avR;
+      var avCy = line1Y;
+      defaultAvatars.drawCircleAvatar(
+        ctx,
+        resolveHistoryRowAvatarImage(rec),
+        avCx,
+        avCy,
+        avR,
+        th
+      );
+
+      var nickLeftX = rx + innerPad + avR * 2 + rpx(10);
+      var nickMaxW = Math.max(
+        rpx(56),
+        midColCenterX - nickLeftX - rpx(10)
+      );
       ctx.textBaseline = 'middle';
       ctx.font =
-        rpx(22) +
-        'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
-      ctx.fillStyle = muted;
-      ctx.fillText(timeStr, snapPx(rx + innerPad), snapPx(ry + rpx(28)));
-
-      ctx.font =
         '600 ' +
-        rpx(28) +
+        rpx(29) +
         'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = ink;
       var oppStr = truncateNameToWidth(
         ctx,
         String(rec.opp || '对手'),
-        rw - innerPad * 2 - rpx(100)
+        nickMaxW
       );
-      var resStr =
+      ctx.fillText(oppStr, snapPx(nickLeftX), snapPx(line1Y));
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = muted;
+      var twMax = innerW * 0.42;
+      var timeDraw = timeStr;
+      ctx.font =
+        rpx(20) +
+        'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+      if (ctx.measureText(timeDraw).width > twMax) {
+        ctx.font =
+          rpx(18) +
+          'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+      }
+      if (ctx.measureText(timeDraw).width > twMax) {
+        timeDraw = truncateNameToWidth(ctx, timeStr, twMax);
+      }
+      ctx.fillText(timeDraw, snapPx(midColCenterX), snapPx(line1Y));
+
+      var resBase =
         rec.res === 'win' ? '胜利' : rec.res === 'lose' ? '失败' : '和棋';
+      var resStr =
+        typeof rec.steps === 'number'
+          ? resBase + '（' + String(rec.steps) + '手）'
+          : resBase;
       var resCol =
-        rec.res === 'win'
-          ? accentBrown
-          : rec.res === 'lose'
-          ? '#9B4B4B'
-          : sub;
-
-      ctx.fillStyle = ink;
-      ctx.fillText(oppStr, snapPx(rx + innerPad), snapPx(ry + rpx(62)));
-
+        rec.res === 'win' ? winGold : rec.res === 'lose' ? loseRose : sub;
       ctx.textAlign = 'right';
       ctx.font =
         '600 ' +
-        rpx(26) +
+        rpx(27) +
         'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
       ctx.fillStyle = resCol;
-      ctx.fillText(resStr, snapPx(rx + rw - innerPad), snapPx(ry + rpx(36)));
-
-      var stepStr =
-        typeof rec.steps === 'number' ? String(rec.steps) + ' 手' : '';
-      if (stepStr) {
-        ctx.fillStyle = muted;
-        ctx.font = rpx(22) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
-        ctx.fillText(
-          stepStr,
-          snapPx(rx + rw - innerPad),
-          snapPx(ry + rpx(68))
-        );
+      var resDraw = resStr;
+      var resMaxW = innerW * 0.3;
+      if (ctx.measureText(resDraw).width > resMaxW) {
+        resDraw = truncateNameToWidth(ctx, resStr, resMaxW);
       }
+      ctx.fillText(resDraw, snapPx(rx + rw - innerPad), snapPx(line1Y));
       ctx.restore();
     }
   }
@@ -7231,12 +7404,6 @@ wx.onTouchStart(function (e) {
       }
       return;
     }
-    if (hi === 'chevron') {
-      if (typeof wx.showToast === 'function') {
-        wx.showToast({ title: '更多筛选 敬请期待', icon: 'none' });
-      }
-      return;
-    }
     if (e.touches && e.touches[0] && hitHistoryListZone(x, y)) {
       historyScrollTouchId = e.touches[0].identifier;
       historyScrollLastY = y;
@@ -7713,8 +7880,8 @@ if (typeof wx.onTouchMove === 'function') {
     historyScrollY -= dy;
     var Lh = getHistoryPageLayout();
     var rows = getFilteredMatchHistory();
-    var rowH = rpx(100);
-    var rowGap = rpx(14);
+    var rowH = historyListRowHeightRpx();
+    var rowGap = historyListRowGapRpx();
     var contentH =
       rows.length === 0
         ? rpx(120)
@@ -7837,6 +8004,7 @@ if (typeof wx.onTouchEnd === 'function') {
                     return;
                   }
                   syncCheckinStateFromServerPayload(d);
+                  applyMyGenderFromRatingPayload(d);
                   var calNow = new Date();
                   var calY = calNow.getFullYear();
                   var calM = calNow.getMonth() + 1;
