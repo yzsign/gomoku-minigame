@@ -576,7 +576,97 @@ app.getHistoryListScrollMetrics = function() {
   };
 }
 
+/**
+ * 战绩列表右侧滚动条（不进入列表 clip）。
+ * 仿微信：仅圆角滑块、无轨道；拖动/惯性或静止后短时显示，静止约 HISTORY_SCROLLBAR_HOLD_MS 后消失。
+ * 滑块位置对 historyScrollY 做插值，惯性时更丝滑。
+ */
+app.drawHistoryListScrollbar = function(L, maxScroll, contentH) {
+  if (maxScroll <= 0 || contentH <= 0) {
+    return;
+  }
+  var trackPadT = app.rpx(8);
+  var trackPadB = app.rpx(8);
+  var trackTop = L.listTop + trackPadT;
+  var trackH = L.listH - trackPadT - trackPadB;
+  if (trackH < app.rpx(48)) {
+    return;
+  }
+  /** 宽度接近微信侧条（偏细） */
+  var barW = app.rpx(5);
+  var rCap = barW / 2;
+  var inset = app.rpx(6);
+  var cx = app.W - L.padX - inset - rCap;
+
+  var viewRatio = L.listH / contentH;
+  if (viewRatio > 1) {
+    viewRatio = 1;
+  }
+  var thumbH = Math.max(app.rpx(40), trackH * viewRatio);
+  if (thumbH > trackH) {
+    thumbH = trackH;
+  }
+  var travel = Math.max(0, trackH - thumbH);
+  var targetP = maxScroll > 0 ? app.historyScrollY / maxScroll : 0;
+  if (targetP < 0) {
+    targetP = 0;
+  }
+  if (targetP > 1) {
+    targetP = 1;
+  }
+  var sm = app.historyScrollbarRatioSmooth;
+  if (sm == null || typeof sm !== 'number' || isNaN(sm)) {
+    sm = targetP;
+  } else {
+    var k =
+      app.historyScrollTouchId != null
+        ? 0.88
+        : 0.42;
+    sm += (targetP - sm) * k;
+    if (Math.abs(targetP - sm) < 0.0015) {
+      sm = targetP;
+    }
+  }
+  app.historyScrollbarRatioSmooth = sm;
+  var thumbTop = trackTop + sm * travel;
+
+  var ctx = app.ctx;
+  ctx.save();
+  ctx.globalAlpha = 1;
+  /** 仿微信：仅滑块、无轨道；浅灰半透明（略淡于系统默认黑条） */
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+  app.roundRect(cx - rCap, thumbTop, barW, thumbH, rCap);
+  ctx.fill();
+  ctx.restore();
+}
+
+app.clearHistoryScrollbarFadeTimer = function() {
+  if (app.historyScrollbarFadeTimerId != null) {
+    try {
+      clearTimeout(app.historyScrollbarFadeTimerId);
+    } catch (eSb) {}
+    app.historyScrollbarFadeTimerId = null;
+  }
+};
+
+/** 列表已静止：约 HISTORY_SCROLLBAR_HOLD_MS 后再 draw，用于去掉滚动条 */
+app.scheduleHistoryScrollbarFadeRedraw = function() {
+  app.clearHistoryScrollbarFadeTimer();
+  if (typeof setTimeout === 'undefined') {
+    return;
+  }
+  var hold =
+    app.HISTORY_SCROLLBAR_HOLD_MS != null ? app.HISTORY_SCROLLBAR_HOLD_MS : 1000;
+  app.historyScrollbarFadeTimerId = setTimeout(function() {
+    app.historyScrollbarFadeTimerId = null;
+    if (app.screen === 'history') {
+      app.draw();
+    }
+  }, hold);
+};
+
 app.stopHistoryMomentum = function() {
+  app.clearHistoryScrollbarFadeTimer();
   if (app.historyMomentumRafId != null) {
     app.themeBubbleCaf(app.historyMomentumRafId);
     app.historyMomentumRafId = null;
@@ -587,7 +677,6 @@ app.stopHistoryMomentum = function() {
 
 /** 战绩列表惯性帧：指数减速，触边停住 */
 app.tickHistoryScrollMomentum = function() {
-  app.historyMomentumRafId = null;
   if (app.screen !== 'history' || app.historyListLoading) {
     app.stopHistoryMomentum();
     return;
@@ -607,10 +696,11 @@ app.tickHistoryScrollMomentum = function() {
   } else {
     app.historyScrollY = nextY;
   }
-  app.historyScrollVel *= Math.exp(-dt / 210);
+  app.historyScrollVel *= Math.exp(-dt / 240);
   app.draw();
-  if (Math.abs(app.historyScrollVel) < 0.018) {
+  if (Math.abs(app.historyScrollVel) < 0.014) {
     app.stopHistoryMomentum();
+    app.scheduleHistoryScrollbarFadeRedraw();
     return;
   }
   app.historyMomentumRafId = app.themeBubbleRaf(app.tickHistoryScrollMomentum);
@@ -672,7 +762,7 @@ app.hitHistoryRowOpponentAvatar = function(clientX, clientY) {
   var rowGap = app.historyListRowGapRpx();
   var innerPad = app.rpx(24);
   var avR = app.rpx(24);
-  var yBase = L.listTop - app.historyScrollY + app.rpx(8);
+  var yBase = L.listTop - app.historyScrollY;
   var ri;
   for (ri = 0; ri < rows.length; ri++) {
     var rec = rows[ri];
@@ -718,7 +808,7 @@ app.hitHistoryRowReplayIcon = function(clientX, clientY) {
   var innerPad = app.rpx(24);
   var rw = app.W - L.padX * 2;
   var rx = L.padX;
-  var yBase = L.listTop - app.historyScrollY + app.rpx(8);
+  var yBase = L.listTop - app.historyScrollY;
   var visR = app.rpx(20);
   var hitExtra = app.rpx(14);
   var hitR = visR + hitExtra;
@@ -874,6 +964,7 @@ app.openHistoryScreen = function() {
   app.historyReplayTouchRec = null;
   app.historyReplayTouchId = null;
   app.stopHistoryMomentum();
+  app.historyScrollbarLastScrollTs = 0;
   app.historyScrollY = 0;
   app.historyFilterTab = 0;
   app.loadMatchHistoryList();
@@ -1214,7 +1305,7 @@ app.drawHistory = function() {
   app.ctx.rect(L.padX, L.listTop, app.W - L.padX * 2, L.listH);
   app.ctx.clip();
 
-  var yBase = L.listTop - app.historyScrollY + app.rpx(8);
+  var yBase = L.listTop - app.historyScrollY;
   if (app.historyListLoading || app.historyTabLoading) {
     var lx = L.padX;
     var lw = app.W - L.padX * 2;
@@ -1278,28 +1369,37 @@ app.drawHistory = function() {
       var rx = L.padX;
       var rw = app.W - L.padX * 2;
       app.ctx.save();
-      app.ctx.shadowColor = 'rgba(60, 48, 38, 0.1)';
-      app.ctx.shadowBlur = app.rpx(14);
-      app.ctx.shadowOffsetY = app.rpx(5);
+      app.ctx.shadowColor = 'rgba(38, 28, 18, 0.2)';
+      app.ctx.shadowBlur = app.rpx(20);
+      app.ctx.shadowOffsetY = app.rpx(7);
+      app.ctx.shadowOffsetX = 0;
       var cardFill = app.ctx.createLinearGradient(rx, ry, rx, ry + rowH);
-      cardFill.addColorStop(0, 'rgba(255, 252, 248, 0.99)');
-      cardFill.addColorStop(1, 'rgba(255, 248, 238, 0.98)');
+      cardFill.addColorStop(0, 'rgba(255, 254, 251, 1)');
+      cardFill.addColorStop(0.48, 'rgba(255, 250, 242, 0.99)');
+      cardFill.addColorStop(1, 'rgba(238, 228, 214, 0.97)');
       app.ctx.fillStyle = cardFill;
       app.roundRect(rx, ry, rw, rowH, cardR);
       app.ctx.fill();
       app.ctx.shadowBlur = 0;
-      app.ctx.strokeStyle = 'rgba(92, 75, 58, 0.09)';
-      app.ctx.lineWidth = 1;
+      app.ctx.shadowOffsetY = 0;
+      app.ctx.strokeStyle = 'rgba(92, 75, 58, 0.13)';
+      app.ctx.lineWidth = Math.max(1, app.rpx(1));
       app.roundRect(rx + 0.5, ry + 0.5, rw - 1, rowH - 1, cardR - 0.5);
       app.ctx.stroke();
       app.ctx.save();
       app.roundRect(rx, ry, rw, rowH, cardR);
       app.ctx.clip();
-      var rowSheen = app.ctx.createLinearGradient(rx, ry, rx, ry + rowH * 0.55);
-      rowSheen.addColorStop(0, 'rgba(255, 255, 255, 0.35)');
+      var rowSheen = app.ctx.createLinearGradient(rx, ry, rx, ry + rowH * 0.52);
+      rowSheen.addColorStop(0, 'rgba(255, 255, 255, 0.42)');
+      rowSheen.addColorStop(0.45, 'rgba(255, 255, 255, 0.08)');
       rowSheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
       app.ctx.fillStyle = rowSheen;
-      app.ctx.fillRect(rx, ry, rw, rowH * 0.5);
+      app.ctx.fillRect(rx, ry, rw, rowH * 0.52);
+      var rowFoot = app.ctx.createLinearGradient(rx, ry + rowH * 0.4, rx, ry + rowH);
+      rowFoot.addColorStop(0, 'rgba(72, 56, 40, 0)');
+      rowFoot.addColorStop(1, 'rgba(72, 56, 40, 0.06)');
+      app.ctx.fillStyle = rowFoot;
+      app.ctx.fillRect(rx, ry, rw, rowH);
       app.ctx.restore();
 
       var timeStr = app.formatHistoryDateTime(rec.t);
@@ -1418,6 +1518,29 @@ app.drawHistory = function() {
     }
   }
   app.ctx.restore();
+
+  var listScrolling =
+    app.historyScrollTouchId != null || app.historyMomentumRafId != null;
+  if (listScrolling) {
+    app.historyScrollbarLastScrollTs = Date.now();
+    app.clearHistoryScrollbarFadeTimer();
+  }
+  var holdMs =
+    app.HISTORY_SCROLLBAR_HOLD_MS != null ? app.HISTORY_SCROLLBAR_HOLD_MS : 1000;
+  var fadeHold =
+    app.historyScrollbarLastScrollTs > 0 &&
+    Date.now() - app.historyScrollbarLastScrollTs < holdMs;
+  if (
+    !app.historyListLoading &&
+    !app.historyTabLoading &&
+    rows.length > 0 &&
+    maxScroll > 0 &&
+    (listScrolling || fadeHold)
+  ) {
+    app.drawHistoryListScrollbar(L, maxScroll, contentH);
+  } else {
+    app.historyScrollbarRatioSmooth = null;
+  }
 
   app.drawThemeChrome(th);
   app.drawRatingCardOverlay(th);
@@ -1614,9 +1737,9 @@ app.drawMacaronCard = function(
   }
 }
 
-/** 「风格」按钮：按 THEME_IDS 顺序循环切换 */
+/** 「风格」按钮：按已解锁主题顺序循环切换 */
 app.cycleThemeNext = function() {
-  var ids = themes.THEME_IDS;
+  var ids = themes.getThemeIdsForCycling();
   var i = ids.indexOf(app.themeId);
   if (i < 0) {
     i = 0;
@@ -1634,7 +1757,14 @@ app.syncPieceSkinModalSelectionFromCurrent = function() {
   var per = themes.PIECE_SKINS_PER_PAGE;
   var i;
   for (i = 0; i < cat.length; i++) {
-    if (cat[i].id === app.pieceSkinId) {
+    var e = cat[i];
+    if (e && e.kind === 'theme') {
+      if (e.id === app.themeId) {
+        app.pieceSkinModalPendingIdx = i;
+        app.pieceSkinModalPage = Math.floor(i / per);
+        return;
+      }
+    } else if (e && e.id === app.pieceSkinId) {
       app.pieceSkinModalPendingIdx = i;
       app.pieceSkinModalPage = Math.floor(i / per);
       return;
@@ -1648,6 +1778,7 @@ app.openPieceSkinModal = function() {
   if (app.pieceSkinModalVisible) {
     return;
   }
+  app.pieceSkinWearDblIdx = -1;
   app.stopPieceSkinModalAnim();
   app.syncPieceSkinModalSelectionFromCurrent();
   app.syncMeRatingIfAuthed(function () {
@@ -1662,6 +1793,7 @@ app.closePieceSkinModal = function() {
   if (!app.pieceSkinModalVisible) {
     return;
   }
+  app.pieceSkinWearDblIdx = -1;
   app.runPieceSkinModalCloseAnim();
 }
 
@@ -1757,9 +1889,9 @@ app.getPieceSkinModalLayout = function() {
   var cellGapX = app.rpx(24);
   var cellGapY = app.rpx(32);
   var gridBlockW = cellW * 2 + cellGapX;
-  var gridH = cellH * 2 + cellGapY;
-  /** 标题 + margin16 + 当前穿戴 + margin40 */
-  var headerBlock = app.rpx(128);
+  var gridH = cellH * 4 + cellGapY * 3;
+  /** 标题区 + 与网格间距 */
+  var headerBlock = app.rpx(88);
   var h = pad + headerBlock + gridH + pad;
   var cx = app.W / 2;
   var cy = app.H * 0.5;
@@ -1769,7 +1901,6 @@ app.getPieceSkinModalLayout = function() {
   var gridX0 = x0 + pad + (gridInnerW - gridBlockW) / 2;
   var gridY0 = y0 + pad + headerBlock;
   var titleCy = y0 + pad + app.rpx(24);
-  var currentCy = titleCy + app.rpx(50);
   var cat = themes.getPieceSkinCatalog();
   var pageCount = Math.max(
     1,
@@ -1786,7 +1917,6 @@ app.getPieceSkinModalLayout = function() {
     innerPad: pad,
     pad: pad,
     titleCy: titleCy,
-    currentCy: currentCy,
     gridX0: gridX0,
     gridY0: gridY0,
     cellW: cellW,
@@ -1840,7 +1970,7 @@ app.hitPieceSkinModalGridCatalogIndex = function(tx, ty) {
   var start = app.pieceSkinModalPage * per;
   var row;
   var col;
-  for (row = 0; row < 3; row++) {
+  for (row = 0; row < 4; row++) {
     for (col = 0; col < 2; col++) {
       var slot = row * 2 + col;
       var gx =
@@ -1886,7 +2016,7 @@ app.hitPieceSkinModalRedeemButton = function(tx, ty) {
   var start = app.pieceSkinModalPage * per;
   var row;
   var col;
-  for (row = 0; row < 3; row++) {
+  for (row = 0; row < 4; row++) {
     for (col = 0; col < 2; col++) {
       var slot = row * 2 + col;
       var gx = L.gridX0 + col * (L.cellW + L.cellGapX);
@@ -1916,14 +2046,6 @@ app.hitPieceSkinModalRedeemButton = function(tx, ty) {
     }
   }
   return -1;
-}
-
-app.getCurrentPieceSkinWearTitle = function() {
-  var meta = themes.PIECE_SKINS[app.pieceSkinId];
-  if (meta && meta.name) {
-    return meta.name;
-  }
-  return '随界面';
 }
 
 /** @returns {{ text: string, fill: string }} */
@@ -1994,10 +2116,14 @@ app.redeemPieceSkinWithPoints = function() {
         }
         if (res.statusCode === 200 && d) {
           app.mergePieceSkinRedeemResponseToCache(d);
-          app.pieceSkinId = entry.id;
-          themes.savePieceSkinId(entry.id);
-          app.syncPieceSkinSelectionToServerIfAuthed(entry.id);
-          app.closePieceSkinModal();
+          if (entry.kind === 'theme') {
+            app.themeId = entry.id;
+            themes.saveThemeId(entry.id);
+          } else {
+            app.pieceSkinId = entry.id;
+            themes.savePieceSkinId(entry.id);
+            app.syncPieceSkinSelectionToServerIfAuthed(entry.id);
+          }
           if (typeof wx.showToast === 'function') {
             wx.showToast({
               title: d.alreadyOwned ? '已拥有该皮肤' : '兑换成功',
@@ -2029,7 +2155,7 @@ app.redeemPieceSkinWithPoints = function() {
   );
 }
 
-/** 佩戴已拥有皮肤，或对未解锁项提示；积分兑换请用 redeemPieceSkinWithPoints（仅按钮） */
+/** 佩戴已拥有皮肤或棋盘主题，或对未解锁项提示；积分兑换请用 redeemPieceSkinWithPoints（仅按钮） */
 app.applyPieceSkinWear = function() {
   var cat = themes.getPieceSkinCatalog();
   var entry = cat[app.pieceSkinModalPendingIdx];
@@ -2049,11 +2175,56 @@ app.applyPieceSkinWear = function() {
     app.draw();
     return;
   }
+  if (entry.kind === 'theme') {
+    app.themeId = entry.id;
+    themes.saveThemeId(entry.id);
+    app.draw();
+    return;
+  }
   app.pieceSkinId = entry.id;
   themes.savePieceSkinId(entry.id);
   app.syncPieceSkinSelectionToServerIfAuthed(entry.id);
-  app.closePieceSkinModal();
+  app.draw();
 }
+
+/** 杂货铺：棋盘主题卡片的迷你盘面预览 */
+app.drawPieceSkinModalThemeBoardPreview = function(cx, cy, bw, bh, th) {
+  if (!th || !th.board) {
+    return;
+  }
+  var b = th.board;
+  var x0 = cx - bw / 2;
+  var y0 = cy - bh / 2;
+  var g = app.ctx.createLinearGradient(x0, y0, x0 + bw, y0 + bh);
+  g.addColorStop(0, b.g0);
+  g.addColorStop(1, b.g1);
+  app.ctx.save();
+  app.ctx.fillStyle = g;
+  var br = app.rpx(10);
+  app.roundRect(x0, y0, bw, bh, br);
+  app.ctx.fill();
+  app.ctx.strokeStyle = b.line;
+  app.ctx.lineWidth = app.rpx(1.1);
+  app.ctx.globalAlpha = 0.75;
+  app.ctx.beginPath();
+  app.ctx.moveTo(app.snapPx(x0 + br * 0.8), app.snapPx(cy));
+  app.ctx.lineTo(app.snapPx(x0 + bw - br * 0.8), app.snapPx(cy));
+  app.ctx.moveTo(app.snapPx(cx), app.snapPx(y0 + br * 0.8));
+  app.ctx.lineTo(app.snapPx(cx), app.snapPx(y0 + bh - br * 0.8));
+  app.ctx.stroke();
+  app.ctx.globalAlpha = 1;
+  app.ctx.fillStyle = b.star;
+  app.ctx.beginPath();
+  app.ctx.arc(
+    app.snapPx(cx),
+    app.snapPx(cy),
+    app.rpx(3),
+    0,
+    Math.PI * 2
+  );
+  app.ctx.fill();
+  app.ctx.restore();
+};
 
 app.drawPieceSkinModalPlaceholderPieces = function(midX, cy, pr) {
   var d = pr * 2;

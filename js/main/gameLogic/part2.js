@@ -809,7 +809,7 @@ app.drawHomeNavBar = function(th) {
 
 /** 多于一种界面风格时显示侧栏「界面风格」；当前仅檀木则不显示 */
 app.homeDrawerShowsThemeRow = function() {
-  return themes.THEME_IDS.length > 1;
+  return themes.getThemeIdsForCycling().length > 1;
 }
 
 app.getHomeDrawerMenuItems = function() {
@@ -1262,7 +1262,7 @@ app.drawHomeBottomDock = function(hl, th) {
     app.isHomeCheckinDoneToday() ? '今日已签' : '每日签到',
     '对战排行',
     '我的战绩',
-    '棋子换肤'
+    '杂货铺'
   ];
   var innerW = app.W - padH * 2;
   var colW = innerW / 4;
@@ -1453,6 +1453,11 @@ app.syncCheckinStateFromServerPayload = function(d) {
   if (Array.isArray(d.pieceSkinUnlockedIds)) {
     themes.setPieceSkinUnlockedIdsFromServer(d.pieceSkinUnlockedIds);
   }
+  var tClamp = themes.clampThemeIdToUnlocked(app.themeId);
+  if (tClamp !== app.themeId) {
+    app.themeId = tClamp;
+    themes.saveThemeId(tClamp);
+  }
   var hist = {};
   if (Array.isArray(d.checkinHistory)) {
     var hi;
@@ -1513,10 +1518,15 @@ app.mergePieceSkinRedeemResponseToCache = function(d) {
   if (Array.isArray(d.pieceSkinUnlockedIds)) {
     themes.setPieceSkinUnlockedIdsFromServer(d.pieceSkinUnlockedIds);
   }
+  var tClamp2 = themes.clampThemeIdToUnlocked(app.themeId);
+  if (tClamp2 !== app.themeId) {
+    app.themeId = tClamp2;
+    themes.saveThemeId(tClamp2);
+  }
 }
 
 /**
- * 已登录时拉取 GET /api/me/rating，同步团团萌肤解锁与签到缓存（换肤弹窗等依赖）。
+ * 已登录时拉取 GET /api/me/rating，同步团团萌肤解锁与签到缓存（杂货铺弹窗等依赖）。
  * @param {function()} onDone 无论成功失败都会调用
  */
 app.syncMeRatingIfAuthed = function(onDone) {

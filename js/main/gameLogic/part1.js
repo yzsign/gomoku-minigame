@@ -400,7 +400,7 @@ themes.setPieceSkinUnlockedIdsFromServer([]);
 app.themeId = themes.loadSavedThemeId();
 app.pieceSkinId = themes.loadSavedPieceSkinId();
 
-/** 首页「棋子换肤」弹窗：居中缩放 + 遮罩 */
+/** 首页「杂货铺」弹窗：居中缩放 + 遮罩 */
 app.pieceSkinModalVisible = false;
 app.pieceSkinModalAnim = 0;
 app.pieceSkinModalAnimRafId = null;
@@ -408,10 +408,14 @@ app.pieceSkinModalAnimRafId = null;
 app.pieceSkinModalPage = 0;
 app.pieceSkinModalPendingIdx = 0;
 app.pieceSkinRedeemInFlight = false;
+/** 杂货铺：双击穿戴，首击 catalog 下标与时间戳 */
+app.pieceSkinWearDblIdx = -1;
+app.pieceSkinWearDblAt = 0;
+app.PIECE_SKIN_WEAR_DBL_MS = 450;
 
-/** 棋子换肤：设计稿基准宽度 rpx（304×0.8×1.1） */
+/** 杂货铺：设计稿基准宽度 rpx（304×0.8×1.1） */
 app.PIECE_SKIN_CARD_W_RPX = 304 * 0.88;
-/** 棋子换肤：通用正文字体栈 */
+/** 杂货铺：通用正文字体栈 */
 app.PIECE_SKIN_FONT_UI =
   '"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
 
@@ -441,6 +445,14 @@ app.historyScrollVel = 0;
 app.historyScrollLastTs = 0;
 app.historyMomentumRafId = null;
 app.historyMomentumLastTs = 0;
+/** 战绩列表滚动条滑块纵向位置比例 0~1，插值平滑 */
+app.historyScrollbarRatioSmooth = null;
+/** 静止后约此毫秒再隐藏滚动条（与微信列表接近） */
+app.HISTORY_SCROLLBAR_HOLD_MS = 1000;
+/** 最近一次列表滚动/惯性时间，用于静止后延迟隐藏条 */
+app.historyScrollbarLastScrollTs = 0;
+/** 静止后触发重绘以去掉滚动条的定时器 */
+app.historyScrollbarFadeTimerId = null;
 app.historyListTouchStartX = 0;
 app.historyListTouchStartY = 0;
 app.historyPeakEloCached = 0;
@@ -454,11 +466,11 @@ app.historyTabLoading = false;
 app.historyLoadStartTs = 0;
 
 app.historyListRowHeightRpx = function() {
-  return app.rpx(112);
+  return app.rpx(122);
 }
 
 app.historyListRowGapRpx = function() {
-  return app.rpx(16);
+  return app.rpx(9);
 }
 
 app.loadPeakEloFromStorage = function() {

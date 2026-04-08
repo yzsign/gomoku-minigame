@@ -171,7 +171,7 @@ var THEMES = {
   }
 };
 
-/** 当前仅开放檀木；青瓷 / 水墨暂不下发切换（THEMES 仍保留供后续启用） */
+/** 仅檀木必带；青瓷 / 水墨在解锁后由 {@link getThemeIdsForCycling} 追加 */
 var THEME_IDS = ['classic'];
 
 /**
@@ -367,8 +367,8 @@ var PIECE_SKINS = {
 /** 已开放可持久化的皮肤 id；与目录中 rowStatus: owned 一致 */
 var PIECE_SKIN_IDS = ['basic', 'tuan_moe', 'qingtao_libai'];
 
-/** 皮肤弹窗列表（双列分页，每页 6 格） */
-var PIECE_SKINS_PER_PAGE = 6;
+/** 杂货铺列表（双列 4 行，每页 8 格） */
+var PIECE_SKINS_PER_PAGE = 8;
 
 /**
  * 「团团萌肤」是否已解锁：由服务端 users.piece_skin_tuan_moe_unlocked 决定，
@@ -416,6 +416,8 @@ var pieceSkinUnlockedIdSet = {};
 
 /** 与 PieceSkinRedeemService 中定价一致 */
 var PIECE_SKIN_QINGTAO_LIBAI_COST_POINTS = 200;
+/** 杂货铺：青瓷 / 水墨棋盘，与后端 PieceSkinRedeemService 一致 */
+var THEME_SHOP_COST_POINTS = 200;
 
 function setPieceSkinUnlockedIdsFromServer(ids) {
   pieceSkinUnlockedIdSet = {};
@@ -435,9 +437,23 @@ function isPieceSkinUnlockedOnServer(skinId) {
   return !!(skinId && pieceSkinUnlockedIdSet[skinId]);
 }
 
+/** 首页循环切换：檀木 + 已解锁的棋盘风格 */
+function getThemeIdsForCycling() {
+  var ids = ['classic'];
+  if (isPieceSkinUnlockedOnServer('mint')) {
+    ids.push('mint');
+  }
+  if (isPieceSkinUnlockedOnServer('ink')) {
+    ids.push('ink');
+  }
+  return ids;
+}
+
 function getPieceSkinCatalog() {
   var tuanOk = isTuanMoeUnlocked();
   var qingOk = isPieceSkinUnlockedOnServer('qingtao_libai');
+  var mintOk = isPieceSkinUnlockedOnServer('mint');
+  var inkOk = isPieceSkinUnlockedOnServer('ink');
   return [
     { id: 'basic', locked: false, label: '基础黑白', rowStatus: 'owned' },
     {
@@ -453,6 +469,22 @@ function getPieceSkinCatalog() {
       label: '青萄荔白',
       rowStatus: qingOk ? 'owned' : 'points',
       costPoints: qingOk ? 0 : PIECE_SKIN_QINGTAO_LIBAI_COST_POINTS
+    },
+    {
+      kind: 'theme',
+      id: 'mint',
+      locked: !mintOk,
+      label: '青瓷',
+      rowStatus: mintOk ? 'owned' : 'points',
+      costPoints: mintOk ? 0 : THEME_SHOP_COST_POINTS
+    },
+    {
+      kind: 'theme',
+      id: 'ink',
+      locked: !inkOk,
+      label: '水墨',
+      rowStatus: inkOk ? 'owned' : 'points',
+      costPoints: inkOk ? 0 : THEME_SHOP_COST_POINTS
     }
   ];
 }
@@ -609,14 +641,31 @@ function getTheme(id) {
   return t;
 }
 
+function clampThemeIdToUnlocked(id) {
+  if (id === 'classic') {
+    return 'classic';
+  }
+  if ((id === 'mint' || id === 'ink') && THEMES[id] && isPieceSkinUnlockedOnServer(id)) {
+    return id;
+  }
+  return 'classic';
+}
+
 function loadSavedThemeId() {
   try {
     if (typeof wx !== 'undefined' && wx.getStorageSync) {
       var v = wx.getStorageSync(STORAGE_KEY);
-      if (v === 'mint' || v === 'ink') {
+      if (v === 'classic') {
+        return 'classic';
+      }
+      if ((v === 'mint' || v === 'ink') && THEMES[v]) {
+        if (isPieceSkinUnlockedOnServer(v)) {
+          return v;
+        }
         try {
           wx.setStorageSync(STORAGE_KEY, 'classic');
         } catch (e2) {}
+        return 'classic';
       }
     }
   } catch (e) {}
@@ -624,12 +673,19 @@ function loadSavedThemeId() {
 }
 
 function saveThemeId(id) {
-  if (id !== 'classic' || !THEMES.classic) {
+  if (!THEMES[id]) {
+    return;
+  }
+  if (id === 'mint' || id === 'ink') {
+    if (!isPieceSkinUnlockedOnServer(id)) {
+      return;
+    }
+  } else if (id !== 'classic') {
     return;
   }
   try {
     if (typeof wx !== 'undefined' && wx.setStorageSync) {
-      wx.setStorageSync(STORAGE_KEY, 'classic');
+      wx.setStorageSync(STORAGE_KEY, id);
     }
   } catch (e) {}
 }
@@ -648,6 +704,8 @@ var themesExports = {
   setPieceSkinUnlockedIdsFromServer: setPieceSkinUnlockedIdsFromServer,
   isPieceSkinUnlockedOnServer: isPieceSkinUnlockedOnServer,
   getTheme: getTheme,
+  getThemeIdsForCycling: getThemeIdsForCycling,
+  clampThemeIdToUnlocked: clampThemeIdToUnlocked,
   loadSavedThemeId: loadSavedThemeId,
   saveThemeId: saveThemeId,
   applyPieceSkin: applyPieceSkin,

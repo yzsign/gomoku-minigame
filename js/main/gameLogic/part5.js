@@ -64,6 +64,17 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
   var centerDist = 2 * pr + gapBw;
   var statusY = innerBottom - app.rpx(13);
 
+  if (entry && entry.kind === 'theme') {
+    var thm = themes.getTheme(entry.id);
+    var pvw = app.rpx(112);
+    var pvh = app.rpx(74);
+    app.ctx.save();
+    if (entry.locked) {
+      app.ctx.globalAlpha = 0.78;
+    }
+    app.drawPieceSkinModalThemeBoardPreview(midX, cyPv, pvw, pvh, thm);
+    app.ctx.restore();
+  } else {
   /** 未解锁也绘制真实棋子预览（贴图/渐变），便于「看见皮肤长什么样」；锁定态略降低不透明度 */
   var skinMeta = entry.id && themes.PIECE_SKINS[entry.id];
   if (skinMeta && !skinMeta.followTheme) {
@@ -100,6 +111,7 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     app.ctx.restore();
   } else {
     app.drawPieceSkinModalPlaceholderPieces(midX, cyPv, pr);
+  }
   }
 
   app.ctx.font = '500 ' + titleFont + 'px ' + app.PIECE_SKIN_FONT_UI;
@@ -168,6 +180,53 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
       app.ctx.fillText(statusLine, app.snapPx(midX), app.snapPx(statusY));
     }
   }
+
+  var equippedTheme = entry && entry.kind === 'theme' && app.themeId === entry.id;
+  var equippedPiece =
+    entry &&
+    entry.kind !== 'theme' &&
+    app.pieceSkinId &&
+    entry.id === app.pieceSkinId;
+  if (equippedTheme || equippedPiece) {
+    var tagText = '已装备';
+    var tagFontPx = app.rpx(20);
+    app.ctx.font = '600 ' + tagFontPx + 'px ' + app.PIECE_SKIN_FONT_UI;
+    var tw = app.ctx.measureText(tagText).width;
+    /** 右上角斜标：↘；clip 与卡片同圆角；渐变+描边+字阴影 */
+    var bandW = Math.max(tw + app.rpx(52), app.rpx(124));
+    var bandH = app.rpx(28);
+    var bandR = app.rpx(4);
+    var cornerOff = app.rpx(36);
+    var bx = -bandW / 2;
+    var by = -bandH / 2;
+    app.ctx.save();
+    app.ctx.beginPath();
+    app.roundRect(rx, ry, rw, rh, rr);
+    app.ctx.clip();
+    app.ctx.translate(rx + rw - cornerOff, ry + cornerOff);
+    app.ctx.rotate(Math.PI / 4);
+    var gRibbon = app.ctx.createLinearGradient(0, by, 0, by + bandH);
+    gRibbon.addColorStop(0, '#3fc286');
+    gRibbon.addColorStop(0.5, '#2a9d4f');
+    gRibbon.addColorStop(1, '#176d34');
+    app.ctx.fillStyle = gRibbon;
+    app.roundRect(bx, by, bandW, bandH, bandR);
+    app.ctx.fill();
+    app.ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    app.ctx.lineWidth = app.rpx(1);
+    app.roundRect(bx, by, bandW, bandH, bandR);
+    app.ctx.stroke();
+    app.ctx.fillStyle = '#fafff9';
+    app.ctx.textAlign = 'center';
+    app.ctx.textBaseline = 'middle';
+    app.ctx.shadowColor = 'rgba(0, 35, 18, 0.45)';
+    app.ctx.shadowBlur = app.rpx(2);
+    app.ctx.shadowOffsetY = app.rpx(1);
+    app.ctx.fillText(tagText, app.snapPx(0), app.snapPx(0));
+    app.ctx.shadowBlur = 0;
+    app.ctx.shadowOffsetY = 0;
+    app.ctx.restore();
+  }
 }
 
 app.drawPieceSkinModalOverlay = function(th) {
@@ -215,15 +274,7 @@ app.drawPieceSkinModalOverlay = function(th) {
   app.ctx.textBaseline = 'middle';
   app.ctx.font = '600 ' + app.rpx(34) + 'px ' + app.PIECE_SKIN_FONT_UI;
   app.ctx.fillStyle = '#4a3d32';
-  app.ctx.fillText('棋子换肤', app.snapPx(L.cx), app.snapPx(L.titleCy));
-
-  app.ctx.font = app.rpx(26) + 'px ' + app.PIECE_SKIN_FONT_UI;
-  app.ctx.fillStyle = '#7d6a56';
-  app.ctx.fillText(
-    '当前穿戴：' + app.getCurrentPieceSkinWearTitle(),
-    app.snapPx(L.cx),
-    app.snapPx(L.currentCy)
-  );
+  app.ctx.fillText('杂货铺', app.snapPx(L.cx), app.snapPx(L.titleCy));
 
   var sepY = L.gridY0 - app.rpx(10);
   app.ctx.strokeStyle = 'rgba(92, 75, 58, 0.12)';
@@ -236,7 +287,7 @@ app.drawPieceSkinModalOverlay = function(th) {
   var start = app.pieceSkinModalPage * per;
   var row;
   var col;
-  for (row = 0; row < 3; row++) {
+  for (row = 0; row < 4; row++) {
     for (col = 0; col < 2; col++) {
       var slot = row * 2 + col;
       var gidx = start + slot;
@@ -1033,6 +1084,7 @@ wx.onTouchStart(function (e) {
       app.historyReplayTouchRec = null;
       app.historyReplayTouchId = null;
       app.stopHistoryMomentum();
+      app.historyScrollbarLastScrollTs = 0;
       app.screen = 'home';
       app.historyScrollTouchId = null;
       app.draw();
@@ -1043,6 +1095,7 @@ wx.onTouchStart(function (e) {
       if (!isNaN(tn) && tn >= 0 && tn <= 2) {
         app.historyFilterTab = tn;
         app.stopHistoryMomentum();
+        app.historyScrollbarLastScrollTs = 0;
         app.historyScrollY = 0;
         app.draw();
         app.fetchHistoryListForCurrentFilter();
@@ -1237,7 +1290,20 @@ wx.onTouchStart(function (e) {
         app.draw();
         return;
       }
-      app.applyPieceSkinWear();
+      var now = Date.now();
+      var dblMs =
+        app.PIECE_SKIN_WEAR_DBL_MS != null ? app.PIECE_SKIN_WEAR_DBL_MS : 450;
+      if (
+        app.pieceSkinWearDblIdx === cg &&
+        now - app.pieceSkinWearDblAt <= dblMs
+      ) {
+        app.pieceSkinWearDblIdx = -1;
+        app.applyPieceSkinWear();
+        return;
+      }
+      app.pieceSkinWearDblIdx = cg;
+      app.pieceSkinWearDblAt = now;
+      app.draw();
       return;
     }
     if (!app.hitPieceSkinModalPanel(x, y)) {
@@ -1654,6 +1720,7 @@ if (typeof wx.onTouchEnd === 'function') {
         }
       } else {
         app.historyScrollVel = 0;
+        app.scheduleHistoryScrollbarFadeRedraw();
       }
     }
     if (app.screen === 'home' && app.homePressedButton) {
@@ -1835,6 +1902,7 @@ if (typeof wx.onTouchCancel === 'function') {
     if (app.screen === 'history') {
       app.historyScrollTouchId = null;
       app.stopHistoryMomentum();
+      app.scheduleHistoryScrollbarFadeRedraw();
     }
     if (app.replayControlPressedId != null || app.replayTouchIdentifier != null) {
       app.replayControlPressedId = null;
