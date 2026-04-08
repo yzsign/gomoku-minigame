@@ -34,7 +34,8 @@ app.getUserRatingByUserIdRequestOptions = function(userId) {
   };
 }
 
-/** 落子短音效（audio/stone.wav） */
+/** 落子音效（用户提供的围棋/五子棋落子素材，audio/place-stone-aigei.mp3） */
+app.PLACE_STONE_SRC = 'audio/place-stone-aigei.mp3';
 app.placeStoneAudio = null;
 app.playPlaceStoneSound = function() {
   if (typeof wx === 'undefined' || typeof wx.createInnerAudioContext !== 'function') {
@@ -43,7 +44,7 @@ app.playPlaceStoneSound = function() {
   try {
     if (!app.placeStoneAudio) {
       app.placeStoneAudio = wx.createInnerAudioContext();
-      app.placeStoneAudio.src = 'audio/stone.wav';
+      app.placeStoneAudio.src = app.PLACE_STONE_SRC;
       app.placeStoneAudio.volume = 0.88;
     } else {
       app.placeStoneAudio.stop();
@@ -435,6 +436,11 @@ app.historyScrollY = 0;
 app.historyFilterTab = 0;
 app.historyScrollTouchId = null;
 app.historyScrollLastY = 0;
+/** 列表惯性：px/ms，与手指方向一致（上滑为正，内容向下滚） */
+app.historyScrollVel = 0;
+app.historyScrollLastTs = 0;
+app.historyMomentumRafId = null;
+app.historyMomentumLastTs = 0;
 app.historyListTouchStartX = 0;
 app.historyListTouchStartY = 0;
 app.historyPeakEloCached = 0;
@@ -495,7 +501,25 @@ app.loadMatchHistoryList = function() {
       return;
     }
     var arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    app.matchHistoryList = Array.isArray(arr) ? arr : [];
+    if (!Array.isArray(arr)) {
+      app.matchHistoryList = [];
+      return;
+    }
+    var stripped = [];
+    var si;
+    for (si = 0; si < arr.length; si++) {
+      var row = arr[si];
+      if (row && row.mode === 'pve') {
+        continue;
+      }
+      stripped.push(row);
+    }
+    if (stripped.length !== arr.length) {
+      try {
+        wx.setStorageSync(app.MATCH_HISTORY_STORAGE_KEY, JSON.stringify(stripped));
+      } catch (eSync) {}
+    }
+    app.matchHistoryList = stripped;
   } catch (e) {
     app.matchHistoryList = [];
   }
@@ -667,14 +691,14 @@ app.getDisplayMatchHistoryList = function() {
       fromServer.push(app.mapServerHistoryItem(app.historyServerItems[i]));
     }
   }
-  var pveLocal = [];
+  var localOnly = [];
   for (i = 0; i < app.matchHistoryList.length; i++) {
     var e = app.matchHistoryList[i];
-    if (e && e.mode === 'pve') {
-      pveLocal.push(e);
+    if (e && e.mode === 'local_pvp') {
+      localOnly.push(e);
     }
   }
-  var merged = fromServer.concat(pveLocal);
+  var merged = fromServer.concat(localOnly);
   merged.sort(function (a, b) {
     return (b.t || 0) - (a.t || 0);
   });
@@ -1388,31 +1412,74 @@ app.countStonesOnBoard = function(b) {
 }
 
 /**
- * 终局后写入本机历史：仅人机/同桌（联机战绩由服务端 /api/me/game-history 提供）。
+ * 终局后：人机已登录则 POST /api/me/pve-game 入库；同桌和棋仍写本机 local_pvp。
+ * 联机战绩由服务端结算写入 /api/me/game-history。
  */
+app.submitPveGameToServer = function(body) {
+  if (
+    typeof wx === 'undefined' ||
+    !wx.request ||
+    typeof roomApi.mePveGameOptions !== 'function'
+  ) {
+    return;
+  }
+  wx.request(
+    Object.assign(roomApi.mePveGameOptions(body), {
+      success: function() {},
+      fail: function() {}
+    })
+  );
+}
+
 app.recordMatchHistoryFromGameEnd = function() {
   if (!app.gameOver || app.isPvpOnline) {
     return;
   }
   var rk = app.resultKind;
+  var steps = app.countStonesOnBoard(app.board);
+
+  if (app.isPvpLocal) {
+    if (rk !== 'pvp_draw') {
+      return;
+    }
+    app.appendMatchHistoryRecord({
+      t: Date.now(),
+      res: 'draw',
+      opp: String(app.getOpponentDisplayName() || '对手'),
+      steps: steps,
+      mode: 'local_pvp'
+    });
+    return;
+  }
+
   var res = null;
   if (rk === 'pve_win') {
     res = 'win';
   } else if (rk === 'pve_lose') {
     res = 'lose';
-  } else if (rk === 'pvp_draw' || rk === 'pve_draw') {
+  } else if (rk === 'pve_draw') {
     res = 'draw';
   } else {
     return;
   }
-  var steps = app.countStonesOnBoard(app.board);
-  var opp = String(app.getOpponentDisplayName() || '对手');
-  app.appendMatchHistoryRecord({
-    t: Date.now(),
-    res: res,
-    opp: opp,
-    steps: steps,
-    mode: 'pve'
+  if (!authApi.getSessionToken || !authApi.getSessionToken()) {
+    return;
+  }
+  var playBlack = app.pveHumanColor === app.BLACK;
+  var myResult = res === 'win' ? 'WIN' : res === 'lose' ? 'LOSS' : 'DRAW';
+  var movesJson = null;
+  if (app.pveMoveHistory && app.pveMoveHistory.length > 0) {
+    if (app.pveMoveHistory.length === steps) {
+      try {
+        movesJson = JSON.stringify(app.pveMoveHistory);
+      } catch (eMj) {}
+    }
+  }
+  app.submitPveGameToServer({
+    playBlack: playBlack,
+    myResult: myResult,
+    totalSteps: steps,
+    movesJson: movesJson
   });
 }
 

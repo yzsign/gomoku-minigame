@@ -1032,6 +1032,7 @@ wx.onTouchStart(function (e) {
       app.hideHistoryNativeLoading();
       app.historyReplayTouchRec = null;
       app.historyReplayTouchId = null;
+      app.stopHistoryMomentum();
       app.screen = 'home';
       app.historyScrollTouchId = null;
       app.draw();
@@ -1041,6 +1042,7 @@ wx.onTouchStart(function (e) {
       var tn = parseInt(hi.slice(3), 10);
       if (!isNaN(tn) && tn >= 0 && tn <= 2) {
         app.historyFilterTab = tn;
+        app.stopHistoryMomentum();
         app.historyScrollY = 0;
         app.draw();
       }
@@ -1055,8 +1057,11 @@ wx.onTouchStart(function (e) {
       return;
     }
     if (e.touches && e.touches[0] && app.hitHistoryListZone(x, y)) {
+      app.stopHistoryMomentum();
       app.historyScrollTouchId = e.touches[0].identifier;
       app.historyScrollLastY = y;
+      app.historyScrollLastTs = Date.now();
+      app.historyScrollVel = 0;
       app.historyListTouchStartX = x;
       app.historyListTouchStartY = y;
     }
@@ -1537,16 +1542,14 @@ if (typeof wx.onTouchMove === 'function') {
     }
     var dy = t.clientY - app.historyScrollLastY;
     app.historyScrollLastY = t.clientY;
+    var now = Date.now();
+    var dtMove = Math.max(5, now - app.historyScrollLastTs);
+    app.historyScrollLastTs = now;
+    var instVel = -dy / dtMove;
+    app.historyScrollVel = app.historyScrollVel * 0.62 + instVel * 0.38;
     app.historyScrollY -= dy;
-    var Lh = app.getHistoryPageLayout();
-    var rows = app.getFilteredMatchHistory();
-    var rowH = app.historyListRowHeightRpx();
-    var rowGap = app.historyListRowGapRpx();
-    var contentH =
-      rows.length === 0
-        ? app.rpx(120)
-        : rows.length * (rowH + rowGap) - rowGap + app.rpx(16);
-    var maxScroll = Math.max(0, contentH - Lh.listH);
+    var sm = app.getHistoryListScrollMetrics();
+    var maxScroll = sm.maxScroll;
     if (app.historyScrollY > maxScroll) {
       app.historyScrollY = maxScroll;
     }
@@ -1640,6 +1643,17 @@ if (typeof wx.onTouchEnd === 'function') {
         }
       }
       app.historyScrollTouchId = null;
+      var vmin = 0.055;
+      if (Math.abs(app.historyScrollVel) >= vmin) {
+        app.historyMomentumLastTs = Date.now();
+        if (app.historyMomentumRafId == null) {
+          app.historyMomentumRafId = app.themeBubbleRaf(
+            app.tickHistoryScrollMomentum
+          );
+        }
+      } else {
+        app.historyScrollVel = 0;
+      }
     }
     if (app.screen === 'home' && app.homePressedButton) {
       if (
@@ -1819,6 +1833,7 @@ if (typeof wx.onTouchCancel === 'function') {
   wx.onTouchCancel(function () {
     if (app.screen === 'history') {
       app.historyScrollTouchId = null;
+      app.stopHistoryMomentum();
     }
     if (app.replayControlPressedId != null || app.replayTouchIdentifier != null) {
       app.replayControlPressedId = null;

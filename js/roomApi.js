@@ -117,6 +117,18 @@ function meRatingOptions() {
   };
 }
 
+/** POST /api/me/pve-game：人机终局写入 games（body: JSON，需 Authorization） */
+function mePveGameOptions(bodyObj) {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/pve-game',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify(bodyObj || {})
+  };
+}
+
 /** GET /api/me/game-history?limit=&offset=：已结算联机对局列表（需 Authorization） */
 function meGameHistoryOptions(limit, offset) {
   var lim =
@@ -256,6 +268,7 @@ module.exports = {
   roomApiRandomMatchCancelOptions: roomApiRandomMatchCancelOptions,
   roomApiRandomMatchFallbackOptions: roomApiRandomMatchFallbackOptions,
   meRatingOptions: meRatingOptions,
+  mePveGameOptions: mePveGameOptions,
   meGameHistoryOptions: meGameHistoryOptions,
   meCheckinOptions: meCheckinOptions,
   mePieceSkinRedeemOptions: mePieceSkinRedeemOptions,

@@ -79,6 +79,7 @@ app.exitReplayScreen = function() {
 app.openHistoryReplayOverlay = function(movesArr) {
   app.stopReplayAuto();
   app.clearReplayControlPress();
+  app.stopHistoryMomentum();
   app.replayMoves = movesArr || [];
   app.replayStep = 0;
   app.historyReplayOverlayVisible = true;
@@ -551,6 +552,67 @@ app.getHistoryPageLayout = function() {
   };
 }
 
+/** 战绩列表可滚动高度（与 drawHistory 一致，含加载态） */
+app.getHistoryListScrollMetrics = function() {
+  var Lh = app.getHistoryPageLayout();
+  var contentH;
+  if (app.historyListLoading) {
+    contentH = app.rpx(120);
+  } else {
+    var rows = app.getFilteredMatchHistory();
+    var rowH = app.historyListRowHeightRpx();
+    var rowGap = app.historyListRowGapRpx();
+    contentH =
+      rows.length === 0
+        ? app.rpx(120)
+        : rows.length * (rowH + rowGap) - rowGap + app.rpx(16);
+  }
+  return {
+    contentH: contentH,
+    maxScroll: Math.max(0, contentH - Lh.listH)
+  };
+}
+
+app.stopHistoryMomentum = function() {
+  if (app.historyMomentumRafId != null) {
+    app.themeBubbleCaf(app.historyMomentumRafId);
+    app.historyMomentumRafId = null;
+  }
+  app.historyScrollVel = 0;
+  app.historyMomentumLastTs = 0;
+}
+
+/** 战绩列表惯性帧：指数减速，触边停住 */
+app.tickHistoryScrollMomentum = function() {
+  app.historyMomentumRafId = null;
+  if (app.screen !== 'history' || app.historyListLoading) {
+    app.stopHistoryMomentum();
+    return;
+  }
+  var now = Date.now();
+  var dt = Math.min(36, Math.max(5, now - app.historyMomentumLastTs));
+  app.historyMomentumLastTs = now;
+  var sm = app.getHistoryListScrollMetrics();
+  var maxScroll = sm.maxScroll;
+  var nextY = app.historyScrollY + app.historyScrollVel * dt;
+  if (nextY <= 0) {
+    app.historyScrollY = 0;
+    app.historyScrollVel = 0;
+  } else if (nextY >= maxScroll) {
+    app.historyScrollY = maxScroll;
+    app.historyScrollVel = 0;
+  } else {
+    app.historyScrollY = nextY;
+  }
+  app.historyScrollVel *= Math.exp(-dt / 210);
+  app.draw();
+  if (Math.abs(app.historyScrollVel) < 0.018) {
+    app.stopHistoryMomentum();
+    return;
+  }
+  app.historyMomentumRafId = app.themeBubbleRaf(app.tickHistoryScrollMomentum);
+}
+
 app.hitHistoryInteract = function(clientX, clientY) {
   var L = app.getHistoryPageLayout();
   if (
@@ -757,6 +819,7 @@ app.openHistoryScreen = function() {
   app.clearReplayControlPress();
   app.historyReplayTouchRec = null;
   app.historyReplayTouchId = null;
+  app.stopHistoryMomentum();
   app.historyScrollY = 0;
   app.historyFilterTab = 0;
   app.loadMatchHistoryList();
@@ -1081,12 +1144,9 @@ app.drawHistory = function() {
   var rowGap = app.historyListRowGapRpx();
   var innerPad = app.rpx(24);
   var cardR = app.rpx(18);
-  var contentH = app.historyListLoading
-    ? app.rpx(120)
-    : rows.length === 0
-      ? app.rpx(120)
-      : rows.length * (rowH + rowGap) - rowGap + app.rpx(16);
-  var maxScroll = Math.max(0, contentH - L.listH);
+  var scrollM = app.getHistoryListScrollMetrics();
+  var contentH = scrollM.contentH;
+  var maxScroll = scrollM.maxScroll;
   if (app.historyScrollY > maxScroll) {
     app.historyScrollY = maxScroll;
   }
