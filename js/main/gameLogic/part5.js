@@ -273,6 +273,9 @@ app.draw = function() {
   }
   if (app.screen === 'history') {
     app.drawHistory();
+    if (app.historyReplayOverlayVisible) {
+      app.drawHistoryReplayOverlay();
+    }
     return;
   }
   if (app.screen === 'pve_color') {
@@ -480,6 +483,118 @@ app.drawButton = function(label, cx, cy, active) {
   app.ctx.textAlign = 'center';
   app.ctx.textBaseline = 'middle';
   app.ctx.fillText(label, app.snapPx(cx), app.snapPx(cy));
+}
+
+/**
+ * 棋谱回放底栏药丸：渐变光泽 + 描边（与对局页 drawButton 区分，仅回放条使用）。
+ */
+app.drawReplayToolbarPill = function(cx, cy, bw, bh, active, pressed) {
+  var th = app.getUiTheme();
+  var r = Math.min(bh / 2, 18);
+  var x = cx - bw / 2;
+  var y = cy - bh / 2;
+  var ctx = app.ctx;
+
+  ctx.save();
+  ctx.shadowColor = active ? th.btnShadow : 'rgba(42, 36, 30, 0.1)';
+  ctx.shadowBlur = active ? 16 : 11;
+  ctx.shadowOffsetY = active ? 4 : 2;
+  ctx.fillStyle = active ? th.btnPrimary : th.btnGhostFill;
+  app.roundRect(x, y, bw, bh, r);
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  ctx.save();
+  app.roundRect(x, y, bw, bh, r);
+  ctx.clip();
+  if (active) {
+    var gloss = ctx.createLinearGradient(x, y, x, y + bh);
+    gloss.addColorStop(0, 'rgba(255,255,255,0.3)');
+    gloss.addColorStop(0.42, 'rgba(255,255,255,0.08)');
+    gloss.addColorStop(0.72, 'rgba(0,0,0,0)');
+    gloss.addColorStop(1, 'rgba(0,0,0,0.1)');
+    ctx.fillStyle = gloss;
+    ctx.fillRect(x, y, bw, bh);
+  } else {
+    var gi = ctx.createLinearGradient(x, y, x, y + bh);
+    gi.addColorStop(0, 'rgba(255,255,255,0.65)');
+    gi.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gi;
+    ctx.fillRect(x, y, bw, bh);
+  }
+  ctx.restore();
+
+  ctx.strokeStyle = active
+    ? 'rgba(255,255,255,0.48)'
+    : th.btnGhostStroke;
+  ctx.lineWidth = 1.25;
+  app.roundRect(x + 0.2, y + 0.2, bw - 0.4, bh - 0.4, Math.max(0, r - 0.2));
+  ctx.stroke();
+
+  if (pressed) {
+    ctx.save();
+    app.roundRect(x, y, bw, bh, r);
+    ctx.clip();
+    ctx.fillStyle = active ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.12)';
+    ctx.fillRect(x, y, bw, bh);
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+/** 棋谱回放：文字按钮（关闭 / 自动 / 暂停） */
+app.drawReplayToolbarButton = function(label, cx, cy, active, controlId) {
+  var bw = app.REPLAY_CTRL_PILL_W != null ? app.REPLAY_CTRL_PILL_W : 82;
+  var bh = 36;
+  var pressed =
+    controlId != null && app.replayControlPressedId === controlId;
+  app.drawReplayToolbarPill(cx, cy, bw, bh, active, pressed);
+  var th = app.getUiTheme();
+  app.ctx.font =
+    '600 13px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  app.ctx.fillStyle = active ? '#fffefb' : th.btnGhostText;
+  app.ctx.textAlign = 'center';
+  app.ctx.textBaseline = 'middle';
+  app.ctx.fillText(label, app.snapPx(cx), app.snapPx(cy));
+}
+
+/**
+ * 棋谱回放：上一步 / 下一步，与回放条药丸同风格，中间为单折线箭头。
+ */
+app.drawReplayStepIconButton = function(cx, cy, toPrev, active, controlId) {
+  var th = app.getUiTheme();
+  var bw = app.REPLAY_CTRL_PILL_W != null ? app.REPLAY_CTRL_PILL_W : 82;
+  var bh = 36;
+  var pressed =
+    controlId != null && app.replayControlPressedId === controlId;
+  app.drawReplayToolbarPill(cx, cy, bw, bh, active, pressed);
+  var fg = active ? '#fffefb' : th.btnGhostText;
+  app.ctx.strokeStyle = fg;
+  if (active) {
+    app.ctx.shadowColor = 'rgba(0,0,0,0.2)';
+    app.ctx.shadowBlur = 2;
+    app.ctx.shadowOffsetY = 1;
+  }
+  app.ctx.lineCap = 'round';
+  app.ctx.lineJoin = 'round';
+  app.ctx.lineWidth = Math.max(2.2, app.rpx(2.8));
+  var u = app.rpx(12);
+  app.ctx.beginPath();
+  if (toPrev) {
+    app.ctx.moveTo(cx + u * 0.38, cy - u * 0.58);
+    app.ctx.lineTo(cx - u * 0.42, cy);
+    app.ctx.lineTo(cx + u * 0.38, cy + u * 0.58);
+  } else {
+    app.ctx.moveTo(cx - u * 0.38, cy - u * 0.58);
+    app.ctx.lineTo(cx + u * 0.42, cy);
+    app.ctx.lineTo(cx - u * 0.38, cy + u * 0.58);
+  }
+  app.ctx.stroke();
+  app.ctx.shadowBlur = 0;
+  app.ctx.shadowOffsetY = 0;
 }
 
 app.roundRect = function(x, y, w, h, r) {
@@ -898,10 +1013,25 @@ wx.onTouchStart(function (e) {
       }
       return;
     }
+    if (app.historyReplayOverlayVisible) {
+      app.layout = app.computeLayout();
+      var rcH = app.hitReplayControl(x, y);
+      if (rcH != null) {
+        app.replayControlPressedId = rcH;
+        app.replayTouchIdentifier = e.touches[0].identifier;
+      } else {
+        app.replayControlPressedId = null;
+        app.replayTouchIdentifier = null;
+      }
+      app.draw();
+      return;
+    }
     var hi = app.hitHistoryInteract(x, y);
     if (hi === 'back') {
       app.historyListLoading = false;
       app.hideHistoryNativeLoading();
+      app.historyReplayTouchRec = null;
+      app.historyReplayTouchId = null;
       app.screen = 'home';
       app.historyScrollTouchId = null;
       app.draw();
@@ -914,6 +1044,14 @@ wx.onTouchStart(function (e) {
         app.historyScrollY = 0;
         app.draw();
       }
+      return;
+    }
+    var hRec = app.hitHistoryRowReplayIcon(x, y);
+    if (hRec && e.touches && e.touches[0]) {
+      app.historyReplayTouchRec = hRec;
+      app.historyReplayTouchId = e.touches[0].identifier;
+      app.historyListTouchStartX = x;
+      app.historyListTouchStartY = y;
       return;
     }
     if (e.touches && e.touches[0] && app.hitHistoryListZone(x, y)) {
@@ -1184,7 +1322,11 @@ wx.onTouchStart(function (e) {
     }
   }
 
-  var boardAv = app.hitWhichGameBoardNameAvatar(x, y);
+  var boardAv =
+    app.screen === 'replay' ||
+    (app.screen === 'history' && app.historyReplayOverlayVisible)
+      ? null
+      : app.hitWhichGameBoardNameAvatar(x, y);
   if (boardAv === 'my') {
     app.showMyRatingModal();
     return;
@@ -1254,43 +1396,16 @@ wx.onTouchStart(function (e) {
   }
 
   if (app.screen === 'replay') {
-    var rc = app.hitReplayControl(x, y);
-    if (rc === 'close') {
-      app.exitReplayScreen();
-      return;
+    app.layout = app.computeLayout();
+    var rcR = app.hitReplayControl(x, y);
+    if (rcR != null) {
+      app.replayControlPressedId = rcR;
+      app.replayTouchIdentifier = e.touches[0].identifier;
+    } else {
+      app.replayControlPressedId = null;
+      app.replayTouchIdentifier = null;
     }
-    if (rc === 'prev' && app.replayStep > 0) {
-      app.replayStep--;
-      app.draw();
-      return;
-    }
-    if (rc === 'next' && app.replayStep < app.replayMoves.length) {
-      app.replayStep++;
-      app.playPlaceStoneSound();
-      app.draw();
-      return;
-    }
-    if (rc === 'auto') {
-      if (app.replayAutoTimerId != null) {
-        app.stopReplayAuto();
-      } else if (app.replayMoves.length > 0) {
-        if (app.replayStep >= app.replayMoves.length) {
-          app.replayStep = 0;
-        }
-        app.replayAutoTimerId = setInterval(function () {
-          if (app.replayStep >= app.replayMoves.length) {
-            app.stopReplayAuto();
-            app.draw();
-            return;
-          }
-          app.replayStep++;
-          app.playPlaceStoneSound();
-          app.draw();
-        }, 600);
-      }
-      app.draw();
-      return;
-    }
+    app.draw();
     return;
   }
 
@@ -1371,6 +1486,37 @@ wx.onTouchStart(function (e) {
 
 if (typeof wx.onTouchMove === 'function') {
   wx.onTouchMove(function (e) {
+    if (
+      app.screen === 'replay' ||
+      (app.screen === 'history' && app.historyReplayOverlayVisible)
+    ) {
+      if (
+        app.replayControlPressedId != null &&
+        e.touches &&
+        e.touches.length
+      ) {
+        var tm;
+        for (tm = 0; tm < e.touches.length; tm++) {
+          if (
+            app.replayTouchIdentifier != null &&
+            e.touches[tm].identifier === app.replayTouchIdentifier
+          ) {
+            app.layout = app.computeLayout();
+            var curHit = app.hitReplayControl(
+              e.touches[tm].clientX,
+              e.touches[tm].clientY
+            );
+            if (curHit !== app.replayControlPressedId) {
+              app.replayControlPressedId = null;
+              app.replayTouchIdentifier = null;
+              app.draw();
+            }
+            break;
+          }
+        }
+      }
+      return;
+    }
     if (app.screen !== 'history' || app.historyScrollTouchId == null) {
       return;
     }
@@ -1414,6 +1560,62 @@ if (typeof wx.onTouchMove === 'function') {
 if (typeof wx.onTouchEnd === 'function') {
   wx.onTouchEnd(function (e) {
     var t = e.changedTouches && e.changedTouches[0];
+    if (
+      e.changedTouches &&
+      (app.screen === 'replay' ||
+        (app.screen === 'history' && app.historyReplayOverlayVisible))
+    ) {
+      var rpe;
+      var matchedReplayEnd = null;
+      if (app.replayTouchIdentifier != null) {
+        for (rpe = 0; rpe < e.changedTouches.length; rpe++) {
+          if (e.changedTouches[rpe].identifier === app.replayTouchIdentifier) {
+            matchedReplayEnd = e.changedTouches[rpe];
+            break;
+          }
+        }
+      }
+      var savedReplayId = app.replayControlPressedId;
+      app.replayControlPressedId = null;
+      app.replayTouchIdentifier = null;
+      if (savedReplayId != null && matchedReplayEnd) {
+        app.layout = app.computeLayout();
+        var endReplayHit = app.hitReplayControl(
+          matchedReplayEnd.clientX,
+          matchedReplayEnd.clientY
+        );
+        if (endReplayHit === savedReplayId) {
+          app.onReplayControlHit(savedReplayId);
+        } else {
+          app.draw();
+        }
+      } else if (savedReplayId != null) {
+        app.draw();
+      }
+    }
+    if (app.screen === 'history' && app.historyReplayTouchId != null && e.changedTouches) {
+      var hrTouch = null;
+      var hrej;
+      for (hrej = 0; hrej < e.changedTouches.length; hrej++) {
+        if (e.changedTouches[hrej].identifier == app.historyReplayTouchId) {
+          hrTouch = e.changedTouches[hrej];
+          break;
+        }
+      }
+      if (hrTouch) {
+        var tapSlopHr = app.rpx(56);
+        var hdx = hrTouch.clientX - app.historyListTouchStartX;
+        var hdy = hrTouch.clientY - app.historyListTouchStartY;
+        if (
+          hdx * hdx + hdy * hdy <= tapSlopHr * tapSlopHr &&
+          app.historyReplayTouchRec
+        ) {
+          app.openHistoryReplayForRecord(app.historyReplayTouchRec);
+        }
+      }
+      app.historyReplayTouchRec = null;
+      app.historyReplayTouchId = null;
+    }
     var teHist = null;
     if (app.screen === 'history' && app.historyScrollTouchId != null && e.changedTouches) {
       var hi;
@@ -1617,6 +1819,11 @@ if (typeof wx.onTouchCancel === 'function') {
   wx.onTouchCancel(function () {
     if (app.screen === 'history') {
       app.historyScrollTouchId = null;
+    }
+    if (app.replayControlPressedId != null || app.replayTouchIdentifier != null) {
+      app.replayControlPressedId = null;
+      app.replayTouchIdentifier = null;
+      app.draw();
     }
     if (app.homePressedButton || app.homePressedDockCol !== null) {
       app.homePressedButton = null;

@@ -898,6 +898,16 @@ app.lastSettledGameId = null;
 app.replayMoves = [];
 app.replayStep = 0;
 app.replayAutoTimerId = null;
+/** 棋谱回放底栏药丸宽度（与 drawButton 一致；相邻箭头按钮中心距=此值则边缘相贴） */
+app.REPLAY_CTRL_PILL_W = 82;
+/** 战绩页：在当前页面上以遮罩弹出棋谱回放（不切换 screen） */
+app.historyReplayOverlayVisible = false;
+/** 战绩列表：在回放图标上按下时的行记录与 touch identifier */
+app.historyReplayTouchRec = null;
+app.historyReplayTouchId = null;
+/** 棋谱回放底栏：'close'|'prev'|'next'|'auto'，按下未抬起时用于点击态绘制 */
+app.replayControlPressedId = null;
+app.replayTouchIdentifier = null;
 
 /** 联机对手：服务端头像与昵称（与占位默认图区分） */
 app.onlineOppAvatarImg = null;
@@ -1078,6 +1088,11 @@ app.disconnectOnline = function() {
   app.onlineMatchRound = 1;
   app.randomMatchHostCancelToken = '';
   app.clearOnlineOpponentProfile();
+  if (app.historyReplayOverlayVisible) {
+    app.historyReplayOverlayVisible = false;
+  }
+  app.replayControlPressedId = null;
+  app.replayTouchIdentifier = null;
   if (app.screen === 'replay') {
     app.screen = 'game';
     app.showResultOverlay = false;

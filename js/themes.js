@@ -582,6 +582,28 @@ function savePieceSkinId(id) {
   } catch (e3) {}
 }
 
+/** 登录后 GET /api/me/rating 的 pieceSkinId：服务端已校验，直接落盘并用于当前局 */
+function applyPieceSkinIdFromServer(id) {
+  if (!id || typeof id !== 'string') {
+    return;
+  }
+  var sid = id.trim();
+  if (!sid || !PIECE_SKINS[sid] || PIECE_SKINS[sid].followTheme) {
+    return;
+  }
+  try {
+    if (typeof wx !== 'undefined' && wx.setStorage) {
+      wx.setStorage({ key: PIECE_SKIN_STORAGE_KEY, data: sid });
+      return;
+    }
+  } catch (e) {}
+  try {
+    if (typeof wx !== 'undefined' && wx.setStorageSync) {
+      wx.setStorageSync(PIECE_SKIN_STORAGE_KEY, sid);
+    }
+  } catch (e2) {}
+}
+
 function getTheme(id) {
   var t = THEMES[id] || THEMES.classic;
   return t;
@@ -631,7 +653,8 @@ var themesExports = {
   applyPieceSkin: applyPieceSkin,
   getPieceSkin: getPieceSkin,
   loadSavedPieceSkinId: loadSavedPieceSkinId,
-  savePieceSkinId: savePieceSkinId
+  savePieceSkinId: savePieceSkinId,
+  applyPieceSkinIdFromServer: applyPieceSkinIdFromServer
 };
 
 Object.defineProperty(themesExports, 'PIECE_SKIN_CATALOG', {

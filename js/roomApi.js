@@ -166,6 +166,18 @@ function mePieceSkinRedeemOptions(skinId) {
   };
 }
 
+/** POST /api/me/piece-skin：当前佩戴棋子皮肤写入数据库（body: { pieceSkinId }） */
+function mePieceSkinSelectOptions(pieceSkinId) {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/piece-skin',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify({ pieceSkinId: pieceSkinId })
+  };
+}
+
 /** GET /api/rooms/opponent-rating?roomId=：当前房间对手的公开天梯（须为双方玩家之一） */
 function roomOpponentRatingOptions(roomId) {
   return {
@@ -247,6 +259,7 @@ module.exports = {
   meGameHistoryOptions: meGameHistoryOptions,
   meCheckinOptions: meCheckinOptions,
   mePieceSkinRedeemOptions: mePieceSkinRedeemOptions,
+  mePieceSkinSelectOptions: mePieceSkinSelectOptions,
   roomOpponentRatingOptions: roomOpponentRatingOptions,
   userRatingByUserIdOptions: userRatingByUserIdOptions,
   gameSettleOptions: gameSettleOptions,

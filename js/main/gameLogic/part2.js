@@ -1489,6 +1489,11 @@ app.syncCheckinStateFromServerPayload = function(d) {
   if (typeof d.eloScore === 'number' && !isNaN(d.eloScore)) {
     app.savePeakEloIfHigher(d.eloScore);
   }
+  if (typeof d.pieceSkinId === 'string' && d.pieceSkinId.trim()) {
+    var psid = d.pieceSkinId.trim();
+    themes.applyPieceSkinIdFromServer(psid);
+    app.pieceSkinId = psid;
+  }
 }
 
 /**
@@ -1547,6 +1552,19 @@ app.syncMeRatingIfAuthed = function(onDone) {
       fail: function () {
         onDone();
       }
+    })
+  );
+}
+
+/** 佩戴成功后写入 users.piece_skin_id（失败不影响本地已保存） */
+app.syncPieceSkinSelectionToServerIfAuthed = function(skinId) {
+  if (!skinId || !authApi.getSessionToken()) {
+    return;
+  }
+  wx.request(
+    Object.assign(roomApi.mePieceSkinSelectOptions(skinId), {
+      success: function () {},
+      fail: function () {}
     })
   );
 }

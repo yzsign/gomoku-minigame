@@ -53,8 +53,14 @@ app.buildBoardFromMoves = function(moves, step) {
   return b;
 }
 
+app.clearReplayControlPress = function() {
+  app.replayControlPressedId = null;
+  app.replayTouchIdentifier = null;
+}
+
 app.enterReplayScreen = function(movesArr) {
   app.stopReplayAuto();
+  app.clearReplayControlPress();
   app.replayMoves = movesArr || [];
   app.replayStep = 0;
   app.screen = 'replay';
@@ -64,9 +70,74 @@ app.enterReplayScreen = function(movesArr) {
 
 app.exitReplayScreen = function() {
   app.stopReplayAuto();
+  app.clearReplayControlPress();
   app.screen = 'game';
   app.showResultOverlay = true;
   app.draw();
+}
+
+app.openHistoryReplayOverlay = function(movesArr) {
+  app.stopReplayAuto();
+  app.clearReplayControlPress();
+  app.replayMoves = movesArr || [];
+  app.replayStep = 0;
+  app.historyReplayOverlayVisible = true;
+  app.draw();
+}
+
+app.closeHistoryReplayOverlay = function() {
+  app.stopReplayAuto();
+  app.clearReplayControlPress();
+  app.historyReplayOverlayVisible = false;
+  app.draw();
+}
+
+/**
+ * 棋谱控制条：全屏回放页与战绩弹层共用。
+ */
+app.onReplayControlHit = function(rc) {
+  if (rc == null) {
+    return;
+  }
+  if (rc === 'close') {
+    if (app.historyReplayOverlayVisible) {
+      app.closeHistoryReplayOverlay();
+    } else {
+      app.exitReplayScreen();
+    }
+    return;
+  }
+  if (rc === 'prev' && app.replayStep > 0) {
+    app.replayStep--;
+    app.draw();
+    return;
+  }
+  if (rc === 'next' && app.replayStep < app.replayMoves.length) {
+    app.replayStep++;
+    app.playPlaceStoneSound();
+    app.draw();
+    return;
+  }
+  if (rc === 'auto') {
+    if (app.replayAutoTimerId != null) {
+      app.stopReplayAuto();
+    } else if (app.replayMoves.length > 0) {
+      if (app.replayStep >= app.replayMoves.length) {
+        app.replayStep = 0;
+      }
+      app.replayAutoTimerId = setInterval(function () {
+        if (app.replayStep >= app.replayMoves.length) {
+          app.stopReplayAuto();
+          app.draw();
+          return;
+        }
+        app.replayStep++;
+        app.playPlaceStoneSound();
+        app.draw();
+      }, 600);
+    }
+    app.draw();
+  }
 }
 
 app.tryReplayByRoomFallback = function() {
@@ -129,14 +200,35 @@ app.openReplayFromResult = function() {
   app.tryReplayByRoomFallback();
 }
 
+/** 棋谱回放底部按钮行 Y（相对原 bottomY 上移，避免挡住战绩列表区） */
+app.getReplayControlsButtonY = function() {
+  return app.layout.bottomY - app.rpx(112);
+};
+
+/** 「棋谱回放 · n/m」与按钮行的垂直间距 */
+app.getReplaySubtitleY = function() {
+  return app.getReplayControlsButtonY() - app.rpx(46);
+};
+
+/** 上一步 / 下一步：以屏宽中心对称，中心距=药丸宽，两钮边缘相贴无间隙 */
+app.getReplayNavPrevCx = function() {
+  var w = app.REPLAY_CTRL_PILL_W || 82;
+  return app.W / 2 - w / 2;
+};
+
+app.getReplayNavNextCx = function() {
+  var w = app.REPLAY_CTRL_PILL_W || 82;
+  return app.W / 2 + w / 2;
+};
+
 app.hitReplayControl = function(clientX, clientY) {
-  var btnY = app.layout.bottomY;
+  var btnY = app.getReplayControlsButtonY();
   var halfW = 46;
-  var halfH = 22;
+  var halfH = 24;
   var list = [
     { id: 'close', x: app.W * 0.18 },
-    { id: 'prev', x: app.W * 0.38 },
-    { id: 'next', x: app.W * 0.62 },
+    { id: 'prev', x: app.getReplayNavPrevCx() },
+    { id: 'next', x: app.getReplayNavNextCx() },
     { id: 'auto', x: app.W * 0.82 }
   ];
   var i;
@@ -152,9 +244,8 @@ app.hitReplayControl = function(clientX, clientY) {
   return null;
 }
 
-app.drawReplay = function() {
-  app.fillAmbientBackground();
-  app.layout = app.computeLayout();
+/** 棋盘与棋谱控制条（全屏回放与战绩弹层共用，不含背景） */
+app.drawReplayBoardLayer = function() {
   var th = app.getCurrentTheme();
   doodles.drawGameBoardCornerClouds(
     app.ctx,
@@ -166,7 +257,6 @@ app.drawReplay = function() {
   render.drawBoard(app.ctx, app.layout, th);
   var rb = app.buildBoardFromMoves(app.replayMoves, app.replayStep);
   render.drawPieces(app.ctx, rb, app.layout, app.getThemeForPieces(th));
-  app.drawBoardNameLabels(app.ctx, app.layout, th);
   app.ctx.save();
   app.ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
   app.ctx.shadowBlur = 6;
@@ -181,21 +271,56 @@ app.drawReplay = function() {
   );
   app.ctx.restore();
   var total = app.replayMoves.length;
+  var btnY = app.getReplayControlsButtonY();
+  var subY = app.getReplaySubtitleY();
   render.drawText(
     app.ctx,
     '棋谱回放 · ' + app.replayStep + ' / ' + total,
     app.W / 2,
-    app.layout.bottomY - 50,
+    subY,
     15,
     th.status
   );
-  var btnY = app.layout.bottomY;
-  app.drawButton('关闭', app.W * 0.18, btnY, true);
-  app.drawButton('上一步', app.W * 0.38, btnY, app.replayStep > 0);
-  app.drawButton('下一步', app.W * 0.62, btnY, app.replayStep < total);
+  app.drawReplayToolbarButton('关闭', app.W * 0.18, btnY, true, 'close');
+  app.drawReplayStepIconButton(
+    app.getReplayNavPrevCx(),
+    btnY,
+    true,
+    app.replayStep > 0,
+    'prev'
+  );
+  app.drawReplayStepIconButton(
+    app.getReplayNavNextCx(),
+    btnY,
+    false,
+    app.replayStep < total,
+    'next'
+  );
   var autoOn = app.replayAutoTimerId != null;
-  app.drawButton(autoOn ? '暂停' : '自动', app.W * 0.82, btnY, total > 0);
+  app.drawReplayToolbarButton(
+    autoOn ? '暂停' : '自动',
+    app.W * 0.82,
+    btnY,
+    total > 0,
+    'auto'
+  );
   app.drawThemeChrome(th);
+}
+
+app.drawReplay = function() {
+  app.fillAmbientBackground();
+  app.layout = app.computeLayout();
+  app.drawReplayBoardLayer();
+}
+
+/** 战绩页：半透明遮罩 + 棋谱层（仍停留在 screen===history） */
+app.drawHistoryReplayOverlay = function() {
+  app.ctx.save();
+  app.ctx.fillStyle = 'rgba(0, 0, 0, 0.78)';
+  app.ctx.fillRect(0, 0, app.W, app.H);
+  app.ctx.restore();
+  app.layout = app.computeLayout();
+  app.drawReplayBoardLayer();
 }
 
 /* ---------- 绘制：各界面 ---------- */
@@ -506,6 +631,118 @@ app.hitHistoryRowOpponentAvatar = function(clientX, clientY) {
   return null;
 }
 
+/**
+ * 战绩行右侧回放图标命中（仅服务端行且含有效 gameId 时绘制/可点）。
+ */
+app.hitHistoryRowReplayIcon = function(clientX, clientY) {
+  if (app.historyListLoading) {
+    return null;
+  }
+  var L = app.getHistoryPageLayout();
+  if (
+    clientX < L.padX ||
+    clientX > app.W - L.padX ||
+    clientY < L.listTop ||
+    clientY > L.listBottom
+  ) {
+    return null;
+  }
+  var rows = app.getFilteredMatchHistory();
+  var rowH = app.historyListRowHeightRpx();
+  var rowGap = app.historyListRowGapRpx();
+  var innerPad = app.rpx(24);
+  var rw = app.W - L.padX * 2;
+  var rx = L.padX;
+  var yBase = L.listTop - app.historyScrollY + app.rpx(8);
+  var visR = app.rpx(20);
+  var hitExtra = app.rpx(14);
+  var hitR = visR + hitExtra;
+  var ri;
+  for (ri = 0; ri < rows.length; ri++) {
+    var rec = rows[ri];
+    if (!rec || rec.mode !== 'server') {
+      continue;
+    }
+    var gid = rec.gameId;
+    var gidN =
+      typeof gid === 'number' && !isNaN(gid)
+        ? gid
+        : parseInt(String(gid != null ? gid : ''), 10);
+    if (!gidN || gidN <= 0) {
+      continue;
+    }
+    var ry = yBase + ri * (rowH + rowGap);
+    if (ry + rowH < L.listTop - 2 || ry > L.listBottom + 2) {
+      continue;
+    }
+    var line1Y = ry + rowH * 0.5;
+    var replayCx = rx + rw - innerPad - visR;
+    var dx = clientX - replayCx;
+    var dy = clientY - line1Y;
+    if (dx * dx + dy * dy <= hitR * hitR) {
+      return rec;
+    }
+  }
+  return null;
+}
+
+app.openHistoryReplayForRecord = function(rec) {
+  if (!rec || rec.mode !== 'server') {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '暂无棋谱', icon: 'none' });
+    }
+    return;
+  }
+  var gid = rec.gameId;
+  var gidN =
+    typeof gid === 'number' && !isNaN(gid)
+      ? gid
+      : parseInt(String(gid != null ? gid : ''), 10);
+  if (!gidN || gidN <= 0) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '暂无棋谱', icon: 'none' });
+    }
+    return;
+  }
+  if (!authApi.getSessionToken()) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '请先登录', icon: 'none' });
+    }
+    return;
+  }
+  if (typeof wx.showLoading === 'function') {
+    wx.showLoading({ title: '加载棋谱…', mask: true });
+  }
+  wx.request(
+    Object.assign(roomApi.gameReplayByIdOptions(gidN), {
+      success: function (res) {
+        if (typeof wx.hideLoading === 'function') {
+          try {
+            wx.hideLoading();
+          } catch (eH) {}
+        }
+        if (res.statusCode === 200 && res.data && res.data.moves) {
+          app.openHistoryReplayOverlay(res.data.moves);
+        } else {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '暂无棋谱', icon: 'none' });
+          }
+        }
+      },
+      fail: function () {
+        if (typeof wx.hideLoading === 'function') {
+          try {
+            wx.hideLoading();
+          } catch (eH2) {}
+        }
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '网络错误', icon: 'none' });
+        }
+      }
+    })
+  );
+}
+
 app.hideHistoryNativeLoading = function() {
   if (typeof wx.hideLoading === 'function') {
     try {
@@ -515,6 +752,11 @@ app.hideHistoryNativeLoading = function() {
 }
 
 app.openHistoryScreen = function() {
+  app.historyReplayOverlayVisible = false;
+  app.stopReplayAuto();
+  app.clearReplayControlPress();
+  app.historyReplayTouchRec = null;
+  app.historyReplayTouchId = null;
   app.historyScrollY = 0;
   app.historyFilterTab = 0;
   app.loadMatchHistoryList();
@@ -998,6 +1240,20 @@ app.drawHistory = function() {
       }
       app.ctx.fillText(timeDraw, app.snapPx(midColCenterX), app.snapPx(line1Y));
 
+      var gidRaw = rec.gameId;
+      var gidNum =
+        typeof gidRaw === 'number' && !isNaN(gidRaw)
+          ? gidRaw
+          : parseInt(String(gidRaw != null ? gidRaw : ''), 10);
+      var showReplayIcon =
+        rec.mode === 'server' && !isNaN(gidNum) && gidNum > 0;
+      var visRIcon = app.rpx(20);
+      var replayCx = rx + rw - innerPad - visRIcon;
+      var resTipX = rx + rw - innerPad;
+      if (showReplayIcon) {
+        resTipX = replayCx - visRIcon - app.rpx(8);
+      }
+
       var resBase =
         rec.res === 'win' ? '胜利' : rec.res === 'lose' ? '失败' : '和棋';
       var resStr =
@@ -1013,11 +1269,36 @@ app.drawHistory = function() {
         'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
       app.ctx.fillStyle = resCol;
       var resDraw = resStr;
-      var resMaxW = innerW * 0.3;
+      var resMaxW = Math.min(
+        innerW * 0.3,
+        Math.max(app.rpx(36), resTipX - midColCenterX - app.rpx(12))
+      );
       if (app.ctx.measureText(resDraw).width > resMaxW) {
         resDraw = app.truncateNameToWidth(app.ctx, resStr, resMaxW);
       }
-      app.ctx.fillText(resDraw, app.snapPx(rx + rw - innerPad), app.snapPx(line1Y));
+      app.ctx.fillText(resDraw, app.snapPx(resTipX), app.snapPx(line1Y));
+
+      if (showReplayIcon) {
+        app.ctx.save();
+        app.ctx.fillStyle = 'rgba(123, 94, 63, 0.14)';
+        app.ctx.beginPath();
+        app.ctx.arc(replayCx, line1Y, visRIcon, 0, Math.PI * 2);
+        app.ctx.fill();
+        app.ctx.strokeStyle = 'rgba(123, 94, 63, 0.38)';
+        app.ctx.lineWidth = Math.max(1, app.rpx(1));
+        app.ctx.stroke();
+        var triS = app.rpx(10);
+        app.ctx.fillStyle = accentBrown;
+        app.ctx.globalAlpha = 0.92;
+        app.ctx.beginPath();
+        app.ctx.moveTo(replayCx - triS * 0.35, line1Y - triS * 0.55);
+        app.ctx.lineTo(replayCx - triS * 0.35, line1Y + triS * 0.55);
+        app.ctx.lineTo(replayCx + triS * 0.68, line1Y);
+        app.ctx.closePath();
+        app.ctx.fill();
+        app.ctx.restore();
+      }
+
       app.ctx.restore();
     }
   }
@@ -1600,6 +1881,7 @@ app.redeemPieceSkinWithPoints = function() {
           app.mergePieceSkinRedeemResponseToCache(d);
           app.pieceSkinId = entry.id;
           themes.savePieceSkinId(entry.id);
+          app.syncPieceSkinSelectionToServerIfAuthed(entry.id);
           app.closePieceSkinModal();
           if (typeof wx.showToast === 'function') {
             wx.showToast({
@@ -1654,6 +1936,7 @@ app.applyPieceSkinWear = function() {
   }
   app.pieceSkinId = entry.id;
   themes.savePieceSkinId(entry.id);
+  app.syncPieceSkinSelectionToServerIfAuthed(entry.id);
   app.closePieceSkinModal();
 }
 
