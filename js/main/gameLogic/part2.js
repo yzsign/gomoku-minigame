@@ -640,6 +640,8 @@ app.loadHomeUiAssets = function() {
   app.homeDockRankImg = null;
   app.homeDockHistoryImg = null;
   app.homeDockSkinImg = null;
+  app.shopThemeMintBoardImg = null;
+  app.shopThemeInkBoardImg = null;
   app.tuanMoePieceBlackImg = null;
   app.tuanMoePieceWhiteImg = null;
   app.qingtaoLibaiPieceBlackImg = null;
@@ -648,7 +650,7 @@ app.loadHomeUiAssets = function() {
   app.homeMascotSheetImg = null;
 
   var loadPhase = 1;
-  var remaining = 8;
+  var remaining = 10;
   function oneDone() {
     remaining--;
     if (remaining > 0) {
@@ -760,6 +762,12 @@ app.loadHomeUiAssets = function() {
   });
   bind('images/ui/home-dock-skin.png', function (im) {
     app.homeDockSkinImg = im;
+  });
+  bind('images/ui/shop-celadon-board.png', function (im) {
+    app.shopThemeMintBoardImg = im;
+  });
+  bind('images/ui/shop-ink-board.png', function (im) {
+    app.shopThemeInkBoardImg = im;
   });
   bind('images/pieces/tuan-black.png', function (im) {
     app.tuanMoePieceBlackImg = im;
@@ -1499,6 +1507,11 @@ app.syncCheckinStateFromServerPayload = function(d) {
     themes.applyPieceSkinIdFromServer(psid);
     app.pieceSkinId = psid;
   }
+  if (typeof d.themeId === 'string' && d.themeId.trim()) {
+    var thid = d.themeId.trim();
+    themes.applyThemeIdFromServer(thid);
+    app.themeId = themes.clampThemeIdToUnlocked(thid);
+  }
 }
 
 /**
@@ -1573,6 +1586,19 @@ app.syncPieceSkinSelectionToServerIfAuthed = function(skinId) {
   }
   wx.request(
     Object.assign(roomApi.mePieceSkinSelectOptions(skinId), {
+      success: function () {},
+      fail: function () {}
+    })
+  );
+}
+
+/** 棋盘主题装备写入 user_equipped_cosmetics.THEME（失败不影响本地已保存） */
+app.syncThemeToServerIfAuthed = function(themeId) {
+  if (!themeId || !authApi.getSessionToken()) {
+    return;
+  }
+  wx.request(
+    Object.assign(roomApi.meEquipOptions('THEME', themeId), {
       success: function () {},
       fail: function () {}
     })

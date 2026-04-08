@@ -367,6 +367,10 @@ var PIECE_SKINS = {
 /** 已开放可持久化的皮肤 id；与目录中 rowStatus: owned 一致 */
 var PIECE_SKIN_IDS = ['basic', 'tuan_moe', 'qingtao_libai'];
 
+/** 杂货铺装备种类：与后端 CosmeticCategory 对应（小写便于 JSON）；每类同时只穿戴一件 */
+var SHOP_CATEGORY_PIECE_SKIN = 'piece_skin';
+var SHOP_CATEGORY_THEME = 'theme';
+
 /** 杂货铺列表（双列 4 行，每页 8 格） */
 var PIECE_SKINS_PER_PAGE = 8;
 
@@ -449,15 +453,32 @@ function getThemeIdsForCycling() {
   return ids;
 }
 
+function getShopCategory(entry) {
+  if (!entry || typeof entry !== 'object') {
+    return SHOP_CATEGORY_PIECE_SKIN;
+  }
+  if (entry.shopCategory === SHOP_CATEGORY_THEME || entry.kind === 'theme') {
+    return SHOP_CATEGORY_THEME;
+  }
+  return SHOP_CATEGORY_PIECE_SKIN;
+}
+
 function getPieceSkinCatalog() {
   var tuanOk = isTuanMoeUnlocked();
   var qingOk = isPieceSkinUnlockedOnServer('qingtao_libai');
   var mintOk = isPieceSkinUnlockedOnServer('mint');
   var inkOk = isPieceSkinUnlockedOnServer('ink');
   return [
-    { id: 'basic', locked: false, label: '基础黑白', rowStatus: 'owned' },
+    {
+      id: 'basic',
+      shopCategory: SHOP_CATEGORY_PIECE_SKIN,
+      locked: false,
+      label: '基础黑白',
+      rowStatus: 'owned'
+    },
     {
       id: 'tuan_moe',
+      shopCategory: SHOP_CATEGORY_PIECE_SKIN,
       locked: !tuanOk,
       label: '团团萌肤',
       rowStatus: tuanOk ? 'owned' : 'locked',
@@ -465,6 +486,7 @@ function getPieceSkinCatalog() {
     },
     {
       id: 'qingtao_libai',
+      shopCategory: SHOP_CATEGORY_PIECE_SKIN,
       locked: !qingOk,
       label: '青萄荔白',
       rowStatus: qingOk ? 'owned' : 'points',
@@ -472,6 +494,7 @@ function getPieceSkinCatalog() {
     },
     {
       kind: 'theme',
+      shopCategory: SHOP_CATEGORY_THEME,
       id: 'mint',
       locked: !mintOk,
       label: '青瓷',
@@ -480,6 +503,7 @@ function getPieceSkinCatalog() {
     },
     {
       kind: 'theme',
+      shopCategory: SHOP_CATEGORY_THEME,
       id: 'ink',
       locked: !inkOk,
       label: '水墨',
@@ -690,12 +714,43 @@ function saveThemeId(id) {
   } catch (e) {}
 }
 
+/**
+ * 登录后 GET /api/me/rating 的 themeId：写入本地 STORAGE_KEY（服务端已校验解锁）
+ */
+function applyThemeIdFromServer(id) {
+  if (!id || typeof id !== 'string') {
+    return;
+  }
+  var tid = id.trim();
+  if (!THEMES[tid]) {
+    return;
+  }
+  if (tid === 'classic') {
+    try {
+      if (typeof wx !== 'undefined' && wx.setStorageSync) {
+        wx.setStorageSync(STORAGE_KEY, 'classic');
+      }
+    } catch (e) {}
+    return;
+  }
+  if ((tid === 'mint' || tid === 'ink') && isPieceSkinUnlockedOnServer(tid)) {
+    try {
+      if (typeof wx !== 'undefined' && wx.setStorageSync) {
+        wx.setStorageSync(STORAGE_KEY, tid);
+      }
+    } catch (e2) {}
+  }
+}
+
 var themesExports = {
   THEMES: THEMES,
   THEME_IDS: THEME_IDS,
   PIECE_SKINS: PIECE_SKINS,
   PIECE_SKIN_IDS: PIECE_SKIN_IDS,
   PIECE_SKINS_PER_PAGE: PIECE_SKINS_PER_PAGE,
+  SHOP_CATEGORY_PIECE_SKIN: SHOP_CATEGORY_PIECE_SKIN,
+  SHOP_CATEGORY_THEME: SHOP_CATEGORY_THEME,
+  getShopCategory: getShopCategory,
   getPieceSkinCatalog: getPieceSkinCatalog,
   getPieceSkinCatalogLabel: getPieceSkinCatalogLabel,
   isTuanMoeUnlocked: isTuanMoeUnlocked,
@@ -708,6 +763,7 @@ var themesExports = {
   clampThemeIdToUnlocked: clampThemeIdToUnlocked,
   loadSavedThemeId: loadSavedThemeId,
   saveThemeId: saveThemeId,
+  applyThemeIdFromServer: applyThemeIdFromServer,
   applyPieceSkin: applyPieceSkin,
   getPieceSkin: getPieceSkin,
   loadSavedPieceSkinId: loadSavedPieceSkinId,

@@ -61,18 +61,95 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
   var gapBw = app.rpx(18);
   var cyPv = cyRegion - clusterShift;
   var nameY = cyPv + pr + gapStoneTitle + titleLineH / 2;
+  var catalogLabelX = midX;
+  var catalogLabelAlign = 'center';
+  /** 主题卡：名称竖排在图右侧 */
+  var catalogLabelVertical = false;
+  /** 主题卡专用 font（宋体系 + 略大字号）；非主题时为空 */
+  var themeShopLabelFont = '';
+  var themeLabelCx = midX;
   var centerDist = 2 * pr + gapBw;
   var statusY = innerBottom - app.rpx(13);
 
-  if (entry && entry.kind === 'theme') {
+  if (entry && themes.getShopCategory(entry) === themes.SHOP_CATEGORY_THEME) {
+    var themePvw = app.rpx(158);
+    var themePvh = app.rpx(106);
+    var gapImgText = app.rpx(5) + 5;
+    var themeTitlePx = app.rpx(31);
+    themeShopLabelFont =
+      '600 ' +
+      themeTitlePx +
+      'px "Songti SC","STSong","SimSun","PingFang SC","Microsoft YaHei",serif';
+    app.ctx.font = themeShopLabelFont;
+    var themeLabLayout = themes.getPieceSkinCatalogLabel(entry);
+    var maxChW = 0;
+    var cix;
+    for (cix = 0; cix < themeLabLayout.length; cix++) {
+      var chW = app.ctx.measureText(themeLabLayout.charAt(cix)).width;
+      if (chW > maxChW) {
+        maxChW = chW;
+      }
+    }
+    if (!(maxChW > 0)) {
+      maxChW = themeTitlePx;
+    }
+
+    var shopThemeImg =
+      entry.id === 'mint'
+        ? app.shopThemeMintBoardImg
+        : entry.id === 'ink'
+          ? app.shopThemeInkBoardImg
+          : null;
+
+    var dw;
+    var dh;
+    if (shopThemeImg && shopThemeImg.width && shopThemeImg.height) {
+      var iw0 = shopThemeImg.width;
+      var ih0 = shopThemeImg.height;
+      var sc0 = Math.min(themePvw / iw0, themePvh / ih0);
+      dw = iw0 * sc0;
+      dh = ih0 * sc0;
+    } else {
+      dw = themePvw;
+      dh = themePvh;
+    }
+
+    var clusterW = dw + gapImgText + maxChW;
+    var contentLeft = midX - clusterW / 2;
+    cyPv = cyRegion;
+    var themeImgCx = contentLeft + dw / 2;
+    var imgLeft = themeImgCx - themePvw / 2;
+    var themeClipX = imgLeft;
+    var themeClipY = cyRegion - themePvh / 2;
+    nameY = cyRegion;
+    catalogLabelVertical = true;
+    themeLabelCx = contentLeft + dw + gapImgText + maxChW / 2;
+    catalogLabelAlign = 'center';
+
     var thm = themes.getTheme(entry.id);
-    var pvw = app.rpx(112);
-    var pvh = app.rpx(74);
+    var pvw = themePvw;
+    var pvh = themePvh;
     app.ctx.save();
     if (entry.locked) {
       app.ctx.globalAlpha = 0.78;
     }
-    app.drawPieceSkinModalThemeBoardPreview(midX, cyPv, pvw, pvh, thm);
+    if (shopThemeImg && shopThemeImg.width && shopThemeImg.height) {
+      var brPrev = app.rpx(10);
+      var bx = themeClipX;
+      var by = themeClipY;
+      app.ctx.beginPath();
+      app.roundRect(bx, by, pvw, pvh, brPrev);
+      app.ctx.clip();
+      app.ctx.drawImage(
+        shopThemeImg,
+        app.snapPx(themeImgCx - dw * 0.5),
+        app.snapPx(cyPv - dh * 0.5),
+        dw,
+        dh
+      );
+    } else {
+      app.drawPieceSkinModalThemeBoardPreview(themeImgCx, cyPv, pvw, pvh, thm);
+    }
     app.ctx.restore();
   } else {
   /** 未解锁也绘制真实棋子预览（贴图/渐变），便于「看见皮肤长什么样」；锁定态略降低不透明度 */
@@ -114,15 +191,34 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
   }
   }
 
-  app.ctx.font = '500 ' + titleFont + 'px ' + app.PIECE_SKIN_FONT_UI;
+  if (catalogLabelVertical && themeShopLabelFont) {
+    app.ctx.font = themeShopLabelFont;
+  } else {
+    app.ctx.font = '500 ' + titleFont + 'px ' + app.PIECE_SKIN_FONT_UI;
+  }
   app.ctx.fillStyle = '#3d342c';
-  app.ctx.textAlign = 'center';
+  app.ctx.textAlign = catalogLabelVertical ? 'center' : catalogLabelAlign;
   app.ctx.textBaseline = 'middle';
-  app.ctx.fillText(
-    themes.getPieceSkinCatalogLabel(entry),
-    app.snapPx(midX),
-    app.snapPx(nameY)
-  );
+  var catLab = themes.getPieceSkinCatalogLabel(entry);
+  if (catalogLabelVertical) {
+    var vStep = app.rpx(38);
+    var vn = catLab.length;
+    var vStartY = nameY - ((vn - 1) * vStep) / 2;
+    var vi;
+    for (vi = 0; vi < vn; vi++) {
+      app.ctx.fillText(
+        catLab.charAt(vi),
+        app.snapPx(themeLabelCx),
+        app.snapPx(vStartY + vi * vStep)
+      );
+    }
+  } else {
+    app.ctx.fillText(
+      catLab,
+      app.snapPx(catalogLabelAlign === 'center' ? midX : catalogLabelX),
+      app.snapPx(nameY)
+    );
+  }
 
   app.ctx.strokeStyle = 'rgba(92, 75, 58, 0.1)';
   app.ctx.lineWidth = app.rpx(1);
@@ -181,10 +277,13 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     }
   }
 
-  var equippedTheme = entry && entry.kind === 'theme' && app.themeId === entry.id;
+  var equippedTheme =
+    entry &&
+    themes.getShopCategory(entry) === themes.SHOP_CATEGORY_THEME &&
+    app.themeId === entry.id;
   var equippedPiece =
     entry &&
-    entry.kind !== 'theme' &&
+    themes.getShopCategory(entry) === themes.SHOP_CATEGORY_PIECE_SKIN &&
     app.pieceSkinId &&
     entry.id === app.pieceSkinId;
   if (equippedTheme || equippedPiece) {
@@ -312,6 +411,8 @@ app.drawPieceSkinModalOverlay = function(th) {
 }
 
 app.draw = function() {
+  /** 每帧重置为逻辑坐标系，避免某次 save/restore 失衡导致变换累积（画面套叠缩小） */
+  app.ctx.setTransform(app.DPR, 0, 0, app.DPR, 0, 0);
   if (app.screen !== 'home') {
     app.stopHomeMascotAnimLoop();
     app.checkinModalVisible = false;
@@ -346,8 +447,8 @@ app.draw = function() {
 
   app.layout = app.computeLayout();
   var th = app.getUiTheme();
-  /** 对局棋盘固定檀木（classic），与界面风格切换无关 */
-  var boardTh = themes.getTheme('classic');
+  /** 棋盘跟随后台所选界面主题（青瓷 / 水墨 / 檀木）；棋子再叠棋子皮肤 */
+  var boardTh = app.getCurrentTheme();
   var pieceTh = app.getThemeForPieces(boardTh);
   doodles.drawGameBoardCornerClouds(
     app.ctx,

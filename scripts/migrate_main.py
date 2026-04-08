@@ -78,6 +78,8 @@ STATE_NAMES = [
     "homeDockCheckinImg",
     "homeDockHistoryImg",
     "homeDockSkinImg",
+    "shopThemeMintBoardImg",
+    "shopThemeInkBoardImg",
     "homeDockRankImg",
     "homeMascotSheetImg",
     "homePressedDockCol",

@@ -1747,6 +1747,7 @@ app.cycleThemeNext = function() {
   var next = ids[(i + 1) % ids.length];
   app.themeId = next;
   themes.saveThemeId(next);
+  app.syncThemeToServerIfAuthed(next);
   app.themeBubbleText = themes.getTheme(next).name;
   app.startThemeBubbleFadeAnim();
   app.draw();
@@ -1755,23 +1756,26 @@ app.cycleThemeNext = function() {
 app.syncPieceSkinModalSelectionFromCurrent = function() {
   var cat = themes.getPieceSkinCatalog();
   var per = themes.PIECE_SKINS_PER_PAGE;
+  var pi = -1;
+  var ti = -1;
   var i;
   for (i = 0; i < cat.length; i++) {
     var e = cat[i];
-    if (e && e.kind === 'theme') {
-      if (e.id === app.themeId) {
-        app.pieceSkinModalPendingIdx = i;
-        app.pieceSkinModalPage = Math.floor(i / per);
-        return;
-      }
-    } else if (e && e.id === app.pieceSkinId) {
-      app.pieceSkinModalPendingIdx = i;
-      app.pieceSkinModalPage = Math.floor(i / per);
-      return;
+    if (!e) {
+      continue;
+    }
+    if (themes.getShopCategory(e) === themes.SHOP_CATEGORY_THEME && e.id === app.themeId) {
+      ti = i;
+    } else if (
+      themes.getShopCategory(e) === themes.SHOP_CATEGORY_PIECE_SKIN &&
+      e.id === app.pieceSkinId
+    ) {
+      pi = i;
     }
   }
-  app.pieceSkinModalPendingIdx = 0;
-  app.pieceSkinModalPage = 0;
+  var pick = pi >= 0 ? pi : ti >= 0 ? ti : 0;
+  app.pieceSkinModalPendingIdx = pick;
+  app.pieceSkinModalPage = Math.floor(pick / per);
 }
 
 app.openPieceSkinModal = function() {
@@ -2116,9 +2120,10 @@ app.redeemPieceSkinWithPoints = function() {
         }
         if (res.statusCode === 200 && d) {
           app.mergePieceSkinRedeemResponseToCache(d);
-          if (entry.kind === 'theme') {
+          if (themes.getShopCategory(entry) === themes.SHOP_CATEGORY_THEME) {
             app.themeId = entry.id;
             themes.saveThemeId(entry.id);
+            app.syncThemeToServerIfAuthed(entry.id);
           } else {
             app.pieceSkinId = entry.id;
             themes.savePieceSkinId(entry.id);
@@ -2175,9 +2180,10 @@ app.applyPieceSkinWear = function() {
     app.draw();
     return;
   }
-  if (entry.kind === 'theme') {
+  if (themes.getShopCategory(entry) === themes.SHOP_CATEGORY_THEME) {
     app.themeId = entry.id;
     themes.saveThemeId(entry.id);
+    app.syncThemeToServerIfAuthed(entry.id);
     app.draw();
     return;
   }

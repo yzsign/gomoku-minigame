@@ -194,6 +194,18 @@ function mePieceSkinSelectOptions(pieceSkinId) {
   };
 }
 
+/** POST /api/me/equip：按种类装备唯一一件（category: PIECE_SKIN | THEME | …，itemId） */
+function meEquipOptions(category, itemId) {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/equip',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify({ category: category, itemId: itemId })
+  };
+}
+
 /** GET /api/rooms/opponent-rating?roomId=：当前房间对手的公开天梯（须为双方玩家之一） */
 function roomOpponentRatingOptions(roomId) {
   return {
@@ -277,6 +289,7 @@ module.exports = {
   meCheckinOptions: meCheckinOptions,
   mePieceSkinRedeemOptions: mePieceSkinRedeemOptions,
   mePieceSkinSelectOptions: mePieceSkinSelectOptions,
+  meEquipOptions: meEquipOptions,
   roomOpponentRatingOptions: roomOpponentRatingOptions,
   userRatingByUserIdOptions: userRatingByUserIdOptions,
   gameSettleOptions: gameSettleOptions,

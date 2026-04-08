@@ -963,6 +963,10 @@ app.homeDockCheckinImg = null;
 app.homeDockRankImg = null;
 app.homeDockHistoryImg = null;
 app.homeDockSkinImg = null;
+/** 杂货铺「青瓷」棋盘展示图 images/ui/shop-celadon-board.png */
+app.shopThemeMintBoardImg = null;
+/** 杂货铺「水墨」棋盘展示图 images/ui/shop-ink-board.png */
+app.shopThemeInkBoardImg = null;
 /** 「团团萌肤」棋子贴图（UI/棋子 同步至 images/pieces） */
 app.tuanMoePieceBlackImg = null;
 app.tuanMoePieceWhiteImg = null;
@@ -978,7 +982,7 @@ app.homeMascotSheetImg = null;
 app.MASCOT_SHEET_FRAME_COUNT = 41;
 app.MASCOT_SHEET_FPS = 8;
 /** 修改首页 PNG 或路径时递增，避免热重载仍认为「已加载」而跳过 */
-app.HOME_UI_ASSETS_REV = 23;
+app.HOME_UI_ASSETS_REV = 25;
 /** 吉祥物资源所在分包（见 game.json）；wx.loadSubpackage 成功后再加载大图 */
 app.HOME_SUBPACKAGE_NAME = 'res-mascot';
 /** 分包内吉祥物路径前缀；失败时回退主包 images/ui/ */
