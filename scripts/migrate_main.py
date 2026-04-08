@@ -49,6 +49,7 @@ STATE_NAMES = [
     "homeMascotAnimTimer",
     "matchingAnimTimer",
     "historyListLoading",
+    "historyTabLoading",
     "historyLoadStartTs",
     "historyServerItems",
     "historyPeakEloCached",

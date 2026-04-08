@@ -448,6 +448,8 @@ app.historyPeakEloCached = 0;
 app.historyServerItems = [];
 /** 已登录时拉取 rating + game-history 完成前为 true，列表区显示加载态 */
 app.historyListLoading = false;
+/** 切换战绩筛选胶囊时拉取列表，列表区显示加载态 */
+app.historyTabLoading = false;
 /** 开始请求服务端战绩的时间戳，用于最短展示加载动画，避免一闪而过 */
 app.historyLoadStartTs = 0;
 

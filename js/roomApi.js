@@ -129,8 +129,8 @@ function mePveGameOptions(bodyObj) {
   };
 }
 
-/** GET /api/me/game-history?limit=&offset=：已结算联机对局列表（需 Authorization） */
-function meGameHistoryOptions(limit, offset) {
+/** GET /api/me/game-history?limit=&offset=&result=：已结算对局列表；result 可选 WIN|LOSS */
+function meGameHistoryOptions(limit, offset, result) {
   var lim =
     limit !== undefined && limit !== null ? Number(limit) : 50;
   var off =
@@ -141,13 +141,17 @@ function meGameHistoryOptions(limit, offset) {
   if (isNaN(off) || off < 0) {
     off = 0;
   }
+  var q =
+    GOMOKU_API_BASE +
+    '/api/me/game-history?limit=' +
+    encodeURIComponent(String(lim)) +
+    '&offset=' +
+    encodeURIComponent(String(off));
+  if (result === 'WIN' || result === 'LOSS') {
+    q += '&result=' + encodeURIComponent(result);
+  }
   return {
-    url:
-      GOMOKU_API_BASE +
-      '/api/me/game-history?limit=' +
-      encodeURIComponent(String(lim)) +
-      '&offset=' +
-      encodeURIComponent(String(off)),
+    url: q,
     /** 与 GET 等价；部分运行环境对 GET 返回 405，服务端已同时注册 POST */
     method: 'POST',
     header: withAuthHeaders({})

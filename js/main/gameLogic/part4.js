@@ -201,14 +201,17 @@ app.openReplayFromResult = function() {
   app.tryReplayByRoomFallback();
 }
 
-/** 棋谱回放底部按钮行 Y（相对原 bottomY 上移，避免挡住战绩列表区） */
+/**
+ * 棋谱回放底栏药丸中心 Y（相对 layout.bottomY）。
+ * 在原先 rpx(112) 基础上再上移约 20 逻辑像素（rpx(40) 在 375 宽屏约 20px）。
+ */
 app.getReplayControlsButtonY = function() {
-  return app.layout.bottomY - app.rpx(112);
+  return app.layout.bottomY - app.rpx(112) - app.rpx(40);
 };
 
-/** 「棋谱回放 · n/m」与按钮行的垂直间距 */
+/** 「棋谱回放 · n/m」与底栏药丸（高约 36）中心的间距，须足够大以免字与按钮重叠 */
 app.getReplaySubtitleY = function() {
-  return app.getReplayControlsButtonY() - app.rpx(46);
+  return app.getReplayControlsButtonY() - app.rpx(76);
 };
 
 /** 上一步 / 下一步：以屏宽中心对称，中心距=药丸宽，两钮边缘相贴无间隙 */
@@ -813,6 +816,57 @@ app.hideHistoryNativeLoading = function() {
   }
 }
 
+/**
+ * 按当前 historyFilterTab 请求 /api/me/game-history（全部不传 result，胜利/失败传 WIN|LOSS）。
+ */
+app.fetchHistoryListForCurrentFilter = function() {
+  if (!authApi.getSessionToken || !authApi.getSessionToken()) {
+    app.historyTabLoading = false;
+    app.draw();
+    return;
+  }
+  var rf = null;
+  if (app.historyFilterTab === 1) {
+    rf = 'WIN';
+  } else if (app.historyFilterTab === 2) {
+    rf = 'LOSS';
+  }
+  app.historyTabLoading = true;
+  app.draw();
+  if (typeof wx === 'undefined' || !wx.request) {
+    app.historyTabLoading = false;
+    app.draw();
+    return;
+  }
+  wx.request(
+    Object.assign(roomApi.meGameHistoryOptions(50, 0, rf), {
+      complete: function() {
+        app.historyTabLoading = false;
+        app.draw();
+      },
+      success: function(res) {
+        app.historyServerItems = [];
+        if (res.statusCode === 200 && res.data) {
+          var body = res.data;
+          if (body && typeof body === 'string') {
+            try {
+              body = JSON.parse(body);
+            } catch (eH) {
+              body = null;
+            }
+          }
+          if (body && Array.isArray(body.items)) {
+            app.historyServerItems = body.items;
+          }
+        }
+      },
+      fail: function() {
+        app.historyServerItems = [];
+      }
+    })
+  );
+}
+
 app.openHistoryScreen = function() {
   app.historyReplayOverlayVisible = false;
   app.stopReplayAuto();
@@ -1161,7 +1215,7 @@ app.drawHistory = function() {
   app.ctx.clip();
 
   var yBase = L.listTop - app.historyScrollY + app.rpx(8);
-  if (app.historyListLoading) {
+  if (app.historyListLoading || app.historyTabLoading) {
     var lx = L.padX;
     var lw = app.W - L.padX * 2;
     var lh = L.listH;

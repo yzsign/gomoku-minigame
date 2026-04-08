@@ -1045,6 +1045,7 @@ wx.onTouchStart(function (e) {
         app.stopHistoryMomentum();
         app.historyScrollY = 0;
         app.draw();
+        app.fetchHistoryListForCurrentFilter();
       }
       return;
     }
