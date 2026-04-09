@@ -479,16 +479,17 @@ app.draw = function() {
   app.drawBoardNameLabels(app.ctx, app.layout, th);
 
   app.ctx.save();
-  app.ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
-  app.ctx.shadowBlur = 6;
+  app.ctx.shadowColor = 'rgba(0, 0, 0, 0.06)';
+  app.ctx.shadowBlur = 4;
   app.ctx.shadowOffsetY = 1;
+  var titleFs = Math.max(14, Math.round(app.rpx(15)));
   render.drawText(
     app.ctx,
     '团团五子棋',
     app.W / 2,
     app.layout.topBar * 0.45,
-    17,
-    th.title
+    titleFs,
+    th.subtitle != null ? th.subtitle : th.title
   );
   app.ctx.restore();
 
@@ -508,6 +509,13 @@ app.draw = function() {
           : '等待连接…';
     } else if (app.gameOver) {
       status = '对局结束';
+    } else if (app.onlineDrawPending && app.onlineDrawRequesterColor != null) {
+      var drOn = app.onlineDrawRequesterColor === app.BLACK ? '黑' : '白';
+      if (app.pvpOnlineYourColor === app.onlineDrawRequesterColor) {
+        status = '已申请和棋，等待对方回应';
+      } else {
+        status = '对方提议和棋（' + drOn + '方），请在弹窗中选择';
+      }
     } else if (
       app.onlineUndoPending &&
       app.onlineUndoRequesterColor != null
@@ -516,7 +524,7 @@ app.draw = function() {
       if (app.pvpOnlineYourColor === app.onlineUndoRequesterColor) {
         status = '已申请悔棋，等待对方回应';
       } else {
-        status = '对方申请悔棋（' + urOn + '方），请选同意或拒绝';
+        status = '对方申请悔棋（' + urOn + '方），请在弹窗中选择';
       }
     } else if (app.current === app.pvpOnlineYourColor) {
       status = '轮到你（' + sideName + '）';
@@ -524,7 +532,11 @@ app.draw = function() {
       status = '对方思考中…';
     }
   } else if (app.isPvpLocal) {
-    if (app.localUndoRequest) {
+    if (app.localDrawRequest) {
+      var drL =
+        app.localDrawRequest.requesterColor === app.BLACK ? '黑' : '白';
+      status = drL + '方提议和棋，请对方选同意或拒绝';
+    } else if (app.localUndoRequest) {
       var urL = app.localUndoRequest.requesterColor === app.BLACK ? '黑' : '白';
       status = urL + '方申请悔棋，请对方选同意或拒绝';
     } else {
@@ -553,33 +565,27 @@ app.draw = function() {
       }
     }
   }
-  if (app.isPvpOnline || app.isPvpLocal) {
-    render.drawText(
-      app.ctx,
-      status,
-      app.W / 2,
-      app.layout.bottomY - 50,
-      15,
-      th.status
-    );
-  }
-
   var btnY = app.layout.bottomY;
   var undoLabel = '悔棋';
   var undoActive = !app.gameOver;
   if (undoActive && app.isPvpOnline) {
     if (app.onlineUndoPending) {
       if (app.pvpOnlineYourColor === app.onlineUndoRequesterColor) {
-        undoLabel = '撤销申请';
+        undoLabel = '等待中';
+        undoActive = false;
       } else {
         undoActive = false;
       }
+    } else if (app.onlineDrawPending) {
+      undoActive = false;
     } else if (app.countStonesOnBoard(app.board) === 0) {
       undoActive = false;
     }
   } else if (undoActive && app.isPvpLocal) {
     if (app.localUndoRequest) {
       undoLabel = '撤销申请';
+    } else if (app.localDrawRequest) {
+      undoActive = false;
     } else if (app.localMoveHistory.length === 0) {
       undoActive = false;
     }
@@ -589,15 +595,27 @@ app.draw = function() {
     }
   }
 
-  app.drawButton('返回首页', app.W * 0.18, btnY, false);
-  app.drawButton(undoLabel, app.W * 0.5, btnY, undoActive);
-  app.drawButton('重新开始', app.W * 0.82, btnY, false);
+  app.drawGameActionBar(undoLabel, undoActive);
 
   if (app.showUndoRespondRow()) {
-    var urY = btnY - 40;
+    var Ls = app.getGameActionBarLayout();
+    var urY =
+      (Ls.statusChipH > 0
+        ? Ls.statusCenterY - Ls.statusChipH * 0.5 - app.rpx(12)
+        : Ls.y0 - app.rpx(10)) - 17;
     app.drawButton('同意', app.W * 0.35, urY, true);
     app.drawButton('拒绝', app.W * 0.65, urY, true);
+  } else if (app.showDrawRespondRow()) {
+    var LsD = app.getGameActionBarLayout();
+    var drY =
+      (LsD.statusChipH > 0
+        ? LsD.statusCenterY - LsD.statusChipH * 0.5 - app.rpx(12)
+        : LsD.y0 - app.rpx(10)) - 17;
+    app.drawButton('同意', app.W * 0.35, drY, true);
+    app.drawButton('拒绝', app.W * 0.65, drY, true);
   }
+
+  app.drawUndoRejectFloat();
 
   app.drawThemeChrome(th);
 
@@ -609,6 +627,475 @@ app.draw = function() {
   }
 
   app.drawRatingCardOverlay(th);
+}
+
+/**
+ * 对局页底栏：浅色分段条 + 竖分割线；上为扁平彩色图标（PNG），下为说明字。
+ */
+app.getGameActionBarLayout = function() {
+  var btnY = app.layout.bottomY;
+  var pad = app.rpx(10);
+  var barW = app.W - pad * 2;
+  var barH =
+    app.GAME_ACTION_BAR_H_RPX != null
+      ? app.rpx(app.GAME_ACTION_BAR_H_RPX)
+      : app.rpx(128);
+  var x0 = pad;
+  var y0 = btnY - barH / 2;
+  /** 人机离线对战仅保留离开 + 悔棋，不展示和棋/认输 */
+  var colCount = !app.isPvpLocal && !app.isPvpOnline ? 2 : 4;
+  var colW = barW / colCount;
+  var centers = [];
+  var ci;
+  for (ci = 0; ci < colCount; ci++) {
+    centers.push(x0 + colW * (ci + 0.5));
+  }
+  var iconSize =
+    app.GAME_ACTION_BAR_ICON_RPX != null
+      ? app.rpx(app.GAME_ACTION_BAR_ICON_RPX)
+      : app.rpx(72);
+  var labelFs =
+    app.GAME_ACTION_BAR_LABEL_FS_RPX != null
+      ? app.rpx(app.GAME_ACTION_BAR_LABEL_FS_RPX)
+      : app.rpx(26);
+  var iconLabelGap =
+    app.GAME_ACTION_BAR_ICON_LABEL_GAP_RPX != null
+      ? app.rpx(app.GAME_ACTION_BAR_ICON_LABEL_GAP_RPX)
+      : app.rpx(6);
+  var chipHr =
+    app.GAME_STATUS_CHIP_H_RPX != null ? app.GAME_STATUS_CHIP_H_RPX : 0;
+  var chipH = chipHr > 0 ? app.rpx(chipHr) : 0;
+  var gapBarToChip = chipH > 0 ? app.rpx(9) : app.rpx(6);
+  var statusCenterY = y0 - gapBarToChip - chipH / 2;
+  return {
+    btnY: btnY,
+    pad: pad,
+    barW: barW,
+    barH: barH,
+    x0: x0,
+    y0: y0,
+    colCount: colCount,
+    colW: colW,
+    iconSize: iconSize,
+    labelFs: labelFs,
+    iconLabelGap: iconLabelGap,
+    centers: centers,
+    statusChipH: chipH,
+    statusCenterY: statusCenterY
+  };
+}
+
+/**
+ * 对局状态：圆角胶囊 + 居中字（人机 / 同桌 / 联机共用）
+ */
+app.drawGameStatusPill = function(text, th) {
+  if (!text) {
+    return;
+  }
+  var ctx = app.ctx;
+  var L = app.getGameActionBarLayout();
+  var chipH = L.statusChipH;
+  var cy = L.statusCenterY;
+  var fs = Math.round(app.rpx(15));
+  var padX = app.rpx(22);
+  var maxW = app.W - app.rpx(24);
+  var tw;
+  for (;;) {
+    ctx.font =
+      '600 ' +
+      fs +
+      'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+    tw = ctx.measureText(text).width;
+    if (tw + padX * 2 <= maxW || fs <= 12) {
+      break;
+    }
+    fs -= 1;
+  }
+  var bw = Math.min(maxW, tw + padX * 2);
+  var bx = app.W / 2 - bw / 2;
+  var by = cy - chipH / 2;
+  var rr = chipH / 2;
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.06)';
+  ctx.shadowBlur = app.rpx(6);
+  ctx.shadowOffsetY = app.rpx(1);
+  if (th.id === 'ink') {
+    ctx.fillStyle = 'rgba(38, 34, 30, 0.92)';
+    ctx.strokeStyle = 'rgba(255, 250, 245, 0.14)';
+  } else {
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.07)';
+  }
+  ctx.lineWidth = 1;
+  app.roundRect(bx, by, bw, chipH, rr);
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+  ctx.fillStyle = th.id === 'ink' ? '#f0ebe6' : '#7a726a';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, app.snapPx(app.W / 2), app.snapPx(cy));
+  ctx.restore();
+}
+
+/** 联机：对方拒绝悔棋时横向飘过提示 */
+app.stopUndoRejectFloatAnim = function() {
+  if (app.undoRejectFloatTimer != null) {
+    clearInterval(app.undoRejectFloatTimer);
+    app.undoRejectFloatTimer = null;
+  }
+};
+
+app.startUndoRejectedFloat = function(floatText) {
+  app.stopUndoRejectFloatAnim();
+  app.undoRejectFloat = {
+    startMs: Date.now(),
+    durationMs: 3800,
+    text: floatText || '对方拒绝了你的悔棋'
+  };
+  var self = app;
+  app.undoRejectFloatTimer = setInterval(function() {
+    if (!self.undoRejectFloat) {
+      self.stopUndoRejectFloatAnim();
+      return;
+    }
+    if (
+      Date.now() - self.undoRejectFloat.startMs >=
+      (self.undoRejectFloat.durationMs || 3800)
+    ) {
+      self.undoRejectFloat = null;
+      self.stopUndoRejectFloatAnim();
+    }
+    self.draw();
+  }, 33);
+  app.draw();
+};
+
+app.drawUndoRejectFloat = function() {
+  if (!app.undoRejectFloat || app.screen !== 'game') {
+    return;
+  }
+  var uf = app.undoRejectFloat;
+  var elapsed = Date.now() - uf.startMs;
+  var dur = uf.durationMs || 3800;
+  if (elapsed >= dur) {
+    return;
+  }
+  var lay = app.layout;
+  if (!lay) {
+    return;
+  }
+  var text = uf.text || '对方拒绝了你的悔棋';
+  var ctx = app.ctx;
+  var fs = Math.max(17, Math.round(app.rpx(32)));
+  ctx.save();
+  /** 常规字重；优先行楷/隶书笔势（偏张扬），无则系统黑体 */
+  ctx.font =
+    'normal ' +
+    fs +
+    'px "STXingkai","Xingkai SC","STXingkai-Regular","Kaiti SC","STKaiti","KaiTi","STLiti","LiSu","PingFang SC","Microsoft YaHei",serif';
+  var tw = ctx.measureText(text).width;
+  var progress = elapsed / dur;
+  /** 沿棋盘宽度从左到右飘过；垂直略偏上于棋盘中心 */
+  var boardW = lay.boardPx;
+  var travelStart = -tw * 0.5;
+  var travelEnd = boardW + tw * 0.5;
+  var x = lay.originX + travelStart + progress * (travelEnd - travelStart);
+  var y = lay.originY + boardW * 0.5 - app.rpx(32) - 60;
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(2, Math.round(fs * 0.11));
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
+  ctx.fillStyle = 'rgba(215, 72, 68, 0.98)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.strokeText(text, app.snapPx(x), app.snapPx(y));
+  ctx.fillText(text, app.snapPx(x), app.snapPx(y));
+  ctx.restore();
+};
+
+app.drawGameActionBar = function(undoLabel, undoActive) {
+  var th = app.getUiTheme();
+  var L = app.getGameActionBarLayout();
+  var ctx = app.ctx;
+  var rBar = app.rpx(12);
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.05)';
+  ctx.shadowBlur = app.rpx(8);
+  ctx.shadowOffsetY = app.rpx(2);
+  if (th.id === 'ink') {
+    ctx.fillStyle = 'rgba(32, 28, 26, 0.94)';
+    ctx.strokeStyle = 'rgba(255, 248, 240, 0.08)';
+  } else {
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
+  }
+  ctx.lineWidth = 1;
+  app.roundRect(L.x0, L.y0, L.barW, L.barH, rBar);
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  var divTop = L.y0 + app.rpx(9);
+  var divBot = L.y0 + L.barH - app.rpx(9);
+  ctx.strokeStyle =
+    th.id === 'ink' ? 'rgba(255, 245, 235, 0.1)' : 'rgba(0, 0, 0, 0.08)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  var divI;
+  for (divI = 1; divI < L.colCount; divI++) {
+    ctx.moveTo(app.snapPx(L.x0 + divI * L.colW), app.snapPx(divTop));
+    ctx.lineTo(app.snapPx(L.x0 + divI * L.colW), app.snapPx(divBot));
+  }
+  ctx.stroke();
+
+  var drawOk = app.isDrawButtonActive();
+  var resignOk = app.isResignButtonActive();
+  var pveBarOnly = L.colCount === 2;
+  var cols = [
+    {
+      img: app.gameBarHomeImg,
+      kind: 'home',
+      enabled: true
+    },
+    {
+      img: app.gameBarUndoImg,
+      kind: 'undo',
+      enabled: undoActive
+    }
+  ];
+  if (!pveBarOnly) {
+    cols.push(
+      {
+        img: app.gameBarDrawImg,
+        kind: 'draw',
+        enabled: drawOk
+      },
+      {
+        img: app.gameBarResignImg,
+        kind: 'flag',
+        enabled: resignOk
+      }
+    );
+  }
+  var gameBarLabels = pveBarOnly
+    ? ['离开', '悔棋']
+    : ['离开', '悔棋', '和棋', '认输'];
+  var M = app.gameBarIconSizeMul || {};
+  var labelFsPx = Math.max(12, Math.round(L.labelFs));
+  /** 底栏各列说明字同一基线，避免因各列图标倍率不同导致上下错位 */
+  var labelBottomPad = app.rpx(8);
+  var labelY =
+    L.y0 + L.barH - labelBottomPad - labelFsPx * 0.5;
+  /** 底栏图标底边对齐线（与文字间距固定） */
+  var alignBottomY = labelY - labelFsPx * 0.5 - L.iconLabelGap;
+  var minIconTop = L.y0 + app.rpx(6);
+  /** 浅色条统一深灰字；水墨底栏用浅色字 */
+  var gameBarLabelColor =
+    th.id === 'ink'
+      ? 'rgba(238, 230, 220, 0.98)'
+      : '#3a3836';
+  var i;
+  for (i = 0; i < cols.length; i++) {
+    var col = cols[i];
+    var mul = M[col.kind] != null ? M[col.kind] : 1;
+    var szMax = L.iconSize * mul;
+    var sz = szMax;
+    var measured;
+    var iconTopCol;
+    var attempt;
+    for (attempt = 0; attempt < 28; attempt++) {
+      measured = app.measureGameBarIconDrawSize(col.img, col.kind, sz);
+      iconTopCol = alignBottomY - measured.dh;
+      if (iconTopCol >= minIconTop - 0.25) {
+        break;
+      }
+      sz *= 0.94;
+      if (sz < L.iconSize * 0.48) {
+        break;
+      }
+    }
+    measured = app.measureGameBarIconDrawSize(col.img, col.kind, sz);
+    iconTopCol = alignBottomY - measured.dh;
+    var cx = L.centers[i];
+    var colLeft = L.x0 + i * L.colW;
+    if (i === 1 && undoActive && th.id === 'ink') {
+      ctx.fillStyle = 'rgba(255, 200, 120, 0.08)';
+      app.roundRect(
+        colLeft + app.rpx(3),
+        L.y0 + app.rpx(4),
+        L.colW - app.rpx(6),
+        L.barH - app.rpx(8),
+        app.rpx(8)
+      );
+      ctx.fill();
+    }
+    if (!pveBarOnly && i === 2 && drawOk && app.onlineDrawPending && th.id === 'ink') {
+      ctx.fillStyle = 'rgba(255, 200, 120, 0.08)';
+      app.roundRect(
+        colLeft + app.rpx(3),
+        L.y0 + app.rpx(4),
+        L.colW - app.rpx(6),
+        L.barH - app.rpx(8),
+        app.rpx(8)
+      );
+      ctx.fill();
+    }
+    ctx.save();
+    ctx.globalAlpha = col.enabled ? 1 : 0.55;
+    app.drawGameBarAssetOrVector(
+      ctx,
+      col.img,
+      col.kind,
+      cx,
+      iconTopCol,
+      sz,
+      th.btnGhostText
+    );
+    ctx.restore();
+    ctx.save();
+    /** 悔棋：仅图标可置灰；「悔棋」二字保持与其它说明字同色同不透明度 */
+    var labelAlpha =
+      i === 1 ? 1 : col.enabled ? 1 : 0.55;
+    ctx.globalAlpha = labelAlpha;
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'rgba(0,0,0,0)';
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = gameBarLabelColor;
+    ctx.fillStyle = gameBarLabelColor;
+    render.drawText(
+      ctx,
+      gameBarLabels[i],
+      cx,
+      labelY,
+      labelFsPx,
+      gameBarLabelColor,
+      'normal'
+    );
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+/**
+ * 与 drawGameBarAssetOrVector 一致：PNG 为 contain 缩放后的 dw/dh；矢量大致按槽高。
+ * 用于底栏按「底边对齐」排布，避免各素材透明边距/长宽比不同造成高低不一。
+ */
+app.measureGameBarIconDrawSize = function(img, iconKind, iconSize) {
+  var iw;
+  var ih;
+  if (img) {
+    iw = img.width;
+    ih = img.height;
+    if ((!iw || !ih) && img.naturalWidth != null && img.naturalHeight != null) {
+      iw = img.naturalWidth;
+      ih = img.naturalHeight;
+    }
+    if (iw > 0 && ih > 0) {
+      var sc = Math.min(iconSize / iw, iconSize / ih);
+      return { dw: iw * sc, dh: ih * sc };
+    }
+  }
+  return { dw: iconSize, dh: iconSize * 0.92 };
+};
+
+/** PNG 未就绪时用矢量图标占位（风格与扁平图区分，仅兜底） */
+app.drawGameBarAssetOrVector = function(
+  ctx,
+  img,
+  iconKind,
+  cx,
+  iconTop,
+  iconSize,
+  fg
+) {
+  if (img) {
+    var iw = img.width;
+    var ih = img.height;
+    if ((!iw || !ih) && img.naturalWidth != null && img.naturalHeight != null) {
+      iw = img.naturalWidth;
+      ih = img.naturalHeight;
+    }
+    if (iw > 0 && ih > 0) {
+      var sc = Math.min(iconSize / iw, iconSize / ih);
+      var dw = iw * sc;
+      var dh = ih * sc;
+      var ix = cx - dw / 2;
+      ctx.drawImage(img, app.snapPx(ix), app.snapPx(iconTop), dw, dh);
+      return;
+    }
+  }
+  var icy = iconTop + iconSize * 0.5;
+  var s = iconSize * 0.42;
+  app.drawGameActionIcon(ctx, iconKind, cx, icy, s, fg);
+}
+
+/**
+ * 对局底栏小图标（描线/填充与主题色一致）。
+ * @param {number} s 图标半宽（约 rpx(7.5)）
+ */
+app.drawGameActionIcon = function(ctx, iconKind, icx, icy, s, fg) {
+  ctx.save();
+  ctx.strokeStyle = fg;
+  ctx.fillStyle = fg;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(1.65, app.rpx(2));
+
+  if (iconKind === 'home') {
+    ctx.beginPath();
+    ctx.moveTo(icx, icy - s * 0.5);
+    ctx.lineTo(icx - s * 0.7, icy - s * 0.02);
+    ctx.lineTo(icx - s * 0.7, icy + s * 0.55);
+    ctx.lineTo(icx + s * 0.7, icy + s * 0.55);
+    ctx.lineTo(icx + s * 0.7, icy - s * 0.02);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(icx - s * 0.18, icy + s * 0.55);
+    ctx.lineTo(icx - s * 0.18, icy + s * 0.28);
+    ctx.lineTo(icx + s * 0.18, icy + s * 0.28);
+    ctx.lineTo(icx + s * 0.18, icy + s * 0.55);
+    ctx.stroke();
+  } else if (iconKind === 'undo') {
+    ctx.beginPath();
+    ctx.arc(
+      icx + s * 0.22,
+      icy + s * 0.12,
+      s * 0.52,
+      Math.PI * 0.72,
+      Math.PI * 1.48,
+      true
+    );
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(icx - s * 0.28, icy - s * 0.22);
+    ctx.lineTo(icx - s * 0.52, icy - s * 0.02);
+    ctx.lineTo(icx - s * 0.32, icy + s * 0.12);
+    ctx.stroke();
+  } else if (iconKind === 'draw') {
+    ctx.beginPath();
+    ctx.moveTo(icx - s * 0.62, icy - s * 0.12);
+    ctx.lineTo(icx + s * 0.62, icy - s * 0.12);
+    ctx.moveTo(icx - s * 0.62, icy + s * 0.18);
+    ctx.lineTo(icx + s * 0.62, icy + s * 0.18);
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(icx - s * 0.42, icy + s * 0.62);
+    ctx.lineTo(icx - s * 0.42, icy - s * 0.55);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(icx - s * 0.42, icy - s * 0.48);
+    ctx.lineTo(icx + s * 0.58, icy - s * 0.18);
+    ctx.lineTo(icx - s * 0.42, icy + s * 0.12);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 app.drawButton = function(label, cx, cy, active) {
@@ -772,9 +1259,9 @@ app.hitHomeBottomNav = function(clientX, clientY) {
     return null;
   }
   var innerW = app.W - pad * 2;
-  var colW = innerW / 3;
+  var colW = innerW / 4;
   var col = Math.floor((clientX - pad) / colW);
-  if (col < 0 || col > 2) {
+  if (col < 0 || col > 3) {
     return null;
   }
   return col;
@@ -836,32 +1323,40 @@ app.hitPveColorButton = function(clientX, clientY) {
 }
 
 app.hitGameButton = function(clientX, clientY) {
-  var btnY = app.layout.bottomY;
-  var halfW = 36;
-  var halfH = 22;
-  var list = [
-    { id: 'back', x: app.W * 0.18 },
-    { id: 'undo', x: app.W * 0.5 },
-    { id: 'reset', x: app.W * 0.82 }
-  ];
-  var i;
-  for (i = 0; i < list.length; i++) {
-    var b = list[i];
-    if (
-      Math.abs(clientX - b.x) <= halfW &&
-      Math.abs(clientY - btnY) <= halfH
-    ) {
-      return b.id;
-    }
+  var L = app.getGameActionBarLayout();
+  if (
+    clientX < L.x0 ||
+    clientX > L.x0 + L.barW ||
+    clientY < L.y0 ||
+    clientY > L.y0 + L.barH
+  ) {
+    return null;
   }
-  return null;
+  var col = Math.floor((clientX - L.x0) / L.colW);
+  if (col < 0 || col >= L.colCount) {
+    return null;
+  }
+  if (col === 0) {
+    return 'back';
+  }
+  if (col === 1) {
+    return 'undo';
+  }
+  if (col === 2) {
+    return 'draw';
+  }
+  return 'resign';
 }
 
 app.hitUndoRespondRow = function(clientX, clientY) {
   if (!app.showUndoRespondRow()) {
     return null;
   }
-  var urY = app.layout.bottomY - 40;
+  var Ls = app.getGameActionBarLayout();
+  var urY =
+    (Ls.statusChipH > 0
+      ? Ls.statusCenterY - Ls.statusChipH * 0.5 - app.rpx(12)
+      : Ls.y0 - app.rpx(10)) - 17;
   var halfW = 44;
   var halfH = 20;
   if (
@@ -879,14 +1374,54 @@ app.hitUndoRespondRow = function(clientX, clientY) {
   return null;
 }
 
+app.hitDrawRespondRow = function(clientX, clientY) {
+  if (!app.showDrawRespondRow()) {
+    return null;
+  }
+  var Ls = app.getGameActionBarLayout();
+  var drY =
+    (Ls.statusChipH > 0
+      ? Ls.statusCenterY - Ls.statusChipH * 0.5 - app.rpx(12)
+      : Ls.y0 - app.rpx(10)) - 17;
+  var halfW = 44;
+  var halfH = 20;
+  if (
+    Math.abs(clientX - app.W * 0.35) <= halfW &&
+    Math.abs(clientY - drY) <= halfH
+  ) {
+    return 'accept';
+  }
+  if (
+    Math.abs(clientX - app.W * 0.65) <= halfW &&
+    Math.abs(clientY - drY) <= halfH
+  ) {
+    return 'reject';
+  }
+  return null;
+}
+
 app.handleUndoButtonTap = function() {
   if (app.gameOver) {
     return;
   }
+  if (app.localDrawRequest) {
+    wx.showToast({ title: '请先处理和棋申请', icon: 'none' });
+    return;
+  }
+  if (app.isPvpOnline && app.onlineDrawPending) {
+    wx.showToast({ title: '请先处理和棋申请', icon: 'none' });
+    return;
+  }
   if (app.isPvpOnline) {
     if (app.onlineUndoPending) {
-      if (app.pvpOnlineYourColor === app.onlineUndoRequesterColor) {
-        app.sendOnlineUndo('UNDO_CANCEL');
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({
+          title:
+            app.pvpOnlineYourColor === app.onlineUndoRequesterColor
+              ? '请等待对方处理'
+              : '请在弹窗中同意或拒绝',
+          icon: 'none'
+        });
       }
       return;
     }
@@ -1078,7 +1613,13 @@ app.tryPlace = function(r, c) {
   if (app.localUndoRequest) {
     return;
   }
+  if (app.localDrawRequest) {
+    return;
+  }
   if (app.isPvpOnline && app.onlineUndoPending) {
+    return;
+  }
+  if (app.isPvpOnline && app.onlineDrawPending) {
     return;
   }
   if (app.isPvpOnline) {
@@ -1588,8 +2129,28 @@ wx.onTouchStart(function (e) {
     (app.gameOver || app.onlineResultOverlaySticky)
   ) {
     var rb = app.hitResultButton(x, y);
-    if (rb === 'again') {
-      app.resetGame();
+    if (rb === 'rematch_same') {
+      if (app.isPvpOnline) {
+        app.sendOnlineRematchRequest();
+      } else {
+        app.resetGame();
+      }
+      return;
+    }
+    if (rb === 'rematch_new') {
+      if (app.isPvpOnline) {
+        app.startRandomMatchFromResultOverlay();
+      } else {
+        app.resetGame();
+      }
+      return;
+    }
+    if (rb === 'rematch_accept') {
+      app.sendOnlineRematchAccept();
+      return;
+    }
+    if (rb === 'rematch_decline') {
+      app.sendOnlineRematchDecline();
       return;
     }
     if (rb === 'replay') {
@@ -1605,19 +2166,21 @@ wx.onTouchStart(function (e) {
 
   var urBtn = app.hitUndoRespondRow(x, y);
   if (urBtn === 'accept') {
-    if (app.isPvpLocal) {
-      app.execLocalUndoAccept();
-    } else if (app.isPvpOnline) {
-      app.sendOnlineUndo('UNDO_ACCEPT');
-    }
+    app.execLocalUndoAccept();
     return;
   }
   if (urBtn === 'reject') {
-    if (app.isPvpLocal) {
-      app.execLocalUndoReject();
-    } else if (app.isPvpOnline) {
-      app.sendOnlineUndo('UNDO_REJECT');
-    }
+    app.execLocalUndoReject();
+    return;
+  }
+
+  var drBtn = app.hitDrawRespondRow(x, y);
+  if (drBtn === 'accept') {
+    app.execLocalDrawAccept();
+    return;
+  }
+  if (drBtn === 'reject') {
+    app.execLocalDrawReject();
     return;
   }
 
@@ -1630,16 +2193,29 @@ wx.onTouchStart(function (e) {
     app.handleUndoButtonTap();
     return;
   }
-  if (gbtn === 'reset') {
-    if (app.isPvpOnline) {
-      if (app.gameOver) {
-        app.resetGame();
-      } else {
-        wx.showToast({ title: '对局中无法重开', icon: 'none' });
-      }
+  if (gbtn === 'draw') {
+    app.handleDrawButtonTap();
+    return;
+  }
+  if (gbtn === 'resign') {
+    if (!app.isResignButtonActive()) {
       return;
     }
-    app.resetGame();
+    if (typeof wx.showModal === 'function') {
+      wx.showModal({
+        title: '认输',
+        content: '确定认输吗？对方将获胜。',
+        confirmText: '认输',
+        cancelText: '取消',
+        success: function (res) {
+          if (res.confirm) {
+            app.handleResignTap();
+          }
+        }
+      });
+    } else {
+      app.handleResignTap();
+    }
     return;
   }
 
@@ -1877,7 +2453,7 @@ if (typeof wx.onTouchEnd === 'function') {
       app.homePressedDockCol = null;
       app.draw();
       if (endDock === pdc) {
-        if (pdc === 2) {
+        if (pdc === 3) {
           app.openPieceSkinModal();
           return;
         }
@@ -1950,6 +2526,18 @@ if (typeof wx.onTouchEnd === 'function') {
           return;
         }
         if (pdc === 1) {
+          authApi.ensureSession(function (sessOk) {
+            if (!sessOk || !authApi.getSessionToken()) {
+              if (typeof wx.showToast === 'function') {
+                wx.showToast({ title: '请先登录', icon: 'none' });
+              }
+              return;
+            }
+            app.showMyRatingModal();
+          });
+          return;
+        }
+        if (pdc === 2) {
           app.openHistoryScreen();
           return;
         }

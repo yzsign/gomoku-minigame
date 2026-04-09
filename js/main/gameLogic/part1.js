@@ -120,6 +120,21 @@ app.getOpponentDisplayName = function() {
   return '电脑';
 }
 
+/**
+ * 本局「我」在棋盘旁展示的执子色；联机取 pvpOnlineYourColor，其余取 pveHumanColor（含同桌）。
+ */
+app.getMyAssignedStoneColor = function() {
+  if (app.isPvpOnline) {
+    return app.pvpOnlineYourColor;
+  }
+  return app.pveHumanColor;
+};
+
+/** 对手执子色（与「我」相对） */
+app.getOpponentAssignedStoneColor = function() {
+  return app.oppositeColor(app.getMyAssignedStoneColor());
+};
+
 /** 与 render.drawBoard 中棋盘外接矩形一致 */
 app.getBoardOuterRect = function(layout) {
   var cell = layout.cell;
@@ -155,13 +170,19 @@ app.truncateNameToWidth = function(ctx, text, maxW) {
 app.computeBoardNameLabelLayout = function(layout) {
   var r = app.getBoardOuterRect(layout);
   var pad = Math.max(8, layout.cell * 0.22);
-  var outerGap = Math.max(10, layout.cell * 0.34);
   var maxW = r.bw * 0.48;
   var fontPx = Math.max(
     15,
     Math.min(20, Math.round(14 + layout.cell * 0.22))
   );
-  var avR = Math.max(17, Math.min(30, Math.round(layout.cell * 0.46)));
+  var avR = Math.max(22, Math.min(44, Math.round(layout.cell * 0.64)));
+  /** 头像圆与棋盘边至少留空，避免大头像压住格线（与 oppCy/myCy 推导一致） */
+  var boardEdgePad = Math.max(6, app.rpx(8));
+  var outerGap = Math.max(
+    10,
+    layout.cell * 0.34,
+    avR - fontPx * 0.5 + boardEdgePad
+  );
   var myImg = app.getMyAvatarImageForUi();
   var oppImg =
     app.isPvpOnline &&
@@ -172,9 +193,11 @@ app.computeBoardNameLabelLayout = function(layout) {
       : defaultAvatars.getOnlineOpponentDefaultAvatarImage();
   var hasMyAv = myImg && myImg.width && myImg.height;
   var hasOppAv = oppImg && oppImg.width && oppImg.height;
-  var myNameExtra = hasMyAv ? avR * 2 + 6 : 0;
-  var oppNameExtra = hasOppAv ? avR * 2 + 6 : 0;
   var textTop = r.by + r.bh + outerGap;
+  var myNameExtra = hasMyAv ? 2 * avR + 6 : 0;
+  var myTextX = r.bx + pad + myNameExtra;
+  var oppNameExtra = hasOppAv ? 2 * avR + 6 : 0;
+  var oppNameRightX = r.bx + r.bw - pad - oppNameExtra;
   return {
     r: r,
     pad: pad,
@@ -187,22 +210,86 @@ app.computeBoardNameLabelLayout = function(layout) {
     hasMyAv: hasMyAv,
     hasOppAv: hasOppAv,
     textTop: textTop,
-    myTextX: r.bx + pad + myNameExtra,
+    myTextX: myTextX,
     myCx: r.bx + pad + avR,
     /** 与本人昵称同一行垂直中线（见 draw 中 textBaseline 'middle'） */
     myCy: textTop + fontPx * 0.5,
-    oppNameRightX: r.bx + r.bw - pad - oppNameExtra,
+    oppNameRightX: oppNameRightX,
     oppCx: r.bx + r.bw - pad - avR,
     /** 与对手昵称同一行垂直中线（见 draw 中 textBaseline 'middle'） */
     oppCy: r.by - outerGap - fontPx * 0.5
   };
 }
 
+/**
+ * 头像右下角执子徽章：扁平圆点 + 描边，不抢头像主体，层次比盘面立体子更轻。
+ */
+app.drawAvatarStoneBadge = function(ctx, cxAvatar, cyAvatar, avR, stoneColor, th) {
+  var isBlack = stoneColor === app.BLACK;
+  var ink = th && th.id === 'ink';
+  var k = 0.68;
+  var bx = cxAvatar + avR * 0.707 * k;
+  var by = cyAvatar + avR * 0.707 * k;
+  var br = Math.max(5, Math.min(10, avR * 0.30));
+  ctx.save();
+  ctx.shadowBlur = 0;
+  ctx.shadowColor = 'transparent';
+  ctx.beginPath();
+  ctx.arc(bx, by, br + Math.max(0.8, app.rpx(1.2)), 0, Math.PI * 2);
+  ctx.fillStyle = ink ? 'rgba(18,18,22,0.92)' : 'rgba(255,252,248,0.96)';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(bx, by, br, 0, Math.PI * 2);
+  if (isBlack) {
+    var g = ctx.createRadialGradient(
+      bx - br * 0.35,
+      by - br * 0.35,
+      0,
+      bx,
+      by,
+      br
+    );
+    g.addColorStop(0, ink ? '#3d3d48' : '#353540');
+    g.addColorStop(1, ink ? '#1a1a22' : '#121218');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = ink ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.94)';
+    ctx.lineWidth = Math.max(1.1, app.rpx(2.2));
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(bx - br * 0.28, by - br * 0.28, br * 0.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fill();
+  } else {
+    var g2 = ctx.createRadialGradient(
+      bx + br * 0.25,
+      by - br * 0.3,
+      0,
+      bx,
+      by,
+      br
+    );
+    g2.addColorStop(0, ink ? '#f5f3f0' : '#ffffff');
+    g2.addColorStop(1, ink ? '#dcd8d2' : '#ebe6df');
+    ctx.fillStyle = g2;
+    ctx.fill();
+    ctx.strokeStyle = ink ? 'rgba(70,65,60,0.42)' : 'rgba(55,48,42,0.36)';
+    ctx.lineWidth = Math.max(1, app.rpx(2));
+    ctx.stroke();
+  }
+  ctx.restore();
+};
+
 app.drawBoardNameLabels = function(ctx, layout, th) {
   var L = app.computeBoardNameLabelLayout(layout);
   var oppName = app.getOpponentDisplayName();
   var myName = app.getMyDisplayName();
   ctx.save();
+  var ink = th.id === 'ink';
+  ctx.shadowColor = ink ? 'rgba(0, 0, 0, 0.35)' : 'rgba(255, 252, 248, 0.75)';
+  ctx.shadowBlur = ink ? 3 : 4;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = ink ? 1 : 1;
   ctx.font =
     'bold ' +
     L.fontPx +
@@ -211,12 +298,12 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
   oppName = app.truncateNameToWidth(
     ctx,
     oppName,
-    Math.max(40, L.maxW - (L.hasOppAv ? L.avR * 2 + 6 : 0))
+    Math.max(32, L.maxW - (L.hasOppAv ? L.avR * 2 + 6 : 0))
   );
   myName = app.truncateNameToWidth(
     ctx,
     myName,
-    Math.max(40, L.maxW - (L.hasMyAv ? L.avR * 2 + 6 : 0))
+    Math.max(32, L.maxW - (L.hasMyAv ? L.avR * 2 + 6 : 0))
   );
   /** 对手：棋盘右上角外侧；无网络图时用服务端性别或「与本人相反」默认 */
   ctx.textAlign = 'right';
@@ -231,6 +318,14 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
       L.avR,
       th
     );
+    app.drawAvatarStoneBadge(
+      ctx,
+      L.oppCx,
+      L.oppCy,
+      L.avR,
+      app.getOpponentAssignedStoneColor(),
+      th
+    );
   }
   /** 我：棋盘左下角外侧；无网络图时用服务端 users.gender 对应默认 */
   if (L.hasMyAv) {
@@ -242,11 +337,21 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
       L.avR,
       th
     );
+    app.drawAvatarStoneBadge(
+      ctx,
+      L.myCx,
+      L.myCy,
+      L.avR,
+      app.getMyAssignedStoneColor(),
+      th
+    );
   }
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = th.title || th.subtitle;
   ctx.fillText(myName, app.snapPx(L.myTextX), app.snapPx(L.myCy));
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
   ctx.restore();
 }
 
@@ -428,7 +533,7 @@ app.themeBubbleRafId = null;
 app.homeDrawerOpen = false;
 /** 首页三主按钮按下态：'random' | 'pvp' | 'pve' | null（松手在同类按钮上才触发逻辑） */
 app.homePressedButton = null;
-/** 首页底部 Dock 按下列：0～2 或 null（与 hitHomeBottomNav 一致；对战排行入口已隐藏） */
+/** 首页底部 Dock 按下列：0～3 或 null（与 hitHomeBottomNav 一致：签、对战排行、战绩、杂货铺） */
 app.homePressedDockCol = null;
 
 /** 我的战绩页：本机最近对局 + 滚动 */
@@ -867,6 +972,8 @@ app.showResultOverlay = false;
 
 /** 联机：对方已重置开新局，本端仍显示上一局结算直至用户点「再来一局/返回首页」 */
 app.onlineResultOverlaySticky = false;
+/** 联机终局：WS STATE.rematchRequesterColor，null 表示无人发起再来一局邀请 */
+app.onlineRematchRequesterColor = null;
 
 /** 分出胜负：先高亮五连连线，约 2s 后再弹出结算 */
 app.WIN_REVEAL_DELAY_MS = 2000;
@@ -932,12 +1039,43 @@ app.onlineMatchRound = 1;
 app.onlineMoveHistory = [];
 /** POST /api/games/settle 返回的 gameId，棋谱可事后拉取 */
 app.lastSettledGameId = null;
+/**
+ * 最近一次 settle 返回的天梯分（用于结算页 VS 展示）；离开房间时清空。
+ * { blackEloAfter, whiteEloAfter, blackEloDelta, whiteEloDelta }
+ */
+app.lastSettleRating = null;
 /** app.screen === 'replay'：棋谱数据与当前展示步数（0 表示空盘） */
 app.replayMoves = [];
 app.replayStep = 0;
 app.replayAutoTimerId = null;
 /** 棋谱回放底栏药丸宽度（与 drawButton 一致；相邻箭头按钮中心距=此值则边缘相贴） */
 app.REPLAY_CTRL_PILL_W = 82;
+/**
+ * 对局页底栏：分段条高度（rpx）、图标槽基准边长（rpx）。
+ * 仅改这两项即可调节底部按钮块整体高度（条高与图标略成比例更易协调）。
+ */
+app.GAME_ACTION_BAR_H_RPX = 128;
+app.GAME_ACTION_BAR_ICON_RPX = 72;
+/** 底栏图标下方说明字字号、与图标间距（rpx） */
+app.GAME_ACTION_BAR_LABEL_FS_RPX = 26;
+app.GAME_ACTION_BAR_ICON_LABEL_GAP_RPX = 6;
+/**
+ * 底栏图标槽边长倍率（相对 GAME_ACTION_BAR_ICON_RPX）。
+ * 离开/悔棋素材在盒内更「满」，与和棋/认输同倍率时会显大，略缩小以四格观感接近。
+ */
+app.gameBarIconSizeMul = {
+  home: 0.86,
+  undo: 0.86,
+  draw: 1,
+  flag: 1
+};
+/** 对局页状态胶囊高度；0 表示不绘制状态条（仅图标底栏时） */
+app.GAME_STATUS_CHIP_H_RPX = 0;
+/** 扁平彩色图标 PNG（images/ui/game-bar-*.png），失败时回退矢量 */
+app.gameBarHomeImg = null;
+app.gameBarUndoImg = null;
+app.gameBarDrawImg = null;
+app.gameBarResignImg = null;
 /** 战绩页：在当前页面上以遮罩弹出棋谱回放（不切换 screen） */
 app.historyReplayOverlayVisible = false;
 /** 战绩列表：在回放图标上按下时的行记录与 touch identifier */
@@ -950,6 +1088,8 @@ app.replayTouchIdentifier = null;
 /** 联机对手：服务端头像与昵称（与占位默认图区分） */
 app.onlineOppAvatarImg = null;
 app.onlineOppNickname = '';
+/** 对手 userId（对手资料接口），用于逃跑结算等 */
+app.onlineOppUserId = 0;
 app.onlineOppProfileRoomId = '';
 app.onlineOppProfileFetched = false;
 app.onlineOppFetchInFlight = false;
@@ -982,7 +1122,7 @@ app.homeMascotSheetImg = null;
 app.MASCOT_SHEET_FRAME_COUNT = 41;
 app.MASCOT_SHEET_FPS = 8;
 /** 修改首页 PNG 或路径时递增，避免热重载仍认为「已加载」而跳过 */
-app.HOME_UI_ASSETS_REV = 25;
+app.HOME_UI_ASSETS_REV = 31;
 /** 吉祥物资源所在分包（见 game.json）；wx.loadSubpackage 成功后再加载大图 */
 app.HOME_SUBPACKAGE_NAME = 'res-mascot';
 /** 分包内吉祥物路径前缀；失败时回退主包 images/ui/ */
@@ -1035,10 +1175,18 @@ app.pveMoveHistory = [];
 /** 同桌：走子栈；app.localUndoRequest 含 requesterColor、pendingPops(1|2) */
 app.localMoveHistory = [];
 app.localUndoRequest = null;
+/** 同桌：和棋申请方颜色 */
+app.localDrawRequest = null;
 
 /** 联机：服务端 undoPending / undoRequesterColor */
 app.onlineUndoPending = false;
 app.onlineUndoRequesterColor = null;
+/** 本端刚发出 UNDO_CANCEL，下一帧 STATE 用于区分「对方拒绝」与「自己撤销」 */
+app.onlineUndoCancelPending = false;
+/** 本端刚发出 DRAW_CANCEL，同上 */
+app.onlineDrawCancelPending = false;
+app.onlineDrawPending = false;
+app.onlineDrawRequesterColor = null;
 
 /* ---------- 联机：WebSocket 与房间 ---------- */
 
@@ -1107,6 +1255,12 @@ app.handleOnlineSocketDead = function() {
 }
 
 app.disconnectOnline = function() {
+  if (typeof app.stopUndoRejectFloatAnim === 'function') {
+    app.stopUndoRejectFloatAnim();
+  }
+  app.undoRejectFloat = null;
+  app.onlineUndoCancelPending = false;
+  app.onlineDrawCancelPending = false;
   app.clearOnlineReconnectTimer();
   app.onlineReconnectAttempt = 0;
   app.onlineSocketConnectGen++;
@@ -1117,6 +1271,7 @@ app.disconnectOnline = function() {
   app.stopReplayAuto();
   app.onlineMoveHistory = [];
   app.lastSettledGameId = null;
+  app.lastSettleRating = null;
   app.isPvpOnline = false;
   app.onlineRoomId = '';
   app.onlineToken = '';
@@ -1126,6 +1281,9 @@ app.disconnectOnline = function() {
   app.onlineOpponentIsBot = false;
   app.onlineUndoPending = false;
   app.onlineUndoRequesterColor = null;
+  app.onlineDrawPending = false;
+  app.onlineDrawRequesterColor = null;
+  app.onlineRematchRequesterColor = null;
   app.onlineSettleSent = false;
   app.onlineMatchRound = 1;
   app.randomMatchHostCancelToken = '';
@@ -1144,6 +1302,7 @@ app.disconnectOnline = function() {
 app.clearOnlineOpponentProfile = function() {
   app.onlineOppAvatarImg = null;
   app.onlineOppNickname = '';
+  app.onlineOppUserId = 0;
   app.onlineOppProfileRoomId = '';
   app.onlineOppProfileFetched = false;
   app.onlineOppFetchInFlight = false;
@@ -1196,6 +1355,14 @@ app.loadOnlineOpponentAvatar = function(url) {
 app.applyOnlineOpponentProfilePayload = function(d) {
   if (!d) {
     return;
+  }
+  if (typeof d.userId === 'number' && !isNaN(d.userId)) {
+    app.onlineOppUserId = Math.floor(d.userId);
+  } else if (d.userId != null) {
+    var uid = Number(d.userId);
+    if (!isNaN(uid)) {
+      app.onlineOppUserId = Math.floor(uid);
+    }
   }
   if (typeof d.nickname === 'string' && d.nickname.trim()) {
     app.onlineOppNickname = d.nickname.trim();
@@ -1614,6 +1781,10 @@ app.tryLocalUndoRequest = function() {
     wx.showToast({ title: '没有可悔的棋', icon: 'none' });
     return;
   }
+  if (app.localDrawRequest) {
+    wx.showToast({ title: '请先处理和棋申请', icon: 'none' });
+    return;
+  }
   if (app.localUndoRequest) {
     return;
   }
@@ -1677,25 +1848,17 @@ app.sendOnlineUndo = function(msgType) {
     wx.showToast({ title: '网络未连接', icon: 'none' });
     return;
   }
+  if (msgType === 'UNDO_CANCEL') {
+    app.onlineUndoCancelPending = true;
+  }
   app.socketTask.send({
     data: JSON.stringify({ type: msgType })
   });
 }
 
-/** 联机：仅对方（非申请人）可点同意/拒绝；同桌：同屏显示，由轮到应的一方操作 */
+/** 同桌：画布上显示同意/拒绝。联机改由弹框处理，不再画此行。 */
 app.showUndoRespondRow = function() {
-  if (app.localUndoRequest) {
-    return true;
-  }
-  if (
-    app.isPvpOnline &&
-    app.onlineUndoPending &&
-    app.onlineUndoRequesterColor != null &&
-    app.pvpOnlineYourColor !== app.onlineUndoRequesterColor
-  ) {
-    return true;
-  }
-  return false;
+  return !!app.localUndoRequest;
 }
 
 app.clearWinRevealTimer = function() {
@@ -1703,6 +1866,208 @@ app.clearWinRevealTimer = function() {
     clearTimeout(app.winRevealTimerId);
     app.winRevealTimerId = null;
   }
+}
+
+/** 认输：当前行棋方判负（同桌）；人机为玩家认输则 AI 胜。 */
+app.finishGameByResignLocal = function() {
+  app.gameOver = true;
+  app.winner = app.current === app.BLACK ? app.WHITE : app.BLACK;
+  app.openResult();
+}
+
+app.finishGameByResignPve = function() {
+  app.gameOver = true;
+  app.winner = app.pveAiColor();
+  app.openResult();
+}
+
+/** 和棋终局（同桌 / 人机） */
+app.finishGameDrawLocal = function() {
+  app.gameOver = true;
+  app.winner = null;
+  app.openResult();
+}
+
+app.finishGameDrawPve = function() {
+  app.gameOver = true;
+  app.winner = null;
+  app.openResult();
+}
+
+app.tryLocalDrawRequest = function() {
+  if (app.gameOver || !app.isPvpLocal) {
+    return;
+  }
+  if (app.localUndoRequest) {
+    wx.showToast({ title: '请先处理悔棋申请', icon: 'none' });
+    return;
+  }
+  if (app.localDrawRequest) {
+    return;
+  }
+  app.localDrawRequest = { requesterColor: app.current };
+  app.draw();
+}
+
+app.execLocalDrawAccept = function() {
+  if (!app.localDrawRequest) {
+    return;
+  }
+  app.localDrawRequest = null;
+  app.finishGameDrawLocal();
+}
+
+app.execLocalDrawReject = function() {
+  app.localDrawRequest = null;
+  app.draw();
+}
+
+app.execLocalDrawCancel = function() {
+  app.localDrawRequest = null;
+  app.draw();
+}
+
+app.sendOnlineDraw = function(msgType) {
+  if (!app.onlineSocketCanSend()) {
+    wx.showToast({ title: '网络未连接', icon: 'none' });
+    return;
+  }
+  if (msgType === 'DRAW_CANCEL') {
+    app.onlineDrawCancelPending = true;
+  }
+  app.socketTask.send({
+    data: JSON.stringify({ type: msgType })
+  });
+}
+
+/** 同桌：画布上显示同意/拒绝。联机改由弹框处理。 */
+app.showDrawRespondRow = function() {
+  return !!app.localDrawRequest;
+}
+
+app.handleDrawButtonTap = function() {
+  if (app.gameOver) {
+    return;
+  }
+  if (app.isPvpOnline) {
+    if (!app.onlineSocketCanSend()) {
+      wx.showToast({ title: '网络未连接', icon: 'none' });
+      return;
+    }
+    if (app.onlineDrawPending) {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({
+          title:
+            app.pvpOnlineYourColor === app.onlineDrawRequesterColor
+              ? '请等待对方处理'
+              : '请在弹窗中同意或拒绝',
+          icon: 'none'
+        });
+      }
+      return;
+    }
+    if (app.onlineUndoPending) {
+      wx.showToast({ title: '请先处理悔棋申请', icon: 'none' });
+      return;
+    }
+    app.sendOnlineDraw('DRAW_REQUEST');
+    return;
+  }
+  if (app.isPvpLocal) {
+    if (app.localUndoRequest) {
+      wx.showToast({ title: '请先处理悔棋申请', icon: 'none' });
+      return;
+    }
+    if (app.localDrawRequest) {
+      app.execLocalDrawCancel();
+      return;
+    }
+    app.tryLocalDrawRequest();
+    return;
+  }
+  if (typeof wx.showModal === 'function') {
+    wx.showModal({
+      title: '和棋',
+      content: '确定以和棋结束本局吗？',
+      confirmText: '确定',
+      cancelText: '取消',
+      success: function(res) {
+        if (res.confirm) {
+          app.finishGameDrawPve();
+        }
+      }
+    });
+  } else {
+    app.finishGameDrawPve();
+  }
+}
+
+app.isDrawButtonActive = function() {
+  if (app.gameOver) {
+    return false;
+  }
+  if (app.isPvpOnline) {
+    if (!app.onlineWsConnected || app.onlineOpponentLeft) {
+      return false;
+    }
+    /** 已发起和棋或对方发起和棋：等待结果前不可再点和棋 */
+    if (app.onlineDrawPending) {
+      return false;
+    }
+    if (app.onlineUndoPending) {
+      return false;
+    }
+    return true;
+  }
+  if (app.isPvpLocal) {
+    if (app.localDrawRequest) {
+      return true;
+    }
+    if (app.localUndoRequest) {
+      return false;
+    }
+    return true;
+  }
+  return true;
+}
+
+app.isResignButtonActive = function() {
+  if (app.gameOver) {
+    return false;
+  }
+  if (app.localDrawRequest) {
+    return false;
+  }
+  if (app.isPvpOnline) {
+    if (!app.onlineWsConnected || app.onlineOpponentLeft) {
+      return false;
+    }
+    if (app.onlineDrawPending) {
+      return false;
+    }
+  }
+  return true;
+}
+
+app.handleResignTap = function() {
+  if (app.gameOver) {
+    return;
+  }
+  if (app.isPvpOnline) {
+    if (!app.onlineSocketCanSend()) {
+      wx.showToast({ title: '网络未连接', icon: 'none' });
+      return;
+    }
+    app.socketTask.send({
+      data: JSON.stringify({ type: 'RESIGN' })
+    });
+    return;
+  }
+  if (app.isPvpLocal) {
+    app.finishGameByResignLocal();
+    return;
+  }
+  app.finishGameByResignPve();
 }
 
 app.finishGameWithWin = function(r, c, winnerColor) {
@@ -1741,11 +2106,39 @@ app.applyOnlineState = function(data) {
   if (!data || data.type !== 'STATE') {
     return;
   }
+  var undoCancelPending = app.onlineUndoCancelPending;
+  app.onlineUndoCancelPending = false;
+  var drawCancelPending = app.onlineDrawCancelPending;
+  app.onlineDrawCancelPending = false;
+
+  /** 对方断线：终局并进入结算（仅本帧触发一次） */
+  var finishDueToOppLeave = false;
+
+  /** 用于边沿检测：对方刚发起悔棋/和棋时弹窗提醒回应方 */
+  var prevUndoPendingFlag = app.onlineUndoPending;
+  var prevDrawPendingFlag = app.onlineDrawPending;
+
   var prevBlack = app.onlineBlackConnected;
   var prevWhite = app.onlineWhiteConnected;
   var wasOver = app.gameOver;
   var prevBoard = app.copyBoardFromServer(app.board);
+  var prevStoneCount = app.countStonesOnBoard(prevBoard);
+  var prevWasMyUndoRequest =
+    app.isPvpOnline &&
+    app.screen === 'game' &&
+    !app.gameOver &&
+    app.onlineUndoPending &&
+    app.onlineUndoRequesterColor != null &&
+    app.onlineUndoRequesterColor === app.pvpOnlineYourColor;
+  var prevWasMyDrawRequest =
+    app.isPvpOnline &&
+    app.screen === 'game' &&
+    !app.gameOver &&
+    app.onlineDrawPending &&
+    app.onlineDrawRequesterColor != null &&
+    app.onlineDrawRequesterColor === app.pvpOnlineYourColor;
   app.board = app.copyBoardFromServer(data.board);
+  var newStoneCount = app.countStonesOnBoard(app.board);
   if (app.countStonesOnBoard(app.board) === app.countStonesOnBoard(prevBoard) + 1) {
     app.playPlaceStoneSound();
   }
@@ -1780,6 +2173,21 @@ app.applyOnlineState = function(data) {
       app.onlineOpponentLeft = false;
     } else if (oppWas && !oppNow) {
       app.onlineOpponentLeft = true;
+      /**
+       * 仅「对局未结束、尚无胜负」时按逃跑终局；若本帧已 gameOver 或已有 winner
+       *（含连五/认输等），走下方正常终局，避免胜局因对端断线被误判为「对方离开」。
+       */
+      if (
+        app.screen === 'game' &&
+        !wasOver &&
+        !data.gameOver &&
+        (data.winner === undefined || data.winner === null) &&
+        prevBlack &&
+        prevWhite &&
+        !app.onlineOpponentIsBot
+      ) {
+        finishDueToOppLeave = true;
+      }
     }
   }
   app.onlineUndoPending = !!data.undoPending;
@@ -1790,6 +2198,105 @@ app.applyOnlineState = function(data) {
       data.undoRequesterColor,
       null
     );
+  }
+  app.onlineDrawPending = !!data.drawPending;
+  if (data.drawRequesterColor === undefined || data.drawRequesterColor === null) {
+    app.onlineDrawRequesterColor = null;
+  } else {
+    app.onlineDrawRequesterColor = app.normalizeOnlineStoneInt(
+      data.drawRequesterColor,
+      null
+    );
+  }
+  if (data.rematchRequesterColor === undefined || data.rematchRequesterColor === null) {
+    app.onlineRematchRequesterColor = null;
+  } else {
+    app.onlineRematchRequesterColor = app.normalizeOnlineStoneInt(
+      data.rematchRequesterColor,
+      null
+    );
+  }
+  if (
+    prevWasMyUndoRequest &&
+    !data.undoPending &&
+    prevStoneCount === newStoneCount &&
+    !undoCancelPending &&
+    typeof app.startUndoRejectedFloat === 'function'
+  ) {
+    app.startUndoRejectedFloat();
+  }
+  if (
+    prevWasMyDrawRequest &&
+    !data.drawPending &&
+    !data.gameOver &&
+    !drawCancelPending &&
+    typeof app.startUndoRejectedFloat === 'function'
+  ) {
+    app.startUndoRejectedFloat('对方拒绝了你的和棋');
+  }
+  if (
+    finishDueToOppLeave &&
+    typeof app.finishOnlineGameOpponentLeave === 'function'
+  ) {
+    app.finishOnlineGameOpponentLeave();
+    return;
+  }
+  if (
+    app.isPvpOnline &&
+    app.screen === 'game' &&
+    !wasOver &&
+    !data.gameOver &&
+    typeof wx !== 'undefined' &&
+    typeof wx.showModal === 'function'
+  ) {
+    var respY2 = app.pvpOnlineYourColor;
+    var urq2 = app.onlineUndoRequesterColor;
+    var drq2 = app.onlineDrawRequesterColor;
+    if (
+      !prevUndoPendingFlag &&
+      data.undoPending &&
+      urq2 != null &&
+      respY2 !== urq2
+    ) {
+      wx.showModal({
+        title: '对方申请悔棋',
+        content: '是否同意对方悔棋？',
+        confirmText: '同意',
+        cancelText: '拒绝',
+        success: function(res) {
+          if (!app.isPvpOnline || !app.onlineUndoPending) {
+            return;
+          }
+          if (res.confirm) {
+            app.sendOnlineUndo('UNDO_ACCEPT');
+          } else {
+            app.sendOnlineUndo('UNDO_REJECT');
+          }
+        }
+      });
+    } else if (
+      !prevDrawPendingFlag &&
+      data.drawPending &&
+      drq2 != null &&
+      respY2 !== drq2
+    ) {
+      wx.showModal({
+        title: '对方提议和棋',
+        content: '是否同意和棋终局？',
+        confirmText: '同意',
+        cancelText: '拒绝',
+        success: function(res) {
+          if (!app.isPvpOnline || !app.onlineDrawPending) {
+            return;
+          }
+          if (res.confirm) {
+            app.sendOnlineDraw('DRAW_ACCEPT');
+          } else {
+            app.sendOnlineDraw('DRAW_REJECT');
+          }
+        }
+      });
+    }
   }
   app.lastMsg = '';
   app.syncLastOpponentMoveOnline(prevBoard, app.board, app.pvpOnlineYourColor);
@@ -1813,12 +2320,10 @@ app.applyOnlineState = function(data) {
   }
   if (!app.gameOver && wasOver) {
     app.screen = 'game';
-    if (app.showResultOverlay) {
-      app.onlineResultOverlaySticky = true;
-    } else {
-      app.clearWinRevealTimer();
-      app.winningLineCells = null;
-    }
+    app.showResultOverlay = false;
+    app.onlineResultOverlaySticky = false;
+    app.clearWinRevealTimer();
+    app.winningLineCells = null;
   }
   app.tryFetchOnlineOpponentProfile();
   app.draw();

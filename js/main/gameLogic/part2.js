@@ -83,6 +83,12 @@ app.startOnlineSocket = function() {
       });
       return;
     }
+    if (data.type === 'REMATCH_DECLINED') {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: '对方拒绝了再来一局', icon: 'none' });
+      }
+      return;
+    }
     if (data.type === 'STATE') {
       app.applyOnlineState(data);
     }
@@ -232,9 +238,30 @@ app.tryLaunchOnlineInvite = function(query) {
 
 app.computeLayout = function() {
   var topBar = Math.max(44, app.sys.statusBarHeight + 8);
-  var bottomReserve = 120;
+  var safeBottom = 0;
+  if (
+    app.sys &&
+    app.sys.safeArea &&
+    typeof app.sys.safeArea.bottom === 'number'
+  ) {
+    safeBottom = Math.max(0, app.H - app.sys.safeArea.bottom);
+  }
+  var barHr = app.GAME_ACTION_BAR_H_RPX != null ? app.GAME_ACTION_BAR_H_RPX : 128;
+  var stHr =
+    app.GAME_STATUS_CHIP_H_RPX != null ? app.GAME_STATUS_CHIP_H_RPX : 0;
+  var toPx = function(n) {
+    return (n * app.W) / 750;
+  };
+  var barH = toPx(barHr);
+  var stH = toPx(stHr);
+  /* 棋盘下缘与底栏之间的留白；底栏本身贴 safe area 底边（见 bottomY） */
+  var gap = toPx(12);
+  var padBottom = toPx(4);
+  var bottomReserve = barH + stH + gap + safeBottom + padBottom;
+  bottomReserve = Math.min(240, Math.max(barH + stH + safeBottom + gap, bottomReserve));
   var availH = app.H - topBar - bottomReserve;
-  var availW = app.W - 24;
+  var sideMargin = 12;
+  var availW = app.W - 2 * sideMargin;
   var maxBoard = Math.min(availW, availH);
   var span = app.SIZE - 1;
   /* 格距取整，交叉点落在逻辑整像素上，格线配合 render 内 +0.5 对齐，减少发糊 */
@@ -242,15 +269,17 @@ app.computeLayout = function() {
   var originX = Math.round((app.W - span * cell) / 2);
   var originY = Math.round(topBar + (availH - span * cell) / 2);
   var boardPx = span * cell;
+  /* 底栏垂直中心：条底对齐 H - safeBottom（刘海/ home 条之上） */
+  var bottomY = app.H - safeBottom - barH * 0.5;
   return {
-    margin: 12,
+    margin: sideMargin,
     cell: cell,
     boardPx: boardPx,
     originX: originX,
     originY: originY,
     size: app.SIZE,
     topBar: topBar,
-    bottomY: app.H - bottomReserve + 20
+    bottomY: bottomY
   };
 }
 
@@ -648,15 +677,21 @@ app.loadHomeUiAssets = function() {
   app.qingtaoLibaiPieceWhiteImg = null;
   app.homeMascotImg = null;
   app.homeMascotSheetImg = null;
+  app.gameBarHomeImg = null;
+  app.gameBarUndoImg = null;
+  app.gameBarDrawImg = null;
+  app.gameBarResignImg = null;
 
   var loadPhase = 1;
-  var remaining = 10;
+  var remaining = 14;
   function oneDone() {
     remaining--;
     if (remaining > 0) {
       return;
     }
     if (loadPhase === 1) {
+      /** 首批 UI 图（含对局底栏 game-bar-*.png）已就绪；勿等吉祥物分包再 draw，否则会长期显示矢量占位 */
+      app.draw();
       startMascotAssetsAfterSubpackage();
       return;
     }
@@ -664,9 +699,14 @@ app.loadHomeUiAssets = function() {
     app.homeUiAssetsLoadInFlight = false;
     app.draw();
   }
-  /** 包内路径部分机型需带前导 /，失败则换一条 */
+  /** 包内路径部分机型需带前导 / 或 ./，失败则换一条 */
   function homeUiPathCandidates(rel) {
-    return [rel, rel.indexOf('/') === 0 ? rel.slice(1) : '/' + rel];
+    var a = rel.indexOf('/') === 0 ? rel.slice(1) : '/' + rel;
+    var out = [rel, a];
+    if (rel.indexOf('./') !== 0) {
+      out.push('./' + rel);
+    }
+    return out;
   }
   function bind(rel, assign) {
     var paths = homeUiPathCandidates(rel);
@@ -780,6 +820,18 @@ app.loadHomeUiAssets = function() {
   });
   bind('images/pieces/fruit2.png', function (im) {
     app.qingtaoLibaiPieceWhiteImg = im;
+  });
+  bind('images/ui/game-bar-home.png', function (im) {
+    app.gameBarHomeImg = im;
+  });
+  bind('images/ui/game-bar-undo.png', function (im) {
+    app.gameBarUndoImg = im;
+  });
+  bind('images/ui/game-bar-draw.png', function (im) {
+    app.gameBarDrawImg = im;
+  });
+  bind('images/ui/game-bar-resign.png', function (im) {
+    app.gameBarResignImg = im;
   });
 }
 
@@ -1268,18 +1320,19 @@ app.drawHomeBottomDock = function(hl, th) {
   app.ctx.stroke();
   var labels = [
     app.isHomeCheckinDoneToday() ? '今日已签' : '每日签到',
+    '对战排行',
     '我的战绩',
     '杂货铺'
   ];
   var innerW = app.W - padH * 2;
-  var colW = innerW / 3;
+  var colW = innerW / 4;
   var baseX = padH;
   var iconBox = app.rpx(78);
   var iconY = y0 + app.rpx(34) + iconBox / 2;
   var s = iconBox * 0.14;
   var colMidY = y0 + h * 0.42;
   var i;
-  for (i = 0; i < 3; i++) {
+  for (i = 0; i < 4; i++) {
     var cxi = baseX + colW * i + colW / 2;
     var pressed = app.homePressedDockCol === i;
     var stroke = pressed ? th.title : th.subtitle;
@@ -1295,6 +1348,10 @@ app.drawHomeBottomDock = function(hl, th) {
         app.drawHomeDockIconCheckin(cxi, iconY, s, stroke);
       }
     } else if (i === 1) {
+      if (!app.drawHomeUiImageContain(app.homeDockRankImg, cxi, iconY, iconBox)) {
+        app.drawHomeDockIconRank(cxi, iconY, s, stroke);
+      }
+    } else if (i === 2) {
       if (!app.drawHomeUiImageContain(app.homeDockHistoryImg, cxi, iconY, iconBox)) {
         app.drawHomeDockIconHistory(cxi, iconY, s, stroke);
       }

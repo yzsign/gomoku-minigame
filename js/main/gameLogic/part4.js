@@ -14,27 +14,55 @@ module.exports = function register(app, deps) {
 
 app.hitResultButton = function(clientX, clientY) {
   var rl = app.getResultOverlayLayout();
-  var bw = rl.btnW / 2 + 12;
-  var bh = rl.btnH / 2 + 12;
-  if (
-    Math.abs(clientX - rl.cx) <= bw &&
-    Math.abs(clientY - rl.yAgain) <= bh
-  ) {
-    return 'again';
-  }
-  if (rl.threeBtn) {
+  var halfH = rl.primaryH * 0.5 + 14;
+  if (rl.showRematchRespond) {
+    var halfRw = rl.rematchBtnW * 0.5 + 8;
     if (
-      Math.abs(clientX - rl.cx) <= bw &&
-      Math.abs(clientY - rl.yReplay) <= bh
+      Math.abs(clientX - rl.rematchAcceptCx) <= halfRw &&
+      Math.abs(clientY - rl.primaryCy) <= halfH
     ) {
-      return 'replay';
+      return 'rematch_accept';
+    }
+    if (
+      Math.abs(clientX - rl.rematchDeclineCx) <= halfRw &&
+      Math.abs(clientY - rl.primaryCy) <= halfH
+    ) {
+      return 'rematch_decline';
+    }
+  } else {
+    var halfPw = rl.primaryW * 0.5 + 14;
+    if (
+      Math.abs(clientX - rl.primaryCx) <= halfPw &&
+      Math.abs(clientY - rl.primaryCy) <= halfH
+    ) {
+      return 'rematch_same';
     }
   }
-  if (
-    Math.abs(clientX - rl.cx) <= bw &&
-    Math.abs(clientY - rl.yHome) <= bh
-  ) {
-    return 'home';
+  var nDock = rl.hasReplayDock ? 3 : 2;
+  var colW = app.W / nDock;
+  var dockTop = rl.dockCy - rl.dockH * 0.48;
+  var dockBot = rl.dockCy + rl.dockH * 0.48;
+  if (clientY >= dockTop && clientY <= dockBot) {
+    var col = Math.floor(clientX / colW);
+    if (col < 0) {
+      col = 0;
+    }
+    if (col >= nDock) {
+      col = nDock - 1;
+    }
+    if (nDock === 3) {
+      if (col === 0) {
+        return 'home';
+      }
+      if (col === 1) {
+        return 'replay';
+      }
+      return app.isPvpOnline ? 'rematch_new' : 'rematch_same';
+    }
+    if (col === 0) {
+      return 'home';
+    }
+    return app.isPvpOnline ? 'rematch_new' : 'rematch_same';
   }
   return null;
 }

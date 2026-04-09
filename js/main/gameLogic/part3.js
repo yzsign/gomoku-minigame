@@ -1021,27 +1021,26 @@ app.pixelToCell = function(clientX, clientY) {
 }
 
 app.resetGame = function() {
+  app.lastOpponentMove = null;
+  if (app.isPvpOnline) {
+    if (app.gameOver) {
+      app.screen = 'game';
+      app.sendOnlineRematchRequest();
+      app.draw();
+    }
+    return;
+  }
   app.showResultOverlay = false;
   app.onlineResultOverlaySticky = false;
   app.clearWinRevealTimer();
   app.winningLineCells = null;
-  app.lastOpponentMove = null;
-  if (app.isPvpOnline) {
-    app.screen = 'game';
-    if (app.gameOver && app.onlineSocketCanSend()) {
-      app.socketTask.send({
-        data: JSON.stringify({ type: 'RESET' })
-      });
-    }
-    app.draw();
-    return;
-  }
   if (!app.isPvpLocal) {
     app.aiMoveGeneration++;
   }
   app.pveMoveHistory = [];
   app.localMoveHistory = [];
   app.localUndoRequest = null;
+  app.localDrawRequest = null;
   app.screen = 'game';
   app.board = gomoku.createBoard();
   app.current = app.BLACK;
@@ -1059,6 +1058,56 @@ app.resetGame = function() {
       app.runAiMove();
     }, 220);
   }
+}
+
+/**
+ * 再来一局：发 WebSocket 消息。使用 type RESET，与已部署的旧版云托管兼容；
+ * 新版服务端将 RESET 与 REMATCH_REQUEST 同样视为「再来一局」邀请。
+ */
+app.sendOnlineRematchRequest = function() {
+  if (!app.onlineSocketCanSend()) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '未连接，请稍后重试', icon: 'none' });
+    }
+    return;
+  }
+  if (app.onlineOpponentLeft) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '对方已离开，无法再来一局', icon: 'none' });
+    }
+    return;
+  }
+  app.socketTask.send({
+    data: JSON.stringify({ type: 'RESET' })
+  });
+  if (typeof wx.showToast === 'function') {
+    wx.showToast({ title: '邀请已发送', icon: 'none' });
+  }
+}
+
+app.sendOnlineRematchAccept = function() {
+  if (!app.onlineSocketCanSend()) {
+    return;
+  }
+  app.socketTask.send({
+    data: JSON.stringify({ type: 'REMATCH_ACCEPT' })
+  });
+}
+
+app.sendOnlineRematchDecline = function() {
+  if (!app.onlineSocketCanSend()) {
+    return;
+  }
+  app.socketTask.send({
+    data: JSON.stringify({ type: 'REMATCH_DECLINE' })
+  });
+}
+
+/** 结算页「继续」：重新随机匹配新对手（离开当前房间） */
+app.startRandomMatchFromResultOverlay = function() {
+  app.showResultOverlay = false;
+  app.onlineResultOverlaySticky = false;
+  app.startRandomMatch();
 }
 
 /* ---------- 对局流程：人机、随机匹配、本地/结算 ---------- */
@@ -1333,6 +1382,12 @@ app.cancelMatching = function() {
 }
 
 app.backToHome = function() {
+  if (typeof app.stopUndoRejectFloatAnim === 'function') {
+    app.stopUndoRejectFloatAnim();
+  }
+  app.undoRejectFloat = null;
+  app.onlineUndoCancelPending = false;
+  app.onlineDrawCancelPending = false;
   app.stopReplayAuto();
   app.onlineMoveHistory = [];
   app.lastSettledGameId = null;
@@ -1345,8 +1400,11 @@ app.backToHome = function() {
   app.pveMoveHistory = [];
   app.localMoveHistory = [];
   app.localUndoRequest = null;
+  app.localDrawRequest = null;
   app.onlineUndoPending = false;
   app.onlineUndoRequesterColor = null;
+  app.onlineDrawPending = false;
+  app.onlineDrawRequesterColor = null;
   app.cancelMatchingTimers();
   app.randomMatchHostWaiting = false;
   app.disconnectOnline();
@@ -1366,9 +1424,13 @@ app.startPvpLocal = function() {
   app.onlineResultOverlaySticky = false;
   app.clearWinRevealTimer();
   app.winningLineCells = null;
+  app.localUndoRequest = null;
+  app.localDrawRequest = null;
   app.disconnectOnline();
   app.isRandomMatch = false;
   app.isPvpLocal = true;
+  /** 同桌：下方「我」与上方「对方」固定执黑/执白（与棋局手顺一致） */
+  app.pveHumanColor = Math.random() < 0.5 ? app.BLACK : app.WHITE;
   app.screen = 'game';
   app.board = gomoku.createBoard();
   app.current = app.BLACK;
@@ -1380,7 +1442,7 @@ app.startPvpLocal = function() {
 
 /**
  * 联机终局后上报结算，服务端写入 game 记录并更新 elo（须已登录）。
- * 双方都会调用，先成功者结算，另一方可能收到 409 已结算。
+ * 双方都会调用；重复请求时服务端返回已结算的同一份分数（与先成功者一致）。
  */
 app.maybeRequestOnlineGameSettle = function() {
   if (!app.isPvpOnline || !app.onlineRoomId || app.onlineSettleSent) {
@@ -1412,6 +1474,13 @@ app.maybeRequestOnlineGameSettle = function() {
     outcome: outcome,
     totalSteps: steps
   };
+  if (
+    app.resultKind === 'online_opponent_left' &&
+    typeof app.onlineOppUserId === 'number' &&
+    app.onlineOppUserId > 0
+  ) {
+    settleBody.runawayUserId = app.onlineOppUserId;
+  }
   if (movesPayload.length === steps) {
     settleBody.moves = movesPayload;
   }
@@ -1429,11 +1498,45 @@ app.maybeRequestOnlineGameSettle = function() {
             return;
           }
           var d = res.data;
+          if (d && typeof d === 'string') {
+            try {
+              d = JSON.parse(d);
+            } catch (pe) {
+              d = null;
+            }
+          }
+          function settleNum(v) {
+            if (typeof v === 'number' && !isNaN(v)) {
+              return v;
+            }
+            var n = Number(v);
+            return !isNaN(n) ? n : NaN;
+          }
           if (d && d.gameId !== undefined && d.gameId !== null) {
             var gid = Number(d.gameId);
             if (!isNaN(gid)) {
               app.lastSettledGameId = gid;
             }
+          }
+          var bAfter = d ? settleNum(d.blackEloAfter) : NaN;
+          var wAfter = d ? settleNum(d.whiteEloAfter) : NaN;
+          if (d && isFinite(bAfter) && isFinite(wAfter)) {
+            var bDelta = settleNum(d.blackEloDelta);
+            var wDelta = settleNum(d.whiteEloDelta);
+            app.lastSettleRating = {
+              blackEloAfter: Math.round(bAfter),
+              whiteEloAfter: Math.round(wAfter),
+              blackEloDelta: isFinite(bDelta) ? bDelta : 0,
+              whiteEloDelta: isFinite(wDelta) ? wDelta : 0
+            };
+            if (app.isPvpOnline) {
+              var mineAfter =
+                app.pvpOnlineYourColor === app.BLACK
+                  ? app.lastSettleRating.blackEloAfter
+                  : app.lastSettleRating.whiteEloAfter;
+              app.homeRatingEloCache = mineAfter;
+            }
+            app.draw();
           }
         },
         fail: function () {
@@ -1444,6 +1547,17 @@ app.maybeRequestOnlineGameSettle = function() {
   );
 }
 
+/** 联机：对方断线，判己方胜并弹出结算（对方离开） */
+app.finishOnlineGameOpponentLeave = function() {
+  if (!app.isPvpOnline || app.gameOver) {
+    return;
+  }
+  app.gameOver = true;
+  app.winner = app.pvpOnlineYourColor;
+  app.resultKind = 'online_opponent_left';
+  app.openResult();
+};
+
 app.openResult = function() {
   if (!app.gameOver) {
     return;
@@ -1451,13 +1565,16 @@ app.openResult = function() {
   app.clearWinRevealTimer();
   app.winningLineCells = null;
   if (app.isPvpOnline) {
+    var keepOppLeftKind = app.resultKind === 'online_opponent_left';
     app.maybeRequestOnlineGameSettle();
-    if (app.winner === null) {
-      app.resultKind = 'pvp_draw';
-    } else if (app.winner === app.pvpOnlineYourColor) {
-      app.resultKind = 'online_win';
-    } else {
-      app.resultKind = 'online_lose';
+    if (!keepOppLeftKind) {
+      if (app.winner === null) {
+        app.resultKind = 'online_draw';
+      } else if (app.winner === app.pvpOnlineYourColor) {
+        app.resultKind = 'online_win';
+      } else {
+        app.resultKind = 'online_lose';
+      }
     }
   } else if (app.isPvpLocal) {
     if (app.winner === null) {
@@ -1483,181 +1600,542 @@ app.canShowOnlineReplayButton = function() {
   return app.isPvpOnline && !!app.onlineRoomId;
 }
 
-/** 棋盘页结算弹层：卡片与按钮位置（与 drawResultOverlay / hitResultButton 一致） */
-app.getResultOverlayLayout = function() {
-  var btnW = Math.min(app.W - 48, 300);
-  var btnH = 54;
-  var cardW = Math.min(app.W - 40, 360);
-  var threeBtn = app.canShowOnlineReplayButton();
-  var cardH = threeBtn
-    ? Math.min(380, Math.max(300, app.H * 0.42))
-    : Math.min(300, Math.max(260, app.H * 0.38));
-  var cardX = (app.W - cardW) / 2;
-  var cardY = Math.max((app.sys.statusBarHeight || 0) + 20, app.H * 0.16);
-  var yTitle = cardY + 46;
-  var ySub = cardY + 96;
-  var yAgain = cardY + 148;
-  var yReplay = cardY + 214;
-  var yHome = cardY + 280;
-  if (!threeBtn) {
-    yAgain = cardY + 162;
-    yHome = cardY + 228;
+/**
+ * 结算页 VS 区：执黑 / 执白 头像（与棋盘侧逻辑一致）。
+ */
+app.getResultVsAvatarImage = function(forBlack) {
+  var L = app.computeBoardNameLabelLayout(app.layout);
+  if (app.isPvpOnline) {
+    var imBlack = app.pvpOnlineYourColor === gomoku.BLACK;
+    if (forBlack) {
+      return imBlack ? L.myImg : L.oppImg;
+    }
+    return imBlack ? L.oppImg : L.myImg;
   }
+  if (app.isPvpLocal) {
+    return forBlack
+      ? defaultAvatars.getImageForWeChatGender(1)
+      : defaultAvatars.getImageForWeChatGender(2);
+  }
+  var hum = app.pveHumanColor;
+  if (forBlack) {
+    return hum === gomoku.BLACK ? L.myImg : defaultAvatars.getOpponentAvatarImage();
+  }
+  return hum === gomoku.WHITE ? L.myImg : defaultAvatars.getOpponentAvatarImage();
+}
+
+function drawResultRoundedSquareAvatar(app, th, img, cx, cy, size, cornerR) {
+  var ctx = app.ctx;
+  var x = cx - size * 0.5;
+  var y = cy - size * 0.5;
+  ctx.save();
+  app.roundRect(x, y, size, size, cornerR);
+  ctx.clip();
+  if (img && img.width && img.height) {
+    var sw = Math.min(img.width, img.height);
+    var sx = (img.width - sw) / 2;
+    var sy = (img.height - sw) / 2;
+    ctx.drawImage(img, sx, sy, sw, sw, x, y, size, size);
+  } else {
+    ctx.fillStyle = 'rgba(230, 230, 235, 0.95)';
+    ctx.fillRect(x, y, size, size);
+    ctx.fillStyle = th && th.title ? th.title : '#333';
+    ctx.font = 'bold 14px "PingFang SC",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('?', app.snapPx(cx), app.snapPx(cy));
+  }
+  ctx.restore();
+  ctx.save();
+  app.roundRect(x, y, size, size, cornerR);
+  ctx.strokeStyle = 'rgba(255,255,255,0.96)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawResultConfetti(app, top, hBand) {
+  var ctx = app.ctx;
+  var W = app.W;
+  var seed = 17;
+  var k;
+  var colors = ['#fbbf24', '#60a5fa', '#fb7185', '#34d399', '#a78bfa'];
+  for (k = 0; k < 28; k++) {
+    seed = (seed * 9301 + 49297) % 233280;
+    var rx = (seed % 1000) / 1000;
+    seed = (seed * 9301 + 49297) % 233280;
+    var ry = (seed % 1000) / 1000;
+    var x = rx * W;
+    var y = top + ry * hBand;
+    var r = 2 + (k % 4);
+    ctx.fillStyle = colors[k % colors.length];
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function resultOverlayTitlePack(app) {
+  var rs = app.getUiTheme().result;
+  var rk = app.resultKind;
+  var main = '对局结束';
+  var sub = '';
+  var titleColor = app.getUiTheme().title;
+  var mood = 'draw';
+  switch (rk) {
+    case 'pve_win':
+      mood = 'win';
+      main = '胜利';
+      sub = '恭喜战胜对手';
+      titleColor = rs.win.title;
+      break;
+    case 'pve_lose':
+      mood = 'lose';
+      main = '失败';
+      sub = '再接再厉';
+      titleColor = rs.lose.title;
+      break;
+    case 'pve_draw':
+      mood = 'draw';
+      main = '和局';
+      sub = '难分高下';
+      titleColor = rs.draw.title;
+      break;
+    case 'pvp_black_win':
+      mood = 'win';
+      main = '黑方胜利';
+      sub = '好友对战';
+      titleColor = rs.win.title;
+      break;
+    case 'pvp_white_win':
+      mood = 'win';
+      main = '白方胜利';
+      sub = '好友对战';
+      titleColor = rs.win.title;
+      break;
+    case 'pvp_draw':
+      mood = 'draw';
+      main = '和局';
+      sub = '好友对战';
+      titleColor = rs.draw.title;
+      break;
+    case 'online_win':
+      mood = 'win';
+      main = app.winner === gomoku.WHITE ? '白棋获胜' : '黑棋获胜';
+      sub = '联机对抗';
+      titleColor = rs.win.title;
+      break;
+    case 'online_lose':
+      mood = 'lose';
+      main = '失败';
+      sub = '联机对抗';
+      titleColor = rs.lose.title;
+      break;
+    case 'online_draw':
+      mood = 'draw';
+      main = '和局';
+      sub = '联机对抗';
+      titleColor = rs.draw.title;
+      break;
+    case 'online_opponent_left':
+      mood = 'win';
+      main = '对方离开';
+      sub = '联机对抗';
+      titleColor = rs.win.title;
+      break;
+    default:
+      titleColor = app.getUiTheme().title;
+  }
+  return { main: main, sub: sub, titleColor: titleColor, mood: mood, rs: rs };
+}
+
+/** 棋盘页结算全屏层：几何与 drawResultOverlay / hitResultButton 一致 */
+app.getResultOverlayLayout = function() {
+  var W = app.W;
+  var H = app.H;
+  var sb = app.sys && app.sys.statusBarHeight ? app.sys.statusBarHeight : 0;
+  var pack = resultOverlayTitlePack(app);
+  var hasReplayDock = app.canShowOnlineReplayButton();
+  var primaryW = Math.min(W - 44, 336);
+  var primaryH = 50;
+  var avatarS = 56;
+  var dockH = 56;
+  var statsH = 44;
+  var gapPrimaryStats = 22;
+  var clusterPadV = 14;
+
+  var safeInsetBottom = 0;
+  if (app.sys && app.sys.safeArea && typeof app.sys.safeArea.bottom === 'number') {
+    safeInsetBottom = Math.max(0, H - app.sys.safeArea.bottom);
+  }
+  var dockBottomPad = 10 + Math.min(safeInsetBottom, 28);
+  var dockCy = H - dockBottomPad - dockH * 0.5;
+  var dockZoneTop = dockCy - dockH * 0.62 - 10;
+
+  var trophyCy = sb + 28;
+  var titleMainY;
+  if (pack.mood === 'win') {
+    titleMainY = sb + 96;
+  } else {
+    titleMainY = sb + 56;
+  }
+  var headerEndY = titleMainY + (pack.sub ? 40 : 14);
+
+  var clusterH = avatarS + statsH + gapPrimaryStats + primaryH;
+  var midZoneTop = headerEndY + 18;
+  var midZoneBottom = dockZoneTop;
+  var midH = midZoneBottom - midZoneTop;
+  if (midH < clusterH + 24) {
+    midZoneTop = Math.max(headerEndY + 8, midZoneBottom - clusterH - 24);
+  }
+  var clusterCenterY = midZoneTop + (midZoneBottom - midZoneTop) * 0.5;
+  var clusterTop = clusterCenterY - clusterH * 0.5;
+  if (clusterTop < headerEndY + 8) {
+    clusterTop = headerEndY + 8;
+  }
+  if (clusterTop + clusterH > dockZoneTop - 6) {
+    clusterTop = Math.max(headerEndY + 8, dockZoneTop - clusterH - 6);
+  }
+
+  var vsCy = clusterTop + avatarS * 0.5;
+  var primaryCy =
+    clusterTop + avatarS + statsH + gapPrimaryStats + primaryH * 0.5;
+
+  var midX = W * 0.5;
+  var pairHalf = Math.min(108, Math.max(76, W * 0.27));
+
+  var cardW = Math.min(W - 32, 348);
+  var cardH = clusterH + clusterPadV * 2;
+  var cardX = (W - cardW) * 0.5;
+  var cardY = clusterTop - clusterPadV;
+  var cardR = Math.min(20, cardH * 0.12);
+
+  var showRematchRespond =
+    app.isPvpOnline &&
+    app.gameOver &&
+    app.onlineRematchRequesterColor != null &&
+    app.onlineRematchRequesterColor !== app.pvpOnlineYourColor;
+  var rematchGap = 10;
+  var rematchBtnW = (primaryW - rematchGap) * 0.5;
+  var rematchAcceptCx = midX - primaryW * 0.25 - rematchGap * 0.25;
+  var rematchDeclineCx = midX + primaryW * 0.25 + rematchGap * 0.25;
+
   return {
-    btnW: btnW,
-    btnH: btnH,
-    cx: app.W / 2,
+    fullPage: true,
+    W: W,
+    H: H,
+    sb: sb,
+    trophyCy: trophyCy,
+    titleMainY: titleMainY,
+    vsCy: vsCy,
+    vsLeftCx: midX - pairHalf,
+    vsRightCx: midX + pairHalf,
+    vsTextY: vsCy,
+    avatarS: avatarS,
+    avatarR: 12,
+    primaryCx: midX,
+    primaryCy: primaryCy,
+    primaryW: primaryW,
+    primaryH: primaryH,
+    dockCy: dockCy,
+    dockH: dockH,
+    hasReplayDock: hasReplayDock,
+    clusterTop: clusterTop,
+    clusterH: clusterH,
     cardX: cardX,
     cardY: cardY,
     cardW: cardW,
     cardH: cardH,
-    yTitle: yTitle,
-    ySub: ySub,
-    yAgain: yAgain,
-    yReplay: yReplay,
-    yHome: yHome,
-    threeBtn: threeBtn
+    cardR: cardR,
+    showRematchRespond: showRematchRespond,
+    rematchBtnW: rematchBtnW,
+    rematchAcceptCx: rematchAcceptCx,
+    rematchDeclineCx: rematchDeclineCx
   };
 }
 
 app.drawResultOverlay = function() {
   var th = app.getUiTheme();
-  var rs = th.result;
-  var bg = rs.defaultEnd;
-  var titleColor = th.title;
-  var title = '';
-  var sub = '';
-  switch (app.resultKind) {
-    case 'pve_win':
-      bg = rs.win.bg;
-      titleColor = rs.win.title;
-      title = '胜利';
-      sub = '恭喜战胜对手';
-      break;
-    case 'pve_lose':
-      bg = rs.lose.bg;
-      titleColor = rs.lose.title;
-      title = '失败';
-      sub = '再接再厉';
-      break;
-    case 'pve_draw':
-      bg = rs.draw.bg;
-      titleColor = rs.draw.title;
-      title = '平局';
-      sub = '难分高下';
-      break;
-    case 'pvp_black_win':
-      bg = rs.win.bg;
-      titleColor = rs.win.title;
-      title = '黑方胜利';
-      sub = '好友对战';
-      break;
-    case 'pvp_white_win':
-      bg = rs.win.bg;
-      titleColor = rs.win.title;
-      title = '白方胜利';
-      sub = '好友对战';
-      break;
-    case 'pvp_draw':
-      bg = rs.draw.bg;
-      titleColor = rs.draw.title;
-      title = '平局';
-      sub = '好友对战';
-      break;
-    case 'online_win':
-      bg = rs.win.bg;
-      titleColor = rs.win.title;
-      title = '胜利';
-      sub = '联机对战';
-      break;
-    case 'online_lose':
-      bg = rs.lose.bg;
-      titleColor = rs.lose.title;
-      title = '失败';
-      sub = '联机对战';
-      break;
-    default:
-      title = '对局结束';
-      sub = '';
+  var pack = resultOverlayTitlePack(app);
+  var rs = pack.rs;
+  var ctx = app.ctx;
+  var bgG = ctx.createLinearGradient(0, 0, 0, app.H);
+  if (th.bg && th.bg.length >= 3) {
+    bgG.addColorStop(0, th.bg[0]);
+    bgG.addColorStop(0.52, th.bg[1]);
+    bgG.addColorStop(1, th.bg[2]);
+  } else {
+    bgG.addColorStop(0, rs.defaultEnd);
+    bgG.addColorStop(1, rs.defaultEnd);
   }
-
-  app.ctx.fillStyle = 'rgba(0, 0, 0, 0.52)';
-  app.ctx.fillRect(0, 0, app.W, app.H);
+  ctx.fillStyle = bgG;
+  ctx.fillRect(0, 0, app.W, app.H);
 
   var ly = app.getResultOverlayLayout();
-  var rg = app.ctx.createLinearGradient(
-    0,
-    ly.cardY,
-    0,
-    ly.cardY + ly.cardH
-  );
-  rg.addColorStop(0, bg);
-  rg.addColorStop(1, rs.defaultEnd);
-  var cr = Math.min(26, ly.cardH * 0.12);
-  app.ctx.shadowColor = 'rgba(0,0,0,0.18)';
-  app.ctx.shadowBlur = 24;
-  app.ctx.shadowOffsetY = 8;
-  app.ctx.fillStyle = rg;
-  app.roundRect(ly.cardX, ly.cardY, ly.cardW, ly.cardH, cr);
-  app.ctx.fill();
-  app.ctx.strokeStyle = 'rgba(255, 255, 255, 0.42)';
-  app.ctx.lineWidth = 1.5;
-  app.ctx.stroke();
-  app.ctx.shadowBlur = 0;
-  app.ctx.shadowOffsetY = 0;
-
-  render.drawText(app.ctx, title, ly.cx, ly.yTitle, 36, titleColor);
-  if (sub) {
-    render.drawText(app.ctx, sub, ly.cx, ly.ySub, 16, rs.sub, 'normal');
+  if (pack.mood === 'win') {
+    drawResultConfetti(app, ly.sb + 4, 100);
+    ctx.font = '52px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\uD83C\uDFC6', app.snapPx(app.W * 0.5), app.snapPx(ly.trophyCy));
   }
 
-  app.drawMacaronCard(
-    '再来一局',
-    ly.cx,
-    ly.yAgain,
-    ly.btnW,
-    ly.btnH,
-    th.homeCards[0],
-    false,
-    'bear'
+  render.drawText(
+    ctx,
+    pack.main,
+    app.W * 0.5,
+    ly.titleMainY,
+    30,
+    pack.titleColor,
+    'bold'
   );
-
-  if (ly.threeBtn) {
-    app.drawMacaronCard(
-      '本局回放',
-      ly.cx,
-      ly.yReplay,
-      ly.btnW,
-      ly.btnH,
-      th.homeCards[1],
-      false,
-      'cloud'
+  if (pack.sub) {
+    render.drawText(
+      ctx,
+      pack.sub,
+      app.W * 0.5,
+      ly.titleMainY + 34,
+      14,
+      rs.sub,
+      'normal'
+    );
+  }
+  var imRematchRequester =
+    app.isPvpOnline &&
+    app.onlineRematchRequesterColor != null &&
+    app.onlineRematchRequesterColor === app.pvpOnlineYourColor;
+  if (imRematchRequester) {
+    render.drawText(
+      ctx,
+      '等待对方接受再来一局…',
+      app.W * 0.5,
+      ly.titleMainY + 52,
+      13,
+      rs.sub,
+      'normal'
     );
   }
 
-  app.ctx.shadowColor = 'rgba(0,0,0,0.06)';
-  app.ctx.shadowBlur = 10;
-  app.ctx.shadowOffsetY = 2;
-  app.ctx.fillStyle = rs.secondaryFill;
-  app.ctx.strokeStyle = rs.secondaryStroke;
-  app.ctx.lineWidth = 1.5;
-  app.roundRect(
-    ly.cx - ly.btnW / 2,
-    ly.yHome - ly.btnH / 2,
-    ly.btnW,
-    ly.btnH,
-    22
+  ctx.save();
+  ctx.shadowColor = 'rgba(55, 48, 40, 0.08)';
+  ctx.shadowBlur = 20;
+  ctx.shadowOffsetY = 4;
+  ctx.fillStyle = rs.secondaryFill;
+  ctx.strokeStyle = rs.secondaryStroke;
+  ctx.lineWidth = 1.25;
+  app.roundRect(ly.cardX, ly.cardY, ly.cardW, ly.cardH, ly.cardR);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+  ctx.stroke();
+  ctx.restore();
+
+  /** 联机：与棋盘一致为「左我右对手」，避免执白时与「左黑右白」错位导致双方对分数理解不一致 */
+  var imgLeft;
+  var imgRight;
+  if (app.isPvpOnline) {
+    var Lvs = app.computeBoardNameLabelLayout(app.layout);
+    imgLeft = Lvs.myImg;
+    imgRight = Lvs.oppImg;
+  } else {
+    imgLeft = app.getResultVsAvatarImage(true);
+    imgRight = app.getResultVsAvatarImage(false);
+  }
+  drawResultRoundedSquareAvatar(
+    app,
+    th,
+    imgLeft,
+    ly.vsLeftCx,
+    ly.vsCy,
+    ly.avatarS,
+    ly.avatarR
   );
-  app.ctx.fill();
-  app.ctx.stroke();
-  app.ctx.shadowBlur = 0;
-  app.ctx.shadowOffsetY = 0;
-  app.ctx.font =
-    'bold 17px "PingFang SC","Hiragino Sans GB",sans-serif';
-  app.ctx.fillStyle = rs.secondaryText;
-  app.ctx.textAlign = 'center';
-  app.ctx.textBaseline = 'middle';
-  app.ctx.fillText('返回首页', app.snapPx(ly.cx), app.snapPx(ly.yHome));
+  drawResultRoundedSquareAvatar(
+    app,
+    th,
+    imgRight,
+    ly.vsRightCx,
+    ly.vsCy,
+    ly.avatarS,
+    ly.avatarR
+  );
+
+  ctx.font = 'bold 28px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = th.pageIndicator != null ? th.pageIndicator : '#ea580c';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('VS', app.snapPx(app.W * 0.5), app.snapPx(ly.vsTextY));
+
+  function eloLine(forBlack) {
+    var sr = app.lastSettleRating;
+    if (sr) {
+      var e = forBlack ? sr.blackEloAfter : sr.whiteEloAfter;
+      var d = forBlack ? sr.blackEloDelta : sr.whiteEloDelta;
+      var elo = String(e);
+      var deltaStr = '';
+      var dNeg = false;
+      var dZero = false;
+      if (typeof d === 'number') {
+        dNeg = d < 0;
+        dZero = d === 0;
+        deltaStr = '(' + (d > 0 ? '+' : '') + d + ')';
+      }
+      return {
+        elo: elo,
+        delta: deltaStr,
+        dNeg: dNeg,
+        dZero: dZero
+      };
+    }
+    if (app.isPvpOnline || app.isPvpLocal) {
+      return { elo: '--', delta: '', dNeg: false, dZero: false };
+    }
+    var hum = app.pveHumanColor;
+    var humanOnBlack = hum === gomoku.BLACK;
+    var showHuman = forBlack === humanOnBlack;
+    if (showHuman && typeof app.homeRatingEloCache === 'number') {
+      return {
+        elo: String(Math.round(app.homeRatingEloCache)),
+        delta: '',
+        dNeg: false,
+        dZero: false
+      };
+    }
+    return { elo: '--', delta: '', dNeg: false, dZero: false };
+  }
+
+  var lb;
+  var lw;
+  if (app.isPvpOnline) {
+    var meBlack = app.pvpOnlineYourColor === gomoku.BLACK;
+    lb = eloLine(meBlack);
+    lw = eloLine(!meBlack);
+  } else {
+    lb = eloLine(true);
+    lw = eloLine(false);
+  }
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 18px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = th.title;
+  ctx.fillText(lb.elo, app.snapPx(ly.vsLeftCx), app.snapPx(ly.vsCy + ly.avatarS * 0.5 + 16));
+  ctx.fillText(lw.elo, app.snapPx(ly.vsRightCx), app.snapPx(ly.vsCy + ly.avatarS * 0.5 + 16));
+  ctx.font = '600 14px "PingFang SC","Hiragino Sans GB",sans-serif';
+  if (lb.delta) {
+    ctx.fillStyle = lb.dNeg ? '#dc2626' : lb.dZero ? '#64748b' : '#16a34a';
+    ctx.fillText(
+      lb.delta,
+      app.snapPx(ly.vsLeftCx),
+      app.snapPx(ly.vsCy + ly.avatarS * 0.5 + 34)
+    );
+  }
+  if (lw.delta) {
+    ctx.fillStyle = lw.dNeg ? '#dc2626' : lw.dZero ? '#64748b' : '#16a34a';
+    ctx.fillText(
+      lw.delta,
+      app.snapPx(ly.vsRightCx),
+      app.snapPx(ly.vsCy + ly.avatarS * 0.5 + 34)
+    );
+  }
+
+  var px0 = ly.primaryCx - ly.primaryW * 0.5;
+  var py0 = ly.primaryCy - ly.primaryH * 0.5;
+  if (ly.showRematchRespond) {
+    var accX0 = ly.rematchAcceptCx - ly.rematchBtnW * 0.5;
+    var decX0 = ly.rematchDeclineCx - ly.rematchBtnW * 0.5;
+    var pr = ly.primaryH * 0.5;
+    ctx.shadowColor = 'rgba(60, 48, 38, 0.12)';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 3;
+    ctx.fillStyle = th.homeCards != null ? th.homeCards[0] : '#5C4738';
+    app.roundRect(accX0, py0, ly.rematchBtnW, ly.primaryH, pr);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.lineWidth = 1.2;
+    app.roundRect(accX0 + 0.3, py0 + 0.3, ly.rematchBtnW - 0.6, ly.primaryH - 0.6, pr);
+    ctx.stroke();
+    ctx.fillStyle = th.btnGhostFill != null ? th.btnGhostFill : '#fff';
+    ctx.strokeStyle = th.btnGhostStroke != null ? th.btnGhostStroke : 'rgba(0,0,0,0.12)';
+    app.roundRect(decX0, py0, ly.rematchBtnW, ly.primaryH, pr);
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = 'bold 16px "PingFang SC","Hiragino Sans GB",sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('同意', app.snapPx(ly.rematchAcceptCx), app.snapPx(ly.primaryCy));
+    ctx.fillStyle = th.btnGhostText != null ? th.btnGhostText : '#5E524D';
+    ctx.fillText('拒绝', app.snapPx(ly.rematchDeclineCx), app.snapPx(ly.primaryCy));
+  } else {
+    var primaryLabel = '再来一局';
+    var pinkG = ctx.createLinearGradient(px0, py0, px0, py0 + ly.primaryH);
+    pinkG.addColorStop(0, '#fce7f3');
+    pinkG.addColorStop(0.45, '#f9a8d4');
+    pinkG.addColorStop(1, '#ec4899');
+    ctx.shadowColor = 'rgba(236, 72, 153, 0.35)';
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 4;
+    ctx.fillStyle = pinkG;
+    app.roundRect(px0, py0, ly.primaryW, ly.primaryH, ly.primaryH * 0.5);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+    ctx.lineWidth = 1.25;
+    app.roundRect(px0 + 0.5, py0 + 0.5, ly.primaryW - 1, ly.primaryH - 1, ly.primaryH * 0.5);
+    ctx.stroke();
+    ctx.font = 'bold 17px "PingFang SC","Hiragino Sans GB",sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(
+      '\u2709 ' + primaryLabel,
+      app.snapPx(ly.primaryCx),
+      app.snapPx(ly.primaryCy)
+    );
+  }
+
+  var dockY = ly.dockCy;
+  var nDock = ly.hasReplayDock ? 3 : 2;
+  var colW = app.W / nDock;
+  var di;
+  var dockLabels =
+    nDock === 3 ? ['首页', '回放', '继续'] : ['首页', '继续'];
+  var dockIcons = nDock === 3 ? ['🏠', '🎬', '↻'] : ['🏠', '↻'];
+  var dockTop = dockY - ly.dockH * 0.5;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, dockTop, app.W, ly.dockH);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, dockTop);
+  ctx.lineTo(app.W, dockTop);
+  ctx.stroke();
+  var dockLabelColor = '#8f887f';
+  var dockIconMuted = '#a8a29e';
+  for (di = 0; di < nDock; di++) {
+    var cx = colW * (di + 0.5);
+    ctx.font = '20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = dockIconMuted;
+    ctx.fillText(dockIcons[di], app.snapPx(cx), app.snapPx(dockY - 10));
+    ctx.font =
+      '500 12px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = dockLabelColor;
+    ctx.fillText(dockLabels[di], app.snapPx(cx), app.snapPx(dockY + 14));
+  }
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.08)';
+  ctx.lineWidth = 1;
+  for (di = 1; di < nDock; di++) {
+    var lx = colW * di;
+    ctx.beginPath();
+    ctx.moveTo(lx, dockY - ly.dockH * 0.32);
+    ctx.lineTo(lx, dockY + ly.dockH * 0.32);
+    ctx.stroke();
+  }
+
   app.drawThemeChrome(th);
 }
 

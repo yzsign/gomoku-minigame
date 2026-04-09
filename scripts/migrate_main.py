@@ -47,6 +47,7 @@ STATE_NAMES = [
     "onlineOpponentIsBot",
     "onlineResultOverlaySticky",
     "lastSettledGameId",
+    "lastSettleRating",
     "onlineInviteConsumed",
     "randomMatchHostWaiting",
     "homeMascotAnimTimer",
