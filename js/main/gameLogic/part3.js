@@ -1077,6 +1077,15 @@ app.sendOnlineRematchRequest = function() {
     }
     return;
   }
+  if (
+    app.onlineRematchRequesterColor != null &&
+    app.pvpOnlineYourColor !== app.onlineRematchRequesterColor
+  ) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '请在弹窗中同意或拒绝', icon: 'none' });
+    }
+    return;
+  }
   app.socketTask.send({
     data: JSON.stringify({ type: 'RESET' })
   });
@@ -1722,25 +1731,21 @@ function resultOverlayTitlePack(app) {
     case 'online_win':
       mood = 'win';
       main = app.winner === gomoku.WHITE ? '白棋获胜' : '黑棋获胜';
-      sub = '联机对抗';
       titleColor = rs.win.title;
       break;
     case 'online_lose':
       mood = 'lose';
       main = '失败';
-      sub = '联机对抗';
       titleColor = rs.lose.title;
       break;
     case 'online_draw':
       mood = 'draw';
       main = '和局';
-      sub = '联机对抗';
       titleColor = rs.draw.title;
       break;
     case 'online_opponent_left':
       mood = 'win';
       main = '对方离开';
-      sub = '联机对抗';
       titleColor = rs.win.title;
       break;
     default:
@@ -1810,7 +1815,9 @@ app.getResultOverlayLayout = function() {
   var cardY = clusterTop - clusterPadV;
   var cardR = Math.min(20, cardH * 0.12);
 
-  var showRematchRespond =
+  /** 联机回应方：与悔棋/和棋一致用 wx.showModal，不在画布上画同意/拒绝 */
+  var showRematchRespond = false;
+  var showRematchInviteHint =
     app.isPvpOnline &&
     app.gameOver &&
     app.onlineRematchRequesterColor != null &&
@@ -1848,6 +1855,7 @@ app.getResultOverlayLayout = function() {
     cardH: cardH,
     cardR: cardR,
     showRematchRespond: showRematchRespond,
+    showRematchInviteHint: showRematchInviteHint,
     rematchBtnW: rematchBtnW,
     rematchAcceptCx: rematchAcceptCx,
     rematchDeclineCx: rematchDeclineCx
@@ -2039,34 +2047,16 @@ app.drawResultOverlay = function() {
 
   var px0 = ly.primaryCx - ly.primaryW * 0.5;
   var py0 = ly.primaryCy - ly.primaryH * 0.5;
-  if (ly.showRematchRespond) {
-    var accX0 = ly.rematchAcceptCx - ly.rematchBtnW * 0.5;
-    var decX0 = ly.rematchDeclineCx - ly.rematchBtnW * 0.5;
-    var pr = ly.primaryH * 0.5;
-    ctx.shadowColor = 'rgba(60, 48, 38, 0.12)';
-    ctx.shadowBlur = 12;
-    ctx.shadowOffsetY = 3;
-    ctx.fillStyle = th.homeCards != null ? th.homeCards[0] : '#5C4738';
-    app.roundRect(accX0, py0, ly.rematchBtnW, ly.primaryH, pr);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
-    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-    ctx.lineWidth = 1.2;
-    app.roundRect(accX0 + 0.3, py0 + 0.3, ly.rematchBtnW - 0.6, ly.primaryH - 0.6, pr);
-    ctx.stroke();
-    ctx.fillStyle = th.btnGhostFill != null ? th.btnGhostFill : '#fff';
-    ctx.strokeStyle = th.btnGhostStroke != null ? th.btnGhostStroke : 'rgba(0,0,0,0.12)';
-    app.roundRect(decX0, py0, ly.rematchBtnW, ly.primaryH, pr);
-    ctx.fill();
-    ctx.stroke();
-    ctx.font = 'bold 16px "PingFang SC","Hiragino Sans GB",sans-serif';
-    ctx.fillStyle = '#ffffff';
+  if (ly.showRematchInviteHint) {
+    ctx.font = '600 15px "PingFang SC","Hiragino Sans GB",sans-serif';
+    ctx.fillStyle = rs.sub != null ? rs.sub : '#78716c';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('同意', app.snapPx(ly.rematchAcceptCx), app.snapPx(ly.primaryCy));
-    ctx.fillStyle = th.btnGhostText != null ? th.btnGhostText : '#5E524D';
-    ctx.fillText('拒绝', app.snapPx(ly.rematchDeclineCx), app.snapPx(ly.primaryCy));
+    ctx.fillText(
+      '请在弹窗中选择同意或拒绝',
+      app.snapPx(ly.primaryCx),
+      app.snapPx(ly.primaryCy)
+    );
   } else {
     var primaryLabel = '再来一局';
     var pinkG = ctx.createLinearGradient(px0, py0, px0, py0 + ly.primaryH);

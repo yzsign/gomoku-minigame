@@ -958,17 +958,16 @@ function drawStonePiece(ctx, cx, cy, radius, isBlack, pb, pw, theme) {
  * @param {CanvasRenderingContext2D} ctx
  * @param {number[][]} board
  * @param {object} layout
- * @param {object} theme 主题（themes.js）
+ * @param {object} themeBlack 黑子用主题（含贴图/渐变）
+ * @param {object} [themeWhite] 白子用；省略或与 themeBlack 相同时即本地单机/旧逻辑
  */
-function drawPieces(ctx, board, layout, theme) {
+function drawPieces(ctx, board, layout, themeBlack, themeWhite) {
+  var tw = themeWhite != null ? themeWhite : themeBlack;
   var cell = layout.cell;
   var ox = snapLogical(layout.originX);
   var oy = snapLogical(layout.originY);
   var r;
   var c;
-  var radius = boardPieceRadius(cell, theme);
-  var pb = theme.pieces.black;
-  var pw = theme.pieces.white;
   for (r = 0; r < layout.size; r++) {
     for (c = 0; c < layout.size; c++) {
       var v = board[r][c];
@@ -976,7 +975,11 @@ function drawPieces(ctx, board, layout, theme) {
       var cx = snapLogical(ox + c * cell);
       var cy = snapLogical(oy + r * cell);
       var isBlack = v === gomoku.BLACK;
-      drawStonePiece(ctx, cx, cy, radius, isBlack, pb, pw, theme);
+      var th = isBlack ? themeBlack : tw;
+      var radius = boardPieceRadius(cell, th);
+      var pb = th.pieces.black;
+      var pw = th.pieces.white;
+      drawStonePiece(ctx, cx, cy, radius, isBlack, pb, pw, th);
     }
   }
 }
@@ -1037,49 +1040,54 @@ function drawOpponentLastMoveMarker(ctx, layout, theme, r, c, stoneColor, pieceT
 /**
  * 连成五子高亮：每个胜子外围一圈橙金色柔光晕（与棋子半径一致参考 drawPieces）
  * @param {Array<{r:number,c:number}>} cells 一般为 5 点
+ * @param {object} themeBlack
+ * @param {object} [themeWhite] 省略则与单机相同主题
  */
-function drawWinningLine(ctx, layout, cells, pieceTheme, board) {
+function drawWinningLine(ctx, layout, cells, themeBlack, themeWhite, board) {
   if (!cells || cells.length < 1) {
     return;
   }
+  var tw = themeWhite != null ? themeWhite : themeBlack;
   var cell = layout.cell;
   var ox = snapLogical(layout.originX);
   var oy = snapLogical(layout.originY);
-  /** 与 drawPieces 中棋子半径一致 */
-  var pr = boardPieceRadius(cell, pieceTheme);
-  var w = pieceTheme && pieceTheme.winningLineHighlight;
-  var glowOutMul =
-    w && typeof w.glowOuterMul === 'number' ? w.glowOuterMul : 1.62;
-  var gInnerMul =
-    w && typeof w.glowGradientInnerMul === 'number'
-      ? w.glowGradientInnerMul
-      : 0.92;
-  var ringPriMul =
-    w && typeof w.ringPrimaryMul === 'number' ? w.ringPrimaryMul : 1.14;
-  var ringSecMul =
-    w && typeof w.ringSecondaryMul === 'number' ? w.ringSecondaryMul : 1.06;
-  var lw1 =
-    w && typeof w.primaryLineWidthPr === 'number'
-      ? Math.max(1.6, pr * w.primaryLineWidthPr, cell * 0.045)
-      : Math.max(2.4, cell * 0.075);
-  var lw2 =
-    w && typeof w.secondaryLineWidthPr === 'number'
-      ? Math.max(1, pr * w.secondaryLineWidthPr, cell * 0.028)
-      : Math.max(1.2, cell * 0.038);
-  var shBlur =
-    w && typeof w.primaryShadowBlurPr === 'number'
-      ? Math.max(4, pr * w.primaryShadowBlurPr)
-      : Math.max(12, cell * 0.16);
   var i;
   for (i = 0; i < cells.length; i++) {
     var rr = cells[i].r;
     var cc = cells[i].c;
+    var bv = board ? board[rr][cc] : gomoku.EMPTY;
+    var pieceTheme =
+      bv === gomoku.BLACK ? themeBlack : bv === gomoku.WHITE ? tw : themeBlack;
+    /** 与 drawPieces 中棋子半径一致 */
+    var pr = boardPieceRadius(cell, pieceTheme);
+    var w = pieceTheme && pieceTheme.winningLineHighlight;
+    var glowOutMul =
+      w && typeof w.glowOuterMul === 'number' ? w.glowOuterMul : 1.62;
+    var gInnerMul =
+      w && typeof w.glowGradientInnerMul === 'number'
+        ? w.glowGradientInnerMul
+        : 0.92;
+    var ringPriMul =
+      w && typeof w.ringPrimaryMul === 'number' ? w.ringPrimaryMul : 1.14;
+    var ringSecMul =
+      w && typeof w.ringSecondaryMul === 'number' ? w.ringSecondaryMul : 1.06;
+    var lw1 =
+      w && typeof w.primaryLineWidthPr === 'number'
+        ? Math.max(1.6, pr * w.primaryLineWidthPr, cell * 0.045)
+        : Math.max(2.4, cell * 0.075);
+    var lw2 =
+      w && typeof w.secondaryLineWidthPr === 'number'
+        ? Math.max(1, pr * w.secondaryLineWidthPr, cell * 0.028)
+        : Math.max(1.2, cell * 0.038);
+    var shBlur =
+      w && typeof w.primaryShadowBlurPr === 'number'
+        ? Math.max(4, pr * w.primaryShadowBlurPr)
+        : Math.max(12, cell * 0.16);
     var cx0 = snapLogical(ox + cc * cell);
     var cy0 = snapLogical(oy + rr * cell);
     var cx = cx0;
     var cy = cy0;
     if (board && pieceTheme) {
-      var bv = board[rr][cc];
       if (bv === gomoku.BLACK || bv === gomoku.WHITE) {
         var woff = getPieceTextureVisualCenterOffset(pieceTheme, bv, pr);
         cx = snapLogical(cx0 + woff.dx);

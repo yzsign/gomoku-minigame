@@ -29,7 +29,7 @@ app.hitResultButton = function(clientX, clientY) {
     ) {
       return 'rematch_decline';
     }
-  } else {
+  } else if (!rl.showRematchInviteHint) {
     var halfPw = rl.primaryW * 0.5 + 14;
     if (
       Math.abs(clientX - rl.primaryCx) <= halfPw &&
@@ -86,11 +86,17 @@ app.clearReplayControlPress = function() {
   app.replayTouchIdentifier = null;
 }
 
-app.enterReplayScreen = function(movesArr) {
+app.enterReplayScreen = function(movesArr, blackPieceSkinId, whitePieceSkinId) {
   app.stopReplayAuto();
   app.clearReplayControlPress();
   app.replayMoves = movesArr || [];
   app.replayStep = 0;
+  if (arguments.length >= 2) {
+    app.applyReplayPieceSkinsFromOptional(blackPieceSkinId, whitePieceSkinId);
+  } else {
+    app.replayBlackPieceSkinId = null;
+    app.replayWhitePieceSkinId = null;
+  }
   app.screen = 'replay';
   app.showResultOverlay = false;
   app.draw();
@@ -99,17 +105,25 @@ app.enterReplayScreen = function(movesArr) {
 app.exitReplayScreen = function() {
   app.stopReplayAuto();
   app.clearReplayControlPress();
+  app.replayBlackPieceSkinId = null;
+  app.replayWhitePieceSkinId = null;
   app.screen = 'game';
   app.showResultOverlay = true;
   app.draw();
 }
 
-app.openHistoryReplayOverlay = function(movesArr) {
+app.openHistoryReplayOverlay = function(movesArr, blackPieceSkinId, whitePieceSkinId) {
   app.stopReplayAuto();
   app.clearReplayControlPress();
   app.stopHistoryMomentum();
   app.replayMoves = movesArr || [];
   app.replayStep = 0;
+  if (arguments.length >= 2) {
+    app.applyReplayPieceSkinsFromOptional(blackPieceSkinId, whitePieceSkinId);
+  } else {
+    app.replayBlackPieceSkinId = null;
+    app.replayWhitePieceSkinId = null;
+  }
   app.historyReplayOverlayVisible = true;
   app.draw();
 }
@@ -117,6 +131,8 @@ app.openHistoryReplayOverlay = function(movesArr) {
 app.closeHistoryReplayOverlay = function() {
   app.stopReplayAuto();
   app.clearReplayControlPress();
+  app.replayBlackPieceSkinId = null;
+  app.replayWhitePieceSkinId = null;
   app.historyReplayOverlayVisible = false;
   app.draw();
 }
@@ -182,7 +198,11 @@ app.tryReplayByRoomFallback = function() {
         success: function (res) {
           wx.hideLoading();
           if (res.statusCode === 200 && res.data && res.data.moves) {
-            app.enterReplayScreen(res.data.moves);
+            app.enterReplayScreen(
+              res.data.moves,
+              res.data.blackPieceSkinId,
+              res.data.whitePieceSkinId
+            );
           } else {
             wx.showToast({ title: '暂无棋谱', icon: 'none' });
           }
@@ -203,7 +223,11 @@ app.openReplayFromResult = function() {
     for (i = 0; i < app.onlineMoveHistory.length; i++) {
       copy.push(app.onlineMoveHistory[i]);
     }
-    app.enterReplayScreen(copy);
+    app.enterReplayScreen(
+      copy,
+      app.onlineBlackPieceSkinId,
+      app.onlineWhitePieceSkinId
+    );
     return;
   }
   if (app.lastSettledGameId) {
@@ -213,7 +237,11 @@ app.openReplayFromResult = function() {
         success: function (res) {
           wx.hideLoading();
           if (res.statusCode === 200 && res.data) {
-            app.enterReplayScreen(res.data.moves || []);
+            app.enterReplayScreen(
+              res.data.moves || [],
+              res.data.blackPieceSkinId,
+              res.data.whitePieceSkinId
+            );
           } else {
             app.tryReplayByRoomFallback();
           }
@@ -288,7 +316,8 @@ app.drawReplayBoardLayer = function() {
   );
   render.drawBoard(app.ctx, app.layout, th);
   var rb = app.buildBoardFromMoves(app.replayMoves, app.replayStep);
-  render.drawPieces(app.ctx, rb, app.layout, app.getThemeForPieces(th));
+  var rp = app.getReplayPiecePairThemes(th);
+  render.drawPieces(app.ctx, rb, app.layout, rp.black, rp.white);
   app.ctx.save();
   app.ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
   app.ctx.shadowBlur = 6;
@@ -905,7 +934,11 @@ app.openHistoryReplayForRecord = function(rec) {
           } catch (eH) {}
         }
         if (res.statusCode === 200 && res.data && res.data.moves) {
-          app.openHistoryReplayOverlay(res.data.moves);
+          app.openHistoryReplayOverlay(
+            res.data.moves,
+            res.data.blackPieceSkinId,
+            res.data.whitePieceSkinId
+          );
         } else {
           if (typeof wx.showToast === 'function') {
             wx.showToast({ title: '暂无棋谱', icon: 'none' });

@@ -449,7 +449,24 @@ app.draw = function() {
   var th = app.getUiTheme();
   /** 棋盘跟随后台所选界面主题（青瓷 / 水墨 / 檀木）；棋子再叠棋子皮肤 */
   var boardTh = app.getCurrentTheme();
-  var pieceTh = app.getThemeForPieces(boardTh);
+  var pieceThBlack;
+  var pieceThWhite;
+  if (app.isPvpOnline) {
+    var fb = app.onlineBlackPieceSkinId;
+    var fw = app.onlineWhitePieceSkinId;
+    if (fb == null || fb === '') {
+      fb = app.pieceSkinId;
+    }
+    if (fw == null || fw === '') {
+      fw = app.pieceSkinId;
+    }
+    pieceThBlack = app.getPieceThemeForSkin(boardTh, fb);
+    pieceThWhite = app.getPieceThemeForSkin(boardTh, fw);
+  } else {
+    var pieceUnified = app.getThemeForPieces(boardTh);
+    pieceThBlack = pieceUnified;
+    pieceThWhite = pieceUnified;
+  }
   doodles.drawGameBoardCornerClouds(
     app.ctx,
     app.W,
@@ -458,22 +475,32 @@ app.draw = function() {
     app.sys.statusBarHeight || 0
   );
   render.drawBoard(app.ctx, app.layout, boardTh);
-  render.drawPieces(app.ctx, app.board, app.layout, pieceTh);
+  render.drawPieces(app.ctx, app.board, app.layout, pieceThBlack, pieceThWhite);
   if (app.shouldShowOpponentLastMoveMarker()) {
     var lr = app.lastOpponentMove.r;
     var lc = app.lastOpponentMove.c;
+    var stoneAt = app.board[lr][lc];
+    var markerPieceTh =
+      stoneAt === app.BLACK ? pieceThBlack : pieceThWhite;
     render.drawOpponentLastMoveMarker(
       app.ctx,
       app.layout,
       boardTh,
       lr,
       lc,
-      app.board[lr][lc],
-      pieceTh
+      stoneAt,
+      markerPieceTh
     );
   }
   if (app.winningLineCells && app.winningLineCells.length >= 1) {
-    render.drawWinningLine(app.ctx, app.layout, app.winningLineCells, pieceTh, app.board);
+    render.drawWinningLine(
+      app.ctx,
+      app.layout,
+      app.winningLineCells,
+      pieceThBlack,
+      pieceThWhite,
+      app.board
+    );
   }
 
   app.drawBoardNameLabels(app.ctx, app.layout, th);
@@ -2032,6 +2059,15 @@ wx.onTouchStart(function (e) {
       app.homePressedButton = null;
       app.homePressedDockCol = dockHit;
       app.draw();
+      return;
+    }
+  }
+
+  if (app.screen === 'game' && app.isOnlineFriendMatchNotStarted()) {
+    if (app.hitGameButton(x, y) !== 'back') {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: '对局未开始', icon: 'none' });
+      }
       return;
     }
   }

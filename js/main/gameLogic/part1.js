@@ -878,12 +878,54 @@ app.enrichPieceSkinTheme = function(theme, skinId) {
 }
 
 /**
- * 绘制棋子用：在基底主题上套用棋子皮肤（与界面风格独立）。
+ * 绘制棋子用：在基底主题上套用指定棋子皮肤 id（与界面风格独立）。
+ */
+app.getPieceThemeForSkin = function(baseTheme, skinId) {
+  var sid = skinId && String(skinId).trim() ? String(skinId).trim() : 'basic';
+  var t = themes.applyPieceSkin(baseTheme, sid);
+  return app.enrichPieceSkinTheme(t, sid);
+}
+
+/**
+ * 绘制棋子用：在基底主题上套用当前佩戴棋子皮肤（与界面风格独立）。
  * 对局页基底为檀木盘时仍用 classic 作合并基底。
  */
 app.getThemeForPieces = function(baseTheme) {
-  var t = themes.applyPieceSkin(baseTheme, app.pieceSkinId);
-  return app.enrichPieceSkinTheme(t, app.pieceSkinId);
+  return app.getPieceThemeForSkin(baseTheme, app.pieceSkinId);
+}
+
+/**
+ * 棋谱回放：某侧为 null 时该侧回退为 app.pieceSkinId（兼容旧存档无字段）。
+ */
+app.applyReplayPieceSkinsFromOptional = function(blackPieceSkinId, whitePieceSkinId) {
+  if (blackPieceSkinId != null && String(blackPieceSkinId).trim() !== '') {
+    app.replayBlackPieceSkinId = String(blackPieceSkinId).trim();
+  } else {
+    app.replayBlackPieceSkinId = null;
+  }
+  if (whitePieceSkinId != null && String(whitePieceSkinId).trim() !== '') {
+    app.replayWhitePieceSkinId = String(whitePieceSkinId).trim();
+  } else {
+    app.replayWhitePieceSkinId = null;
+  }
+}
+
+/**
+ * 棋谱层绘制：返回黑/白两套棋子主题（与联机对局分支一致）。
+ */
+app.getReplayPiecePairThemes = function(baseTheme) {
+  var fb = app.replayBlackPieceSkinId;
+  var fw = app.replayWhitePieceSkinId;
+  if (fb == null || fb === '') {
+    fb = app.pieceSkinId;
+  }
+  if (fw == null || fw === '') {
+    fw = app.pieceSkinId;
+  }
+  return {
+    black: app.getPieceThemeForSkin(baseTheme, fb),
+    white: app.getPieceThemeForSkin(baseTheme, fw)
+  };
 }
 
 /**
@@ -1034,6 +1076,23 @@ app.onlineInviteConsumed = false;
 app.onlineSettleSent = false;
 /** 与 WS STATE.matchRound 一致：首局 1，再来一局后递增，用于结算上报 */
 app.onlineMatchRound = 1;
+/**
+ * 联机 STATE：双方执子皮肤（服务端广播）；null 兼容旧服务端，绘制时回退为统一使用 app.pieceSkinId
+ */
+app.onlineBlackPieceSkinId = null;
+app.onlineWhitePieceSkinId = null;
+
+/**
+ * 好友联机（非随机匹配）：双方未都在座时视为对局未开始。
+ * 用于邀请后对面未进房、白方未加入、关闭转发面板后仍在等待等场景。
+ */
+app.isOnlineFriendMatchNotStarted = function() {
+  return (
+    app.isPvpOnline &&
+    !app.isRandomMatch &&
+    (!app.onlineBlackConnected || !app.onlineWhiteConnected)
+  );
+};
 
 /** 联机：从盘面差分同步的终局手顺（悔棋会缩短），用于结算 moves 与回放 */
 app.onlineMoveHistory = [];
@@ -1048,6 +1107,9 @@ app.lastSettleRating = null;
 app.replayMoves = [];
 app.replayStep = 0;
 app.replayAutoTimerId = null;
+/** 棋谱回放双方棋子皮肤（服务端 replay 或本局联机 STATE） */
+app.replayBlackPieceSkinId = null;
+app.replayWhitePieceSkinId = null;
 /** 棋谱回放底栏药丸宽度（与 drawButton 一致；相邻箭头按钮中心距=此值则边缘相贴） */
 app.REPLAY_CTRL_PILL_W = 82;
 /**
@@ -1287,6 +1349,8 @@ app.disconnectOnline = function() {
   app.onlineSettleSent = false;
   app.onlineMatchRound = 1;
   app.randomMatchHostCancelToken = '';
+  app.onlineBlackPieceSkinId = null;
+  app.onlineWhitePieceSkinId = null;
   app.clearOnlineOpponentProfile();
   if (app.historyReplayOverlayVisible) {
     app.historyReplayOverlayVisible = false;
@@ -2137,6 +2201,7 @@ app.applyOnlineState = function(data) {
     app.onlineDrawPending &&
     app.onlineDrawRequesterColor != null &&
     app.onlineDrawRequesterColor === app.pvpOnlineYourColor;
+  var prevRematchRequesterColor = app.onlineRematchRequesterColor;
   app.board = app.copyBoardFromServer(data.board);
   var newStoneCount = app.countStonesOnBoard(app.board);
   if (app.countStonesOnBoard(app.board) === app.countStonesOnBoard(prevBoard) + 1) {
@@ -2160,6 +2225,24 @@ app.applyOnlineState = function(data) {
     app.winner = app.normalizeOnlineStoneInt(data.winner, null);
   }
   app.pvpOnlineYourColor = app.normalizeOnlineStoneInt(data.yourColor, app.BLACK);
+  if (
+    data.blackPieceSkinId !== undefined &&
+    data.blackPieceSkinId !== null &&
+    String(data.blackPieceSkinId).trim() !== ''
+  ) {
+    app.onlineBlackPieceSkinId = String(data.blackPieceSkinId).trim();
+  } else {
+    app.onlineBlackPieceSkinId = null;
+  }
+  if (
+    data.whitePieceSkinId !== undefined &&
+    data.whitePieceSkinId !== null &&
+    String(data.whitePieceSkinId).trim() !== ''
+  ) {
+    app.onlineWhitePieceSkinId = String(data.whitePieceSkinId).trim();
+  } else {
+    app.onlineWhitePieceSkinId = null;
+  }
   app.onlineBlackConnected = !!data.blackConnected;
   app.onlineWhiteConnected = !!data.whiteConnected;
   if (data.whiteIsBot !== undefined && data.whiteIsBot !== null) {
@@ -2215,6 +2298,35 @@ app.applyOnlineState = function(data) {
       data.rematchRequesterColor,
       null
     );
+  }
+  if (
+    app.isPvpOnline &&
+    app.screen === 'game' &&
+    prevRematchRequesterColor == null &&
+    app.onlineRematchRequesterColor != null &&
+    app.pvpOnlineYourColor !== app.onlineRematchRequesterColor &&
+    typeof wx !== 'undefined' &&
+    typeof wx.showModal === 'function'
+  ) {
+    wx.showModal({
+      title: '对方想再来一局',
+      content: '是否同意与对方再来一局？',
+      confirmText: '同意',
+      cancelText: '拒绝',
+      success: function(res) {
+        if (!app.isPvpOnline || !app.onlineRematchRequesterColor) {
+          return;
+        }
+        if (app.pvpOnlineYourColor === app.onlineRematchRequesterColor) {
+          return;
+        }
+        if (res.confirm) {
+          app.sendOnlineRematchAccept();
+        } else {
+          app.sendOnlineRematchDecline();
+        }
+      }
+    });
   }
   if (
     prevWasMyUndoRequest &&
