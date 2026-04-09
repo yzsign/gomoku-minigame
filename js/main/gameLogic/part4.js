@@ -2180,7 +2180,25 @@ app.applyPieceSkinWear = function() {
     app.draw();
     return;
   }
-  if (themes.getShopCategory(entry) === themes.SHOP_CATEGORY_THEME) {
+  /** 已装备同一项时：再次双击取消装备（主题→檀木，棋子→基础黑白） */
+  var shopTheme = themes.getShopCategory(entry) === themes.SHOP_CATEGORY_THEME;
+  var alreadyEquipped = shopTheme
+    ? app.themeId === entry.id
+    : app.pieceSkinId === entry.id;
+  if (alreadyEquipped) {
+    if (shopTheme) {
+      app.themeId = 'classic';
+      themes.saveThemeId('classic');
+      app.syncThemeToServerIfAuthed('classic');
+    } else {
+      app.pieceSkinId = 'basic';
+      themes.savePieceSkinId('basic');
+      app.syncPieceSkinSelectionToServerIfAuthed('basic');
+    }
+    app.draw();
+    return;
+  }
+  if (shopTheme) {
     app.themeId = entry.id;
     themes.saveThemeId(entry.id);
     app.syncThemeToServerIfAuthed(entry.id);

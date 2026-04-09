@@ -772,9 +772,9 @@ app.hitHomeBottomNav = function(clientX, clientY) {
     return null;
   }
   var innerW = app.W - pad * 2;
-  var colW = innerW / 4;
+  var colW = innerW / 3;
   var col = Math.floor((clientX - pad) / colW);
-  if (col < 0 || col > 3) {
+  if (col < 0 || col > 2) {
     return null;
   }
   return col;
@@ -1877,7 +1877,7 @@ if (typeof wx.onTouchEnd === 'function') {
       app.homePressedDockCol = null;
       app.draw();
       if (endDock === pdc) {
-        if (pdc === 3) {
+        if (pdc === 2) {
           app.openPieceSkinModal();
           return;
         }
@@ -1949,12 +1949,9 @@ if (typeof wx.onTouchEnd === 'function') {
           });
           return;
         }
-        if (pdc === 2) {
+        if (pdc === 1) {
           app.openHistoryScreen();
           return;
-        }
-        if (pdc === 1 && typeof wx.showToast === 'function') {
-          wx.showToast({ title: '对战排行 敬请期待', icon: 'none' });
         }
       }
       return;

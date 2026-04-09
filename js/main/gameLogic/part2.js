@@ -1268,19 +1268,18 @@ app.drawHomeBottomDock = function(hl, th) {
   app.ctx.stroke();
   var labels = [
     app.isHomeCheckinDoneToday() ? '今日已签' : '每日签到',
-    '对战排行',
     '我的战绩',
     '杂货铺'
   ];
   var innerW = app.W - padH * 2;
-  var colW = innerW / 4;
+  var colW = innerW / 3;
   var baseX = padH;
   var iconBox = app.rpx(78);
   var iconY = y0 + app.rpx(34) + iconBox / 2;
   var s = iconBox * 0.14;
   var colMidY = y0 + h * 0.42;
   var i;
-  for (i = 0; i < 4; i++) {
+  for (i = 0; i < 3; i++) {
     var cxi = baseX + colW * i + colW / 2;
     var pressed = app.homePressedDockCol === i;
     var stroke = pressed ? th.title : th.subtitle;
@@ -1296,10 +1295,6 @@ app.drawHomeBottomDock = function(hl, th) {
         app.drawHomeDockIconCheckin(cxi, iconY, s, stroke);
       }
     } else if (i === 1) {
-      if (!app.drawHomeUiImageContain(app.homeDockRankImg, cxi, iconY, iconBox)) {
-        app.drawHomeDockIconRank(cxi, iconY, s, stroke);
-      }
-    } else if (i === 2) {
       if (!app.drawHomeUiImageContain(app.homeDockHistoryImg, cxi, iconY, iconBox)) {
         app.drawHomeDockIconHistory(cxi, iconY, s, stroke);
       }

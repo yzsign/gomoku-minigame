@@ -428,7 +428,7 @@ app.themeBubbleRafId = null;
 app.homeDrawerOpen = false;
 /** 首页三主按钮按下态：'random' | 'pvp' | 'pve' | null（松手在同类按钮上才触发逻辑） */
 app.homePressedButton = null;
-/** 首页底部 Dock 按下列：0～3 或 null（与 hitHomeBottomNav 一致） */
+/** 首页底部 Dock 按下列：0～2 或 null（与 hitHomeBottomNav 一致；对战排行入口已隐藏） */
 app.homePressedDockCol = null;
 
 /** 我的战绩页：本机最近对局 + 滚动 */
