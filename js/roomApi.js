@@ -129,6 +129,39 @@ function mePveGameOptions(bodyObj) {
   };
 }
 
+/** GET /api/me/daily-puzzle/today */
+function meDailyPuzzleTodayOptions() {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/daily-puzzle/today',
+    method: 'GET',
+    header: withAuthHeaders({})
+  };
+}
+
+/** POST /api/me/daily-puzzle/submit body: { moves: [{r,c,color},...] } */
+function meDailyPuzzleSubmitOptions(movesArr) {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/daily-puzzle/submit',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify({ moves: movesArr || [] })
+  };
+}
+
+/** POST /api/me/daily-puzzle/hint */
+function meDailyPuzzleHintOptions() {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/daily-puzzle/hint',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: '{}'
+  };
+}
+
 /** GET /api/me/game-history?limit=&offset=&result=：已结算对局列表；result 可选 WIN|LOSS */
 function meGameHistoryOptions(limit, offset, result) {
   var lim =
@@ -285,6 +318,9 @@ module.exports = {
   roomApiRandomMatchFallbackOptions: roomApiRandomMatchFallbackOptions,
   meRatingOptions: meRatingOptions,
   mePveGameOptions: mePveGameOptions,
+  meDailyPuzzleTodayOptions: meDailyPuzzleTodayOptions,
+  meDailyPuzzleSubmitOptions: meDailyPuzzleSubmitOptions,
+  meDailyPuzzleHintOptions: meDailyPuzzleHintOptions,
   meGameHistoryOptions: meGameHistoryOptions,
   meCheckinOptions: meCheckinOptions,
   mePieceSkinRedeemOptions: mePieceSkinRedeemOptions,

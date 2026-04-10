@@ -99,6 +99,9 @@ app.enterReplayScreen = function(movesArr, blackPieceSkinId, whitePieceSkinId) {
   }
   app.screen = 'replay';
   app.showResultOverlay = false;
+  if (typeof app.stopResultTuanPointsAnim === 'function') {
+    app.stopResultTuanPointsAnim();
+  }
   app.draw();
 }
 
@@ -217,6 +220,15 @@ app.tryReplayByRoomFallback = function() {
 }
 
 app.openReplayFromResult = function() {
+  if (app.isDailyPuzzle && app.dailyPuzzleMoves && app.dailyPuzzleMoves.length > 0) {
+    var dm = [];
+    var di;
+    for (di = 0; di < app.dailyPuzzleMoves.length; di++) {
+      dm.push(app.dailyPuzzleMoves[di]);
+    }
+    app.enterReplayScreen(dm, null, null);
+    return;
+  }
   if (app.onlineMoveHistory.length > 0) {
     var copy = [];
     var i;
@@ -513,14 +525,24 @@ app.drawHomeContentBelowPieceSkinModal = function() {
     app.homePressedButton === 'pvp'
   );
   app.drawHomeReferencePill(
-    hl.cx,
-    hl.yPve,
-    hl.btnW,
+    hl.cxPve,
+    hl.yPvePair,
+    hl.halfBtnW,
     hl.btnH,
     '人机对战',
     'pve',
     th,
     app.homePressedButton === 'pve'
+  );
+  app.drawHomeReferencePill(
+    hl.cxDaily,
+    hl.yPvePair,
+    hl.halfBtnW,
+    hl.btnH,
+    '每日残局',
+    'daily',
+    th,
+    app.homePressedButton === 'daily'
   );
 
   app.drawHomeBottomDock(hl, th);

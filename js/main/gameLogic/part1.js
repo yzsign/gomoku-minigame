@@ -114,6 +114,10 @@ app.getOpponentDisplayName = function() {
   if (app.isPvpLocal) {
     return '对方';
   }
+  if (app.isDailyPuzzle) {
+    var oc = app.getOpponentAssignedStoneColor();
+    return oc === app.BLACK ? '黑方' : '白方';
+  }
   if (app.isRandomMatch) {
     return app.randomOpponentName || '对手';
   }
@@ -126,6 +130,9 @@ app.getOpponentDisplayName = function() {
 app.getMyAssignedStoneColor = function() {
   if (app.isPvpOnline) {
     return app.pvpOnlineYourColor;
+  }
+  if (app.isDailyPuzzle) {
+    return app.current;
   }
   return app.pveHumanColor;
 };
@@ -1237,6 +1244,14 @@ app.isPvpLocal = false;
 
 /** 联机好友对战（Spring Boot WebSocket） */
 app.isPvpOnline = false;
+/** 每日残局：同一设备黑白交替，提交手顺至 /api/me/daily-puzzle/submit */
+app.isDailyPuzzle = false;
+app.dailyPuzzleMeta = null;
+app.dailyPuzzleMoves = [];
+app.dailyPuzzleInitialBoard = null;
+app.dailyPuzzleSideToMoveStart = app.BLACK;
+app.dailyPuzzleSubmitting = false;
+app.dailyPuzzleResultKind = '';
 app.onlineRoomId = '';
 app.onlineToken = '';
 /** 本客户端执子 gomoku.BLACK | gomoku.WHITE，与服务器 STATE.yourColor 一致 */
@@ -1313,11 +1328,14 @@ app.onlineMoveHistory = [];
 /** POST /api/games/settle 返回的 gameId，棋谱可事后拉取 */
 app.lastSettledGameId = null;
 /**
- * 最近一次 settle 返回的天梯分与团团积分（用于结算页 VS 展示）；离开房间时清空。
+ * 最近一次 settle 返回的天梯分与团团积分字段（动画用）；离开房间时清空。
  * { blackEloAfter, whiteEloAfter, blackEloDelta, whiteEloDelta,
  *   blackActivityPointsAfter, whiteActivityPointsAfter, blackActivityPointsDelta, whiteActivityPointsDelta }
  */
 app.lastSettleRating = null;
+/** 结算页仅自己可见：团团积分增加飘字；{ startMs, delta } */
+app.resultTuanPointsAnim = null;
+app.resultTuanPointsRafId = null;
 /** app.screen === 'replay'：棋谱数据与当前展示步数（0 表示空盘） */
 app.replayMoves = [];
 app.replayStep = 0;
@@ -1605,6 +1623,9 @@ app.disconnectOnline = function() {
   app.onlineMoveHistory = [];
   app.lastSettledGameId = null;
   app.lastSettleRating = null;
+  if (typeof app.stopResultTuanPointsAnim === 'function') {
+    app.stopResultTuanPointsAnim();
+  }
   app.isPvpOnline = false;
   app.onlineRoomId = '';
   app.onlineToken = '';
@@ -1962,7 +1983,7 @@ app.submitPveGameToServer = function(body) {
 }
 
 app.recordMatchHistoryFromGameEnd = function() {
-  if (!app.gameOver || app.isPvpOnline) {
+  if (!app.gameOver || app.isPvpOnline || app.isDailyPuzzle) {
     return;
   }
   var rk = app.resultKind;
@@ -2087,7 +2108,36 @@ app.refreshLocalLastOpponent = function() {
   app.lastOpponentMove = { r: last.r, c: last.c };
 }
 
+app.undoDailyPuzzleOneMove = function() {
+  if (!app.dailyPuzzleMoves || app.dailyPuzzleMoves.length === 0) {
+    return;
+  }
+  var m = app.dailyPuzzleMoves.pop();
+  app.board[m.r][m.c] = gomoku.EMPTY;
+  app.current = m.color;
+  app.gameOver = false;
+  app.winner = null;
+  app.clearWinRevealTimer();
+  app.winningLineCells = null;
+};
+
+app.execDailyPuzzleUndo = function() {
+  if (app.gameOver) {
+    return;
+  }
+  if (!app.dailyPuzzleMoves || app.dailyPuzzleMoves.length === 0) {
+    wx.showToast({ title: '没有可悔的棋', icon: 'none' });
+    return;
+  }
+  app.undoDailyPuzzleOneMove();
+  app.draw();
+};
+
 app.execPveUndo = function() {
+  if (app.isDailyPuzzle) {
+    app.execDailyPuzzleUndo();
+    return;
+  }
   if (app.gameOver || app.isPvpLocal || app.isPvpOnline) {
     return;
   }
@@ -2805,6 +2855,9 @@ app.applyOnlineState = function(data) {
   ) {
     app.onlineSettleSent = false;
     app.lastSettleRating = null;
+    if (typeof app.stopResultTuanPointsAnim === 'function') {
+      app.stopResultTuanPointsAnim();
+    }
     app.openResult();
     return;
   }
@@ -2812,6 +2865,9 @@ app.applyOnlineState = function(data) {
     app.screen = 'game';
     app.showResultOverlay = false;
     app.onlineResultOverlaySticky = false;
+    if (typeof app.stopResultTuanPointsAnim === 'function') {
+      app.stopResultTuanPointsAnim();
+    }
     app.clearWinRevealTimer();
     app.winningLineCells = null;
   }

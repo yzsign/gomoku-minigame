@@ -1030,8 +1030,20 @@ app.resetGame = function() {
     }
     return;
   }
+  if (app.isDailyPuzzle) {
+    app.showResultOverlay = false;
+    app.onlineResultOverlaySticky = false;
+    app.stopResultTuanPointsAnim();
+    app.clearWinRevealTimer();
+    app.winningLineCells = null;
+    app.restoreDailyPuzzleInitial();
+    app.screen = 'game';
+    app.draw();
+    return;
+  }
   app.showResultOverlay = false;
   app.onlineResultOverlaySticky = false;
+  app.stopResultTuanPointsAnim();
   app.clearWinRevealTimer();
   app.winningLineCells = null;
   if (!app.isPvpLocal) {
@@ -1149,6 +1161,7 @@ app.sendOnlineRematchDecline = function() {
 app.startRandomMatchFromResultOverlay = function() {
   app.showResultOverlay = false;
   app.onlineResultOverlaySticky = false;
+  app.stopResultTuanPointsAnim();
   app.startRandomMatch();
 }
 
@@ -1158,10 +1171,211 @@ app.startPve = function(humanColor) {
   app.disconnectOnline();
   app.isPvpLocal = false;
   app.isRandomMatch = false;
+  app.isDailyPuzzle = false;
   app.pveHumanColor = humanColor === undefined ? app.BLACK : humanColor;
   app.screen = 'game';
   app.resetGame();
 }
+
+app.restoreDailyPuzzleInitial = function() {
+  if (!app.dailyPuzzleInitialBoard) {
+    return;
+  }
+  app.board = app.copyBoardFromServer(app.dailyPuzzleInitialBoard);
+  app.dailyPuzzleMoves = [];
+  app.current = app.dailyPuzzleSideToMoveStart;
+  app.gameOver = false;
+  app.winner = null;
+  app.clearWinRevealTimer();
+  app.winningLineCells = null;
+};
+
+app.startDailyPuzzleFromApiData = function(d) {
+  app.disconnectOnline();
+  app.isPvpLocal = false;
+  app.isPvpOnline = false;
+  app.isRandomMatch = false;
+  app.isDailyPuzzle = true;
+  app.dailyPuzzleMeta = {
+    puzzleDate: d.puzzleDate,
+    puzzleId: d.puzzleId,
+    goal: d.goal,
+    maxUserMoves: d.maxUserMoves,
+    title: d.title,
+    difficulty: d.difficulty,
+    hasHint: d.hasHint
+  };
+  app.dailyPuzzleMoves = [];
+  app.dailyPuzzleSubmitting = false;
+  app.dailyPuzzleResultKind = '';
+  app.board = app.copyBoardFromServer(d.board);
+  app.dailyPuzzleInitialBoard = app.copyBoardFromServer(d.board);
+  app.dailyPuzzleSideToMoveStart =
+    d.sideToMove === app.WHITE ? app.WHITE : app.BLACK;
+  app.current = app.dailyPuzzleSideToMoveStart;
+  app.gameOver = false;
+  app.winner = null;
+  app.showResultOverlay = false;
+  app.screen = 'game';
+  app.lastMsg = '每日残局';
+  app.draw();
+};
+
+app.requestStartDailyPuzzle = function() {
+  authApi.ensureSession(function(ok) {
+    if (!ok || !authApi.getSessionToken()) {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: '请先登录', icon: 'none' });
+      }
+      return;
+    }
+    if (typeof wx.showLoading === 'function') {
+      wx.showLoading({ title: '加载中…', mask: true });
+    }
+    wx.request(
+      Object.assign(roomApi.meDailyPuzzleTodayOptions(), {
+        success: function(res) {
+          if (typeof wx.hideLoading === 'function') {
+            wx.hideLoading();
+          }
+          var data = res.data;
+          if (res.statusCode === 401) {
+            wx.showToast({ title: '请先登录', icon: 'none' });
+            return;
+          }
+          if (res.statusCode !== 200 || !data) {
+            wx.showToast({ title: '加载失败', icon: 'none' });
+            return;
+          }
+          if (data.scheduled === false) {
+            wx.showToast({ title: '今日暂无残局', icon: 'none' });
+            return;
+          }
+          app.startDailyPuzzleFromApiData(data);
+        },
+        fail: function() {
+          if (typeof wx.hideLoading === 'function') {
+            wx.hideLoading();
+          }
+          wx.showToast({ title: '网络错误', icon: 'none' });
+        }
+      })
+    );
+  });
+};
+
+/**
+ * 终局或满盘时提交；wasWin 表示最后一步是否构成五连。
+ */
+app.submitDailyPuzzleMovesAndHandle = function(r, c, lastColor, wasWin) {
+  if (app.dailyPuzzleSubmitting) {
+    return;
+  }
+  app.dailyPuzzleSubmitting = true;
+  app.draw();
+  wx.request(
+    Object.assign(
+      roomApi.meDailyPuzzleSubmitOptions(app.dailyPuzzleMoves),
+      {
+        success: function(res) {
+          app.dailyPuzzleSubmitting = false;
+          var data = res.data;
+          if (res.statusCode === 401) {
+            wx.showToast({ title: '请先登录', icon: 'none' });
+            if (wasWin) {
+              app.undoDailyPuzzleOneMove();
+            }
+            app.draw();
+            return;
+          }
+          if (res.statusCode !== 200 || !data) {
+            wx.showToast({ title: '提交失败', icon: 'none' });
+            if (wasWin) {
+              app.undoDailyPuzzleOneMove();
+            } else {
+              app.restoreDailyPuzzleInitial();
+            }
+            app.draw();
+            return;
+          }
+          var result = data.result;
+          if (result === 'ALREADY_SOLVED') {
+            app.dailyPuzzleResultKind = 'daily_puzzle_already';
+            app.gameOver = true;
+            app.winner = null;
+            app.showResultOverlay = true;
+            app.draw();
+            return;
+          }
+          if (result === 'SOLVED') {
+            app.dailyPuzzleResultKind = 'daily_puzzle_solved';
+            app.gameOver = true;
+            app.winner = wasWin ? lastColor : null;
+            if (wasWin) {
+              app.finishGameWithWin(r, c, lastColor);
+            } else {
+              app.openResult();
+            }
+            return;
+          }
+          wx.showToast({
+            title:
+              result === 'INVALID' ? '手顺无效或超步数' : '未达成题目要求',
+            icon: 'none'
+          });
+          if (wasWin) {
+            app.undoDailyPuzzleOneMove();
+          } else {
+            app.restoreDailyPuzzleInitial();
+          }
+          app.draw();
+        },
+        fail: function() {
+          app.dailyPuzzleSubmitting = false;
+          wx.showToast({ title: '网络错误', icon: 'none' });
+          if (wasWin) {
+            app.undoDailyPuzzleOneMove();
+          }
+          app.draw();
+        }
+      }
+    )
+  );
+};
+
+app.requestDailyPuzzleHint = function() {
+  if (!authApi.getSessionToken()) {
+    wx.showToast({ title: '请先登录', icon: 'none' });
+    return;
+  }
+  wx.request(
+    Object.assign(roomApi.meDailyPuzzleHintOptions(), {
+      success: function(res) {
+        var data = res.data;
+        if (res.statusCode === 200 && data && data.hintText) {
+          if (typeof wx.showModal === 'function') {
+            wx.showModal({
+              title: '提示',
+              content: String(data.hintText),
+              showCancel: false
+            });
+          } else {
+            wx.showToast({ title: String(data.hintText), icon: 'none' });
+          }
+          return;
+        }
+        var msg =
+          data && data.message
+            ? String(data.message)
+            : '暂无提示';
+        wx.showToast({ title: msg, icon: 'none' });
+      },
+      fail: function() {
+        wx.showToast({ title: '网络错误', icon: 'none' });
+      }
+    })
+  );
+};
 
 app.cancelMatchingTimers = function() {
   if (app.matchingTimer) {
@@ -1452,6 +1666,12 @@ app.backToHome = function() {
   app.disconnectOnline();
   app.isRandomMatch = false;
   app.isPvpLocal = false;
+  app.isDailyPuzzle = false;
+  app.dailyPuzzleMeta = null;
+  app.dailyPuzzleMoves = [];
+  app.dailyPuzzleInitialBoard = null;
+  app.dailyPuzzleSubmitting = false;
+  app.dailyPuzzleResultKind = '';
   app.onlineInviteConsumed = false;
   app.homeDrawerOpen = false;
   app.homePressedButton = null;
@@ -1470,6 +1690,7 @@ app.startPvpLocal = function() {
   app.localDrawRequest = null;
   app.disconnectOnline();
   app.isRandomMatch = false;
+  app.isDailyPuzzle = false;
   app.isPvpLocal = true;
   /** 同桌：下方「我」与上方「对方」固定执黑/执白（与棋局手顺一致） */
   app.pveHumanColor = Math.random() < 0.5 ? app.BLACK : app.WHITE;
@@ -1636,6 +1857,14 @@ app.maybeRequestOnlineGameSettle = function() {
                   ? app.lastSettleRating.blackEloAfter
                   : app.lastSettleRating.whiteEloAfter;
               app.homeRatingEloCache = mineAfter;
+              var mineApD = NaN;
+              if (isFinite(bApD) && isFinite(wApD)) {
+                mineApD =
+                  app.pvpOnlineYourColor === app.BLACK ? bApD : wApD;
+              }
+              if (isFinite(mineApD) && mineApD > 0) {
+                app.startResultTuanPointsAnim(mineApD);
+              }
             }
             app.draw();
           } else {
@@ -1708,6 +1937,9 @@ app.openResult = function() {
     } else {
       app.resultKind = 'pvp_white_win';
     }
+  } else if (app.isDailyPuzzle) {
+    app.resultKind =
+      app.dailyPuzzleResultKind || 'daily_puzzle_solved';
   } else if (app.winner === null) {
     app.resultKind = 'pve_draw';
   } else {
@@ -1737,6 +1969,11 @@ app.getResultVsAvatarImage = function(forBlack) {
     return imBlack ? L.oppImg : L.myImg;
   }
   if (app.isPvpLocal) {
+    return forBlack
+      ? defaultAvatars.getImageForWeChatGender(1)
+      : defaultAvatars.getImageForWeChatGender(2);
+  }
+  if (app.isDailyPuzzle) {
     return forBlack
       ? defaultAvatars.getImageForWeChatGender(1)
       : defaultAvatars.getImageForWeChatGender(2);
@@ -1797,6 +2034,105 @@ function drawResultConfetti(app, top, hBand) {
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
   }
+}
+
+/** 联机结算页：仅自己一侧飘字，时长与 themeBubble 共用 RAF */
+var RESULT_TUAN_POINTS_ANIM_MS = 1400;
+
+app.stopResultTuanPointsAnim = function() {
+  if (app.resultTuanPointsRafId != null) {
+    app.themeBubbleCaf(app.resultTuanPointsRafId);
+    app.resultTuanPointsRafId = null;
+  }
+  app.resultTuanPointsAnim = null;
+};
+
+/**
+ * 本局团团积分增加 &gt; 0 时调用；对手侧不展示。
+ * @param {number} delta 正整数
+ */
+app.startResultTuanPointsAnim = function(delta) {
+  app.stopResultTuanPointsAnim();
+  if (!(typeof delta === 'number') || delta <= 0) {
+    return;
+  }
+  app.resultTuanPointsAnim = {
+    startMs: Date.now(),
+    delta: Math.floor(delta)
+  };
+  function loop() {
+    if (!app.resultTuanPointsAnim) {
+      app.resultTuanPointsRafId = null;
+      return;
+    }
+    if (!app.showResultOverlay || !app.isPvpOnline) {
+      app.stopResultTuanPointsAnim();
+      return;
+    }
+    var elapsed = Date.now() - app.resultTuanPointsAnim.startMs;
+    if (elapsed >= RESULT_TUAN_POINTS_ANIM_MS) {
+      app.stopResultTuanPointsAnim();
+      app.draw();
+      return;
+    }
+    app.draw();
+    app.resultTuanPointsRafId = app.themeBubbleRaf(loop);
+  }
+  app.resultTuanPointsRafId = app.themeBubbleRaf(loop);
+};
+
+/**
+ * 在「我」的头像上方绘制飘字（联机左侧为本人）；依赖 getResultOverlayLayout。
+ */
+function drawResultOverlayTuanPointsAnim(app, ctx, th, ly) {
+  if (!app.resultTuanPointsAnim || !app.isPvpOnline) {
+    return;
+  }
+  if (!app.showResultOverlay) {
+    return;
+  }
+  var anim = app.resultTuanPointsAnim;
+  var elapsed = Date.now() - anim.startMs;
+  var p = Math.min(1, elapsed / RESULT_TUAN_POINTS_ANIM_MS);
+  if (p >= 1) {
+    return;
+  }
+  var ease = 1 - (1 - p) * (1 - p);
+  var yOff = -56 * ease;
+  var alpha;
+  if (p < 0.12) {
+    alpha = p / 0.12;
+  } else if (p > 0.42) {
+    alpha = Math.max(0, 1 - (p - 0.42) / 0.58);
+  } else {
+    alpha = 1;
+  }
+  var cx = ly.vsLeftCx;
+  var baseY = ly.vsCy - ly.avatarS * 0.42 + yOff;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '600 11px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = '#78716c';
+  ctx.fillText(
+    '团团积分',
+    app.snapPx(cx),
+    app.snapPx(baseY - 14)
+  );
+  ctx.font = 'bold 22px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = '#16a34a';
+  ctx.shadowColor = 'rgba(22, 163, 74, 0.35)';
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 2;
+  ctx.fillText(
+    '+' + anim.delta,
+    app.snapPx(cx),
+    app.snapPx(baseY + 6)
+  );
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+  ctx.restore();
 }
 
 function resultOverlayTitlePack(app) {
@@ -1872,6 +2208,18 @@ function resultOverlayTitlePack(app) {
       main = app.winner === gomoku.WHITE ? '白棋获胜' : '黑棋获胜';
       titleColor = rs.win.title;
       break;
+    case 'daily_puzzle_solved':
+      mood = 'win';
+      main = '残局完成';
+      sub = '今日挑战成功';
+      titleColor = rs.win.title;
+      break;
+    case 'daily_puzzle_already':
+      mood = 'draw';
+      main = '今日已完成';
+      sub = '明天再来';
+      titleColor = rs.draw.title;
+      break;
     default:
       titleColor = app.getUiTheme().title;
   }
@@ -1890,14 +2238,6 @@ app.getResultOverlayLayout = function() {
   var avatarS = 56;
   var dockH = 56;
   var statsH = 44;
-  if (
-    app.isPvpOnline &&
-    app.lastSettleRating &&
-    typeof app.lastSettleRating.blackActivityPointsAfter === 'number' &&
-    typeof app.lastSettleRating.whiteActivityPointsAfter === 'number'
-  ) {
-    statsH = 64;
-  }
   var gapPrimaryStats = 22;
   var clusterPadV = 14;
 
@@ -2152,6 +2492,9 @@ app.drawResultOverlay = function() {
   ctx.fillText('VS', app.snapPx(app.W * 0.5), app.snapPx(ly.vsTextY));
 
   function eloLine(forBlack) {
+    if (app.isDailyPuzzle) {
+      return { elo: '--', delta: '', dNeg: false, dZero: true };
+    }
     var sr = app.lastSettleRating;
     if (sr) {
       var e = forBlack ? sr.blackEloAfter : sr.whiteEloAfter;
@@ -2222,44 +2565,7 @@ app.drawResultOverlay = function() {
     );
   }
 
-  if (
-    app.isPvpOnline &&
-    app.lastSettleRating &&
-    typeof app.lastSettleRating.blackActivityPointsAfter === 'number' &&
-    typeof app.lastSettleRating.whiteActivityPointsAfter === 'number'
-  ) {
-    var srAp = app.lastSettleRating;
-    var meBlk = app.pvpOnlineYourColor === gomoku.BLACK;
-    function tuanLineAp(forBlack) {
-      var ap = forBlack
-        ? srAp.blackActivityPointsAfter
-        : srAp.whiteActivityPointsAfter;
-      var dd = forBlack
-        ? srAp.blackActivityPointsDelta
-        : srAp.whiteActivityPointsDelta;
-      var s = Math.max(0, Math.floor(ap));
-      var t = '团团 ' + s;
-      if (typeof dd === 'number' && dd !== 0) {
-        t += ' (' + (dd > 0 ? '+' : '') + dd + ')';
-      }
-      return t;
-    }
-    ctx.font = '600 12px "PingFang SC","Hiragino Sans GB",sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#78716c';
-    var tuanY = ly.vsCy + ly.avatarS * 0.5 + 50;
-    ctx.fillText(
-      tuanLineAp(meBlk),
-      app.snapPx(ly.vsLeftCx),
-      app.snapPx(tuanY)
-    );
-    ctx.fillText(
-      tuanLineAp(!meBlk),
-      app.snapPx(ly.vsRightCx),
-      app.snapPx(tuanY)
-    );
-  }
+  drawResultOverlayTuanPointsAnim(app, ctx, th, ly);
 
   var px0 = ly.primaryCx - ly.primaryW * 0.5;
   var py0 = ly.primaryCy - ly.primaryH * 0.5;

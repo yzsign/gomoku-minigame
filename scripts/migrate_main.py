@@ -48,6 +48,8 @@ STATE_NAMES = [
     "onlineResultOverlaySticky",
     "lastSettledGameId",
     "lastSettleRating",
+    "resultTuanPointsAnim",
+    "resultTuanPointsRafId",
     "onlineInviteConsumed",
     "randomMatchHostWaiting",
     "homeMascotAnimTimer",

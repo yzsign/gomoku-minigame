@@ -637,6 +637,15 @@ app.draw = function() {
         (app.current === app.BLACK ? '黑方' : '白方') +
         '下棋（面对面轮流）';
     }
+  } else if (app.isDailyPuzzle) {
+    if (app.dailyPuzzleSubmitting) {
+      status = '提交判题中…';
+    } else {
+      status =
+        '请下「' +
+        (app.current === app.BLACK ? '黑' : '白') +
+        '」棋 · 黑白交替';
+    }
   } else if (!status) {
     if (app.current === app.pveHumanColor) {
       status =
@@ -689,7 +698,16 @@ app.draw = function() {
     } else if (app.localMoveHistory.length === 0) {
       undoActive = false;
     }
-  } else if (undoActive && !app.isPvpLocal && !app.isPvpOnline) {
+  } else if (undoActive && app.isDailyPuzzle) {
+    if (!app.dailyPuzzleMoves || app.dailyPuzzleMoves.length === 0) {
+      undoActive = false;
+    }
+  } else if (
+    undoActive &&
+    !app.isPvpLocal &&
+    !app.isPvpOnline &&
+    !app.isDailyPuzzle
+  ) {
     if (app.pveMoveHistory.length === 0) {
       undoActive = false;
     }
@@ -761,8 +779,12 @@ app.getGameActionBarLayout = function() {
       : app.rpx(128);
   var x0 = pad;
   var y0 = btnY - barH / 2;
-  /** 人机离线对战仅保留离开 + 悔棋，不展示和棋/认输 */
-  var colCount = !app.isPvpLocal && !app.isPvpOnline ? 2 : 4;
+  /** 人机：2 列；每日残局：3 列（提示）；联机：4 列 */
+  var colCount = app.isDailyPuzzle
+    ? 3
+    : !app.isPvpLocal && !app.isPvpOnline
+      ? 2
+      : 4;
   var colW = barW / colCount;
   var centers = [];
   var ci;
@@ -1251,6 +1273,7 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
   var drawOk = app.isDrawButtonActive();
   var resignOk = app.isResignButtonActive();
   var pveBarOnly = L.colCount === 2;
+  var dailyBar = app.isDailyPuzzle && L.colCount === 3;
   var cols = [
     {
       img: app.gameBarHomeImg,
@@ -1263,7 +1286,13 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
       enabled: undoActive
     }
   ];
-  if (!pveBarOnly) {
+  if (dailyBar) {
+    cols.push({
+      img: app.gameBarDrawImg,
+      kind: 'draw',
+      enabled: true
+    });
+  } else if (!pveBarOnly) {
     cols.push(
       {
         img: app.gameBarDrawImg,
@@ -1285,9 +1314,11 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
     drawLabel != null && String(drawLabel).trim() !== ''
       ? String(drawLabel)
       : '和棋';
-  var gameBarLabels = pveBarOnly
-    ? ['离开', undoCaption]
-    : ['离开', undoCaption, drawCaption, '认输'];
+  var gameBarLabels = dailyBar
+    ? ['离开', undoCaption, '提示']
+    : pveBarOnly
+      ? ['离开', undoCaption]
+      : ['离开', undoCaption, drawCaption, '认输'];
   var M = app.gameBarIconSizeMul || {};
   var labelFsPx = Math.max(12, Math.round(L.labelFs));
   /** 底栏各列说明字同一基线，避免因各列图标倍率不同导致上下错位 */
@@ -1700,7 +1731,18 @@ app.hitHomeBottomNav = function(clientX, clientY) {
 app.hitHomeButton = function(clientX, clientY) {
   var hl = app.getHomeLayout();
   var nav = app.getHomeNavBarLayout();
-  if (clientY < nav.navBottom || clientY > hl.mainBottom + 8) {
+  if (clientY < nav.navBottom) {
+    return null;
+  }
+  /**
+   * 不再用 mainBottom 截断：第四颗「每日残局」在部分机型上会低于 mainBottom，
+   * 导致整页主按钮无法命中。以下以底部 Dock 上沿为界，与 Dock 重叠时由触摸顺序保证主按钮优先。
+   */
+  if (
+    hl.bottomNavTop != null &&
+    hl.bottomNavTop > 0 &&
+    clientY >= hl.bottomNavTop - 4
+  ) {
     return null;
   }
   var halfW = hl.btnW / 2 + 4;
@@ -1717,11 +1759,18 @@ app.hitHomeButton = function(clientX, clientY) {
   ) {
     return 'pvp';
   }
+  var pairHalfW = hl.halfBtnW * 0.5 + 4;
   if (
-    Math.abs(clientX - hl.cx) <= halfW &&
-    Math.abs(clientY - hl.yPve) <= halfH
+    Math.abs(clientX - hl.cxPve) <= pairHalfW &&
+    Math.abs(clientY - hl.yPvePair) <= halfH
   ) {
     return 'pve';
+  }
+  if (
+    Math.abs(clientX - hl.cxDaily) <= pairHalfW &&
+    Math.abs(clientY - hl.yPvePair) <= halfH
+  ) {
+    return 'daily';
   }
   return null;
 }
@@ -1779,7 +1828,7 @@ app.hitGameButton = function(clientX, clientY) {
     return 'undo';
   }
   if (col === 2) {
-    return 'draw';
+    return app.isDailyPuzzle ? 'hint' : 'draw';
   }
   return 'resign';
 }
@@ -2019,7 +2068,7 @@ app.openingOptionsForAi = function() {
 }
 
 app.runAiMove = function() {
-  if (app.gameOver || app.isPvpLocal || app.isPvpOnline) {
+  if (app.gameOver || app.isPvpLocal || app.isPvpOnline || app.isDailyPuzzle) {
     return;
   }
   var ai = app.pveAiColor();
@@ -2087,6 +2136,30 @@ app.tryPlace = function(r, c) {
     } else {
       wx.showToast({ title: '网络未连接', icon: 'none' });
     }
+    return;
+  }
+  if (app.isDailyPuzzle) {
+    if (app.dailyPuzzleSubmitting) {
+      return;
+    }
+    if (app.board[r][c] !== gomoku.EMPTY) {
+      return;
+    }
+    var dPlaced = app.current;
+    app.board[r][c] = dPlaced;
+    app.playPlaceStoneSound();
+    app.dailyPuzzleMoves.push({ r: r, c: c, color: dPlaced });
+    if (gomoku.checkWin(app.board, r, c, dPlaced)) {
+      app.submitDailyPuzzleMovesAndHandle(r, c, dPlaced, true);
+      return;
+    }
+    if (gomoku.isBoardFull(app.board)) {
+      app.submitDailyPuzzleMovesAndHandle(r, c, dPlaced, false);
+      return;
+    }
+    app.current = dPlaced === app.BLACK ? app.WHITE : app.BLACK;
+    app.lastMsg = '';
+    app.draw();
     return;
   }
   if (app.board[r][c] !== gomoku.EMPTY) return;
@@ -2477,6 +2550,13 @@ wx.onTouchStart(function (e) {
       app.showMyRatingModal();
       return;
     }
+    var homeBtnFirst = app.hitHomeButton(x, y);
+    if (homeBtnFirst !== null) {
+      app.homePressedDockCol = null;
+      app.homePressedButton = homeBtnFirst;
+      app.draw();
+      return;
+    }
     var dockHit = app.hitHomeBottomNav(x, y);
     if (dockHit !== null) {
       app.homePressedButton = null;
@@ -2537,13 +2617,6 @@ wx.onTouchStart(function (e) {
   }
 
   if (app.screen === 'home') {
-    var homeBtn = app.hitHomeButton(x, y);
-    if (homeBtn !== null) {
-      app.homePressedDockCol = null;
-      app.homePressedButton = homeBtn;
-      app.draw();
-      return;
-    }
     if (app.homePressedButton || app.homePressedDockCol !== null) {
       app.homePressedButton = null;
       app.homePressedDockCol = null;
@@ -2682,7 +2755,11 @@ wx.onTouchStart(function (e) {
     return;
   }
   if (gbtn === 'draw') {
-    app.handleDrawButtonTap();
+    if (app.isDailyPuzzle) {
+      app.requestDailyPuzzleHint();
+    } else {
+      app.handleDrawButtonTap();
+    }
     return;
   }
   if (gbtn === 'resign') {
@@ -2712,6 +2789,8 @@ wx.onTouchStart(function (e) {
     if (app.current !== app.pvpOnlineYourColor) {
       return;
     }
+  } else if (app.isDailyPuzzle) {
+    /* 黑白均在同一设备交替落子 */
   } else if (!app.isPvpLocal && app.current !== app.pveHumanColor) {
     return;
   }
@@ -2919,6 +2998,10 @@ if (typeof wx.onTouchEnd === 'function') {
           }
           if (pb === 'random') {
             app.startRandomMatch();
+            return;
+          }
+          if (pb === 'daily') {
+            app.requestStartDailyPuzzle();
             return;
           }
         }

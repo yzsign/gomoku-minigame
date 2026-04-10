@@ -1480,10 +1480,15 @@ app.getHomeLayout = function() {
   var mascotCy = ipTop + ipBlockH * 0.5;
   var mascotScale = app.rpx(140) / 92;
   var btnTopGap = app.rpx(48);
+  /** 人机 + 每日残局并排一行，避免第四颗全宽主按钮把 Dock/吉祥物顶出屏外 */
+  var btnPairGap = app.rpx(20);
+  var halfBtnW = (btnW - btnPairGap) * 0.5;
   var yRandom = ipTop + ipBlockH + btnTopGap + btnH / 2;
   var yFriend = yRandom + btnH / 2 + btnGap + btnH / 2;
-  var yPve = yFriend + btnH / 2 + btnGap + btnH / 2;
-  var dockTopFromFlow = yPve + btnH / 2 + app.rpx(28) + app.rpx(36);
+  var yPvePair = yFriend + btnH / 2 + btnGap + btnH / 2;
+  var cxPve = cx - btnW * 0.25 - btnPairGap * 0.25;
+  var cxDaily = cx + btnW * 0.25 + btnPairGap * 0.25;
+  var dockTopFromFlow = yPvePair + btnH / 2 + app.rpx(28) + app.rpx(36);
   var bottomNavH = app.rpx(216);
   var footerGap = app.rpx(14);
   var copyrightHalf = app.rpx(13);
@@ -1508,7 +1513,11 @@ app.getHomeLayout = function() {
     mascotScale: mascotScale,
     yRandom: yRandom,
     yFriend: yFriend,
-    yPve: yPve,
+    yPvePair: yPvePair,
+    cxPve: cxPve,
+    cxDaily: cxDaily,
+    halfBtnW: halfBtnW,
+    btnPairGap: btnPairGap,
     bottomNavTop: dockTop,
     bottomNavH: bottomNavH,
     footerY: footerY,
