@@ -129,6 +129,27 @@ function mePveGameOptions(bodyObj) {
   };
 }
 
+/** GET /api/me/admin-status — 当前用户是否为 openid 管理员 */
+function meAdminStatusOptions() {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/admin-status',
+    method: 'GET',
+    header: withAuthHeaders({})
+  };
+}
+
+/** POST /api/admin/daily-puzzles — 创建残局（openid 管理员 Bearer + JSON body） */
+function adminDailyPuzzleCreateOptions(bodyObj) {
+  return {
+    url: GOMOKU_API_BASE + '/api/admin/daily-puzzles',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify(bodyObj || {})
+  };
+}
+
 /** GET /api/me/daily-puzzle/today */
 function meDailyPuzzleTodayOptions() {
   return {
@@ -318,6 +339,8 @@ module.exports = {
   roomApiRandomMatchFallbackOptions: roomApiRandomMatchFallbackOptions,
   meRatingOptions: meRatingOptions,
   mePveGameOptions: mePveGameOptions,
+  meAdminStatusOptions: meAdminStatusOptions,
+  adminDailyPuzzleCreateOptions: adminDailyPuzzleCreateOptions,
   meDailyPuzzleTodayOptions: meDailyPuzzleTodayOptions,
   meDailyPuzzleSubmitOptions: meDailyPuzzleSubmitOptions,
   meDailyPuzzleHintOptions: meDailyPuzzleHintOptions,

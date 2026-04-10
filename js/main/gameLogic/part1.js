@@ -1199,8 +1199,16 @@ app.snapPx = function(x) {
 
 /* ---------- 界面与对局状态 ---------- */
 
-/** 'home' | 'pve_color' | 'matching' | 'game' | 'history' | 'replay' */
+/** 'home' | 'pve_color' | 'matching' | 'game' | 'history' | 'replay' | 'admin_puzzle' */
 app.screen = 'home';
+
+/** openid 管理员：侧栏「残局管理」入口（由 /api/me/admin-status 设置） */
+app.userIsAdmin = false;
+/** 管理页草稿棋盘；与 app.board 同引用 */
+app.adminDraftBoard = null;
+app.adminPuzzleTitle = '新残局';
+app.adminPuzzleSideToMove = app.BLACK;
+app.adminPuzzleScheduleDate = '';
 
 /** 对局结束：在棋盘页上以半透明弹层展示（不再切全屏 result） */
 app.showResultOverlay = false;

@@ -474,6 +474,12 @@ app.draw = function() {
     app.ensureHomeMascotAnimLoop();
     return;
   }
+  if (app.screen === 'admin_puzzle') {
+    if (typeof app.drawAdminPuzzleScreen === 'function') {
+      app.drawAdminPuzzleScreen();
+    }
+    return;
+  }
   if (app.screen === 'history') {
     app.drawHistory();
     if (app.historyReplayOverlayVisible) {
@@ -2213,6 +2219,10 @@ wx.onTouchStart(function (e) {
   app.lastTouchDownX = x;
   app.lastTouchDownY = y;
 
+  if (app.screen === 'admin_puzzle') {
+    return;
+  }
+
   if (app.screen === 'history') {
     if (app.ratingCardVisible) {
       if (app.hitRatingCardClose(x, y)) {
@@ -2488,58 +2498,46 @@ wx.onTouchStart(function (e) {
     if (dr === null) {
       return;
     }
-    if (app.homeDrawerShowsThemeRow()) {
-      if (dr === 0) {
-        app.cycleThemeNext();
-        app.homeDrawerOpen = false;
-        app.draw();
-        return;
+    var rows = app.getHomeDrawerRows();
+    if (dr < 0 || dr >= rows.length) {
+      return;
+    }
+    var kind = rows[dr].kind;
+    if (kind === 'admin_puzzle') {
+      app.homeDrawerOpen = false;
+      if (typeof app.enterAdminPuzzleScreen === 'function') {
+        app.enterAdminPuzzleScreen();
       }
-      if (dr === 1) {
-        app.homeDrawerOpen = false;
-        app.openPieceSkinModal();
-        app.draw();
-        return;
+      app.draw();
+      return;
+    }
+    if (kind === 'theme') {
+      app.cycleThemeNext();
+      app.homeDrawerOpen = false;
+      app.draw();
+      return;
+    }
+    if (kind === 'piece_skin') {
+      app.homeDrawerOpen = false;
+      app.openPieceSkinModal();
+      app.draw();
+      return;
+    }
+    if (kind === 'feedback') {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: '敬请期待', icon: 'none' });
       }
-      if (dr === 2) {
-        if (typeof wx.showToast === 'function') {
-          wx.showToast({ title: '敬请期待', icon: 'none' });
-        }
-        app.homeDrawerOpen = false;
-        app.draw();
-        return;
+      app.homeDrawerOpen = false;
+      app.draw();
+      return;
+    }
+    if (kind === 'about') {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: '团团五子棋', icon: 'none' });
       }
-      if (dr === 3) {
-        if (typeof wx.showToast === 'function') {
-          wx.showToast({ title: '团团五子棋', icon: 'none' });
-        }
-        app.homeDrawerOpen = false;
-        app.draw();
-        return;
-      }
-    } else {
-      if (dr === 0) {
-        app.homeDrawerOpen = false;
-        app.openPieceSkinModal();
-        app.draw();
-        return;
-      }
-      if (dr === 1) {
-        if (typeof wx.showToast === 'function') {
-          wx.showToast({ title: '敬请期待', icon: 'none' });
-        }
-        app.homeDrawerOpen = false;
-        app.draw();
-        return;
-      }
-      if (dr === 2) {
-        if (typeof wx.showToast === 'function') {
-          wx.showToast({ title: '团团五子棋', icon: 'none' });
-        }
-        app.homeDrawerOpen = false;
-        app.draw();
-        return;
-      }
+      app.homeDrawerOpen = false;
+      app.draw();
+      return;
     }
     return;
   }
@@ -2874,6 +2872,12 @@ if (typeof wx.onTouchMove === 'function') {
 if (typeof wx.onTouchEnd === 'function') {
   wx.onTouchEnd(function (e) {
     var t = e.changedTouches && e.changedTouches[0];
+    if (app.screen === 'admin_puzzle' && t) {
+      if (typeof app.handleAdminPuzzleTouchEnd === 'function') {
+        app.handleAdminPuzzleTouchEnd(t.clientX, t.clientY);
+      }
+      return;
+    }
     if (
       e.changedTouches &&
       (app.screen === 'replay' ||
@@ -3180,6 +3184,11 @@ if (typeof wx.onShow === 'function') {
     setTimeout(function () {
       app.tryFetchMyProfileAvatar();
     }, 500);
+    setTimeout(function () {
+      if (typeof app.refreshAdminStatus === 'function') {
+        app.refreshAdminStatus();
+      }
+    }, 700);
     if (res && res.query && String(res.query.online) === '1' && res.query.roomId) {
       app.tryLaunchOnlineInvite(res.query);
     }

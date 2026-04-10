@@ -924,10 +924,21 @@ app.homeDrawerShowsThemeRow = function() {
   return themes.getThemeIdsForCycling().length > 1;
 }
 
-app.getHomeDrawerMenuItems = function() {
-  return app.homeDrawerShowsThemeRow()
-    ? ['界面风格', '棋子皮肤', '游戏反馈', '关于团团五子棋']
-    : ['棋子皮肤', '游戏反馈', '关于团团五子棋'];
+/**
+ * 侧栏菜单行：{ label, kind }。kind: admin_puzzle | theme | piece_skin | feedback | about
+ */
+app.getHomeDrawerRows = function() {
+  var rows = [];
+  if (app.userIsAdmin) {
+    rows.push({ label: '残局管理', kind: 'admin_puzzle' });
+  }
+  if (app.homeDrawerShowsThemeRow()) {
+    rows.push({ label: '界面风格', kind: 'theme' });
+  }
+  rows.push({ label: '棋子皮肤', kind: 'piece_skin' });
+  rows.push({ label: '游戏反馈', kind: 'feedback' });
+  rows.push({ label: '关于团团五子棋', kind: 'about' });
+  return rows;
 }
 
 app.drawHomeDrawer = function(th) {
@@ -963,19 +974,19 @@ app.drawHomeDrawer = function(th) {
 
   var rowY = insetTop + app.rpx(110);
   var rowH = app.rpx(96);
-  var items = app.getHomeDrawerMenuItems();
+  var rows = app.getHomeDrawerRows();
   var i;
   app.ctx.font =
     app.rpx(30) +
     'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
   app.ctx.fillStyle = '#333333';
-  for (i = 0; i < items.length; i++) {
+  for (i = 0; i < rows.length; i++) {
     var ry = rowY + i * rowH;
-    app.ctx.fillText(items[i], app.snapPx(app.rpx(28)), app.snapPx(ry));
+    app.ctx.fillText(rows[i].label, app.snapPx(app.rpx(28)), app.snapPx(ry));
   }
   app.ctx.strokeStyle = '#F0F0F0';
   app.ctx.lineWidth = Math.max(1, app.rpx(1));
-  for (i = 0; i < items.length - 1; i++) {
+  for (i = 0; i < rows.length - 1; i++) {
     app.ctx.beginPath();
     app.ctx.moveTo(app.rpx(20), rowY + rowH * (i + 0.55));
     app.ctx.lineTo(pw - app.rpx(16), rowY + rowH * (i + 0.55));
@@ -1020,7 +1031,7 @@ app.hitHomeDrawerRow = function(clientX, clientY) {
   );
   var rowY = insetTop + app.rpx(110);
   var rowH = app.rpx(96);
-  var n = app.getHomeDrawerMenuItems().length;
+  var n = app.getHomeDrawerRows().length;
   var i;
   for (i = 0; i < n; i++) {
     var ry = rowY + i * rowH;
