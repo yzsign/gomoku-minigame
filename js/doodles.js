@@ -222,17 +222,20 @@ function drawHomeHeroMascot(ctx, cx, cy, scale) {
   ctx.restore();
 }
 
-/** 匹配页：极淡弧线角标，不抢中央文案 */
-function drawMatchingDecoration(ctx, W, H) {
+/** 匹配页：极淡弧线角标，不抢中央文案（insetTop 与顶安全区对齐，避免贴刘海） */
+function drawMatchingDecoration(ctx, W, H, insetTop) {
+  var padTop = typeof insetTop === 'number' && insetTop > 0 ? insetTop : 0;
   ctx.save();
   ctx.globalAlpha = 0.2;
   ctx.strokeStyle = 'rgba(255,255,255,0.85)';
   ctx.lineWidth = 1.5;
+  var yLeft = Math.max(padTop + 48, 64, H * 0.12 + padTop * 0.35);
+  var yRight = Math.max(padTop + 58, 78, H * 0.14 + padTop * 0.35);
   ctx.beginPath();
-  ctx.arc(28, Math.max(64, H * 0.15), 36, -Math.PI * 0.15, Math.PI * 0.55);
+  ctx.arc(28, yLeft, 36, -Math.PI * 0.15, Math.PI * 0.55);
   ctx.stroke();
   ctx.beginPath();
-  ctx.arc(W - 28, Math.max(78, H * 0.18), 40, Math.PI * 0.45, Math.PI * 1.12);
+  ctx.arc(W - 28, yRight, 40, Math.PI * 0.45, Math.PI * 1.12);
   ctx.stroke();
   ctx.restore();
 }

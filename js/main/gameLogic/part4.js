@@ -322,12 +322,25 @@ app.drawReplayBoardLayer = function() {
   app.ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
   app.ctx.shadowBlur = 6;
   app.ctx.shadowOffsetY = 1;
+  var insetTop =
+    app.layout && app.layout.insetTop != null
+      ? app.layout.insetTop
+      : typeof app.getGameScreenInsetTop === 'function'
+        ? app.getGameScreenInsetTop()
+        : Math.max(
+            app.sys.statusBarHeight || 24,
+            app.sys.safeArea && app.sys.safeArea.top != null
+              ? app.sys.safeArea.top
+              : 0
+          );
+  var replayTitleFs = 17;
+  var titleCy = insetTop + replayTitleFs * 0.45;
   render.drawText(
     app.ctx,
     '团团五子棋',
     app.W / 2,
-    app.layout.topBar * 0.45,
-    17,
+    titleCy,
+    replayTitleFs,
     th.title
   );
   app.ctx.restore();
@@ -529,12 +542,34 @@ app.drawMatching = function() {
   app.fillAmbientBackground();
 
   var th = app.getUiTheme();
-  doodles.drawMatchingDecoration(app.ctx, app.W, app.H);
+  var M =
+    typeof app.getMatchingPageLayout === 'function'
+      ? app.getMatchingPageLayout()
+      : {
+          titleCx: app.W / 2,
+          titleCy: app.H * 0.22,
+          ySeek: app.H * 0.44,
+          cancelCy: app.H * 0.68,
+          insetTop: 0
+        };
+  doodles.drawMatchingDecoration(
+    app.ctx,
+    app.W,
+    app.H,
+    M.insetTop != null ? M.insetTop : 0
+  );
   app.ctx.save();
   app.ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
   app.ctx.shadowBlur = 10;
   app.ctx.shadowOffsetY = 2;
-  render.drawText(app.ctx, '随机匹配', app.W / 2, app.H * 0.22, 30, th.title);
+  render.drawText(
+    app.ctx,
+    '随机匹配',
+    M.titleCx,
+    M.titleCy,
+    30,
+    th.title
+  );
   app.ctx.restore();
 
   var msg = '正在为你寻找对手';
@@ -543,7 +578,7 @@ app.drawMatching = function() {
   for (d = 0; d < app.matchingDots; d++) {
     dots += '·';
   }
-  var ySeek = app.H * 0.44;
+  var ySeek = M.ySeek;
   if (th.pageIndicator && dots) {
     app.ctx.save();
     app.ctx.font =
@@ -552,7 +587,7 @@ app.drawMatching = function() {
     var wmsg = app.ctx.measureText(msg).width;
     var wdots = app.ctx.measureText(dots).width;
     var total = wmsg + wdots;
-    var startX = app.W / 2 - total / 2;
+    var startX = M.titleCx - total / 2;
     app.ctx.textAlign = 'left';
     app.ctx.fillStyle = th.subtitle;
     app.ctx.fillText(msg, startX, ySeek);
@@ -560,7 +595,7 @@ app.drawMatching = function() {
     app.ctx.fillText(dots, startX + wmsg, ySeek);
     app.ctx.restore();
   } else {
-    render.drawText(app.ctx, msg + dots, app.W / 2, ySeek, 15, th.subtitle);
+    render.drawText(app.ctx, msg + dots, M.titleCx, ySeek, 15, th.subtitle);
   }
 
   app.ctx.font =
@@ -568,7 +603,11 @@ app.drawMatching = function() {
   app.ctx.fillStyle = th.muted;
   app.ctx.textAlign = 'center';
   app.ctx.textBaseline = 'middle';
-  app.ctx.fillText('取消', app.snapPx(app.W / 2), app.snapPx(app.H * 0.68));
+  app.ctx.fillText(
+    '取消',
+    app.snapPx(M.titleCx),
+    app.snapPx(M.cancelCy)
+  );
 }
 
 app.getHistoryPageLayout = function() {
@@ -690,8 +729,15 @@ app.drawHistoryListScrollbar = function(L, maxScroll, contentH) {
   var ctx = app.ctx;
   ctx.save();
   ctx.globalAlpha = 1;
-  /** 仿微信：仅滑块、无轨道；浅灰半透明（略淡于系统默认黑条） */
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+  var thumbFill = 'rgba(0, 0, 0, 0.2)';
+  if (typeof app.getUiTheme === 'function' && typeof app.historyPageUiFromTheme === 'function') {
+    var thSb = app.getUiTheme();
+    var HSb = app.historyPageUiFromTheme(thSb);
+    if (HSb && HSb.scrollbar) {
+      thumbFill = HSb.scrollbar;
+    }
+  }
+  ctx.fillStyle = thumbFill;
   app.roundRect(cx - rCap, thumbTop, barW, thumbH, rCap);
   ctx.fill();
   ctx.restore();
@@ -1146,26 +1192,30 @@ app.openHistoryScreen = function() {
 }
 
 /**
- * 我的战绩：暖色羊皮纸、统计卡、筛选胶囊、对局列表（与首页「檀木」系协调）
+ * 我的战绩：羊皮纸叠层、统计卡、筛选胶囊、对局列表（随当前界面风格）
  */
 app.drawHistory = function() {
   app.fillAmbientBackground();
   var th = app.getUiTheme();
+  var H =
+    typeof app.historyPageUiFromTheme === 'function'
+      ? app.historyPageUiFromTheme(th)
+      : null;
   var L = app.getHistoryPageLayout();
-  var parchment = '#FDF5E6';
-  var cardFill0 = '#FFF9F0';
-  var cardFill1 = '#FFF3E4';
-  var accentBrown = th.homeFriend != null ? th.homeFriend : '#7B5E3F';
-  var tabBg = 'rgba(255, 252, 246, 0.97)';
+  var accentBrown =
+    H && H.tabActive ? H.tabActive : th.homeFriend != null ? th.homeFriend : '#7b5e3f';
+  var tabBg =
+    H && H.tabBg ? H.tabBg : 'rgba(255, 252, 246, 0.97)';
   var ink = th.title;
   var sub = th.subtitle;
   var muted = th.muted;
-  var winGold = '#A67C3D';
-  var loseRose = '#B06060';
+  var winGold = H && H.win ? H.win : '#a67c3d';
+  var loseRose = H && H.lose ? H.lose : '#b06060';
+  var drawTint = H && H.draw ? H.draw : sub;
 
   app.ctx.save();
-  app.ctx.fillStyle = parchment;
-  app.ctx.globalAlpha = 0.32;
+  app.ctx.fillStyle = H ? H.parchmentTint : '#fdf5e6';
+  app.ctx.globalAlpha = H ? 1 : 0.32;
   app.ctx.fillRect(0, 0, app.W, app.H);
   app.ctx.globalAlpha = 1;
   app.ctx.restore();
@@ -1209,18 +1259,18 @@ app.drawHistory = function() {
   var sh = L.statsH;
   var sr = app.rpx(20);
   app.ctx.save();
-  app.ctx.shadowColor = 'rgba(60, 48, 38, 0.12)';
+  app.ctx.shadowColor = H ? H.statShadow : 'rgba(60, 48, 38, 0.12)';
   app.ctx.shadowBlur = app.rpx(18);
   app.ctx.shadowOffsetY = app.rpx(6);
   var statG = app.ctx.createLinearGradient(sx, sy, sx, sy + sh);
-  statG.addColorStop(0, cardFill0);
-  statG.addColorStop(1, cardFill1);
+  statG.addColorStop(0, H ? H.statG0 : '#fff9f0');
+  statG.addColorStop(1, H ? H.statG1 : '#fff3e4');
   app.ctx.fillStyle = statG;
   app.roundRect(sx, sy, sw, sh, sr);
   app.ctx.fill();
   app.ctx.shadowBlur = 0;
   app.ctx.shadowOffsetY = 0;
-  app.ctx.strokeStyle = 'rgba(92, 75, 58, 0.14)';
+  app.ctx.strokeStyle = H ? H.statStroke : 'rgba(92, 75, 58, 0.14)';
   app.ctx.lineWidth = Math.max(1, app.rpx(1));
   app.roundRect(sx + 0.5, sy + 0.5, sw - 1, sh - 1, sr - 0.5);
   app.ctx.stroke();
@@ -1269,7 +1319,7 @@ app.drawHistory = function() {
 
   var divTop = sy + sh * 0.2;
   var divBot = sy + sh * 0.8;
-  app.ctx.strokeStyle = 'rgba(92, 75, 58, 0.12)';
+  app.ctx.strokeStyle = H ? H.statDivider : 'rgba(92, 75, 58, 0.12)';
   app.ctx.lineWidth = 1;
   var dx;
   for (dx = 1; dx <= 2; dx++) {
@@ -1290,7 +1340,7 @@ app.drawHistory = function() {
   app.ctx.fillStyle = tabBg;
   app.roundRect(tx, ty, tw, thh, tr);
   app.ctx.fill();
-  app.ctx.strokeStyle = 'rgba(92, 75, 58, 0.1)';
+  app.ctx.strokeStyle = H ? H.tabBorder : 'rgba(92, 75, 58, 0.1)';
   app.ctx.lineWidth = 1;
   app.roundRect(tx + 0.5, ty + 0.5, tw - 1, thh - 1, tr - 0.5);
   app.ctx.stroke();
@@ -1321,12 +1371,12 @@ app.drawHistory = function() {
       var pillH = thh - pvPad * 2;
       var pr = pillH / 2;
       app.ctx.save();
-      app.ctx.fillStyle = accentBrown;
+      app.ctx.fillStyle = H && H.tabActive ? H.tabActive : accentBrown;
       app.ctx.globalAlpha = 0.22;
       app.roundRect(pillX, pillY, pillW, pillH, pr);
       app.ctx.fill();
       app.ctx.globalAlpha = 0.45;
-      app.ctx.strokeStyle = accentBrown;
+      app.ctx.strokeStyle = H && H.tabActive ? H.tabActive : accentBrown;
       app.ctx.lineWidth = Math.max(1, app.rpx(1.5));
       app.roundRect(pillX + 0.5, pillY + 0.5, pillW - 1, pillH - 1, pr - 0.5);
       app.ctx.stroke();
@@ -1336,7 +1386,11 @@ app.drawHistory = function() {
       '600 ' +
       app.rpx(28) +
       'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
-    app.ctx.fillStyle = active ? accentBrown : sub;
+    app.ctx.fillStyle = active
+      ? H && H.tabTextActive
+        ? H.tabTextActive
+        : accentBrown
+      : sub;
     app.ctx.globalAlpha = active ? 1 : 0.78;
     app.ctx.textAlign = 'center';
     app.ctx.textBaseline = 'middle';
@@ -1372,9 +1426,9 @@ app.drawHistory = function() {
     var lw = app.W - L.padX * 2;
     var lh = L.listH;
     var ly = L.listTop;
-    app.ctx.fillStyle = 'rgba(55, 42, 32, 0.22)';
+    app.ctx.fillStyle = H ? H.loadVeil : 'rgba(55, 42, 32, 0.22)';
     app.ctx.fillRect(lx, ly, lw, lh);
-    app.ctx.fillStyle = 'rgba(255, 252, 248, 0.88)';
+    app.ctx.fillStyle = H ? H.loadPanel : 'rgba(255, 252, 248, 0.88)';
     app.ctx.fillRect(lx, ly, lw, lh);
     app.ctx.textAlign = 'center';
     app.ctx.textBaseline = 'middle';
@@ -1382,7 +1436,7 @@ app.drawHistory = function() {
       '600 ' +
       app.rpx(30) +
       'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
-    app.ctx.fillStyle = 'rgba(62, 48, 36, 0.92)';
+    app.ctx.fillStyle = H ? H.loadTitle : 'rgba(62, 48, 36, 0.92)';
     app.ctx.fillText(
       '加载中…',
       app.snapPx(app.W * 0.5),
@@ -1391,7 +1445,7 @@ app.drawHistory = function() {
     app.ctx.font =
       app.rpx(22) +
       'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
-    app.ctx.fillStyle = 'rgba(92, 78, 68, 0.72)';
+    app.ctx.fillStyle = H ? H.loadSub : 'rgba(92, 78, 68, 0.72)';
     app.ctx.fillText(
       '正在同步服务端战绩',
       app.snapPx(app.W * 0.5),
@@ -1410,12 +1464,14 @@ app.drawHistory = function() {
       app.snapPx(L.listTop + L.listH * 0.38)
     );
     app.ctx.font = app.rpx(22) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
-    app.ctx.fillStyle = 'rgba(92, 78, 68, 0.55)';
+    app.ctx.fillStyle = H ? H.emptySub : 'rgba(92, 78, 68, 0.55)';
+    app.ctx.globalAlpha = H ? 0.72 : 1;
     app.ctx.fillText(
       '完成联机或人机对局后将显示在此',
       app.snapPx(app.W * 0.5),
       app.snapPx(L.listTop + L.listH * 0.55)
     );
+    app.ctx.globalAlpha = 1;
   } else {
     var ri;
     for (ri = 0; ri < rows.length; ri++) {
@@ -1430,20 +1486,20 @@ app.drawHistory = function() {
       var rx = L.padX;
       var rw = app.W - L.padX * 2;
       app.ctx.save();
-      app.ctx.shadowColor = 'rgba(38, 28, 18, 0.2)';
+      app.ctx.shadowColor = H ? H.rowShadow : 'rgba(38, 28, 18, 0.2)';
       app.ctx.shadowBlur = app.rpx(20);
       app.ctx.shadowOffsetY = app.rpx(7);
       app.ctx.shadowOffsetX = 0;
       var cardFill = app.ctx.createLinearGradient(rx, ry, rx, ry + rowH);
-      cardFill.addColorStop(0, 'rgba(255, 254, 251, 1)');
-      cardFill.addColorStop(0.48, 'rgba(255, 250, 242, 0.99)');
-      cardFill.addColorStop(1, 'rgba(238, 228, 214, 0.97)');
+      cardFill.addColorStop(0, H ? H.rowG0 : 'rgba(255, 254, 251, 1)');
+      cardFill.addColorStop(0.48, H ? H.rowG1 : 'rgba(255, 250, 242, 0.99)');
+      cardFill.addColorStop(1, H ? H.rowG2 : 'rgba(238, 228, 214, 0.97)');
       app.ctx.fillStyle = cardFill;
       app.roundRect(rx, ry, rw, rowH, cardR);
       app.ctx.fill();
       app.ctx.shadowBlur = 0;
       app.ctx.shadowOffsetY = 0;
-      app.ctx.strokeStyle = 'rgba(92, 75, 58, 0.13)';
+      app.ctx.strokeStyle = H ? H.rowStroke : 'rgba(92, 75, 58, 0.13)';
       app.ctx.lineWidth = Math.max(1, app.rpx(1));
       app.roundRect(rx + 0.5, ry + 0.5, rw - 1, rowH - 1, cardR - 0.5);
       app.ctx.stroke();
@@ -1458,7 +1514,7 @@ app.drawHistory = function() {
       app.ctx.fillRect(rx, ry, rw, rowH * 0.52);
       var rowFoot = app.ctx.createLinearGradient(rx, ry + rowH * 0.4, rx, ry + rowH);
       rowFoot.addColorStop(0, 'rgba(72, 56, 40, 0)');
-      rowFoot.addColorStop(1, 'rgba(72, 56, 40, 0.06)');
+      rowFoot.addColorStop(1, H ? H.rowFoot1 : 'rgba(72, 56, 40, 0.06)');
       app.ctx.fillStyle = rowFoot;
       app.ctx.fillRect(rx, ry, rw, rowH);
       app.ctx.restore();
@@ -1537,7 +1593,11 @@ app.drawHistory = function() {
           ? resBase + '（' + String(rec.steps) + '手）'
           : resBase;
       var resCol =
-        rec.res === 'win' ? winGold : rec.res === 'lose' ? loseRose : sub;
+        rec.res === 'win'
+          ? winGold
+          : rec.res === 'lose'
+            ? loseRose
+            : drawTint;
       app.ctx.textAlign = 'right';
       app.ctx.font =
         '600 ' +
@@ -1556,15 +1616,15 @@ app.drawHistory = function() {
 
       if (showReplayIcon) {
         app.ctx.save();
-        app.ctx.fillStyle = 'rgba(123, 94, 63, 0.14)';
+        app.ctx.fillStyle = H ? H.replayBg : 'rgba(123, 94, 63, 0.14)';
         app.ctx.beginPath();
         app.ctx.arc(replayCx, line1Y, visRIcon, 0, Math.PI * 2);
         app.ctx.fill();
-        app.ctx.strokeStyle = 'rgba(123, 94, 63, 0.38)';
+        app.ctx.strokeStyle = H ? H.replayStroke : 'rgba(123, 94, 63, 0.38)';
         app.ctx.lineWidth = Math.max(1, app.rpx(1));
         app.ctx.stroke();
         var triS = app.rpx(10);
-        app.ctx.fillStyle = accentBrown;
+        app.ctx.fillStyle = H && H.replayTri ? H.replayTri : accentBrown;
         app.ctx.globalAlpha = 0.92;
         app.ctx.beginPath();
         app.ctx.moveTo(replayCx - triS * 0.35, line1Y - triS * 0.55);
@@ -2114,23 +2174,38 @@ app.hitPieceSkinModalRedeemButton = function(tx, ty) {
 }
 
 /** @returns {{ text: string, fill: string }} */
-app.pieceSkinModalCardStatusStyle = function(entry) {
+app.pieceSkinModalCardStatusStyle = function(entry, th) {
+  var muted =
+    th && th.muted
+      ? th.muted
+      : '#8a7a68';
   if (!entry) {
-    return { text: '', fill: '#8a7a68' };
+    return { text: '', fill: muted };
   }
   if (entry.rowStatus === 'owned') {
-    return { text: '已拥有', fill: '#2a9d4f' };
+    var ownFill =
+      th && th.id === 'mint'
+        ? th.btnPrimary
+        : th && th.id === 'ink'
+          ? '#4a7a5c'
+          : '#2a9d4f';
+    return { text: '已拥有', fill: ownFill };
   }
   if (entry.rowStatus === 'locked') {
+    var lockFill = th && th.muted ? th.muted : '#909090';
     if (entry.unlockHint) {
-      return { text: entry.unlockHint, fill: '#909090' };
+      return { text: entry.unlockHint, fill: lockFill };
     }
-    return { text: '未解锁', fill: '#909090' };
+    return { text: '未解锁', fill: lockFill };
   }
   if (entry.rowStatus === 'points' && entry.costPoints) {
-    return { text: '', fill: '#c77b28' };
+    var pt =
+      th && typeof app.shopModalUiFromTheme === 'function'
+        ? app.shopModalUiFromTheme(th).pointsCost
+        : '#c77b28';
+    return { text: '', fill: pt };
   }
-  return { text: '敬请期待', fill: '#8a7a68' };
+  return { text: '敬请期待', fill: muted };
 }
 
 /**

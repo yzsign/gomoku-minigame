@@ -12,7 +12,12 @@ module.exports = function register(app, deps) {
   var ratingTitle = deps.ratingTitle;
   var wx = deps.wx;
 
-app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassic) {
+app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassic, th) {
+  th = th || (typeof app.getUiTheme === 'function' ? app.getUiTheme() : null);
+  var U =
+    th && typeof app.shopModalUiFromTheme === 'function'
+      ? app.shopModalUiFromTheme(th)
+      : null;
   var focused = gidx === app.pieceSkinModalPendingIdx;
   var rr = app.rpx(18);
   var cardPad = app.rpx(18);
@@ -36,19 +41,25 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
 
   app.ctx.save();
   if (focused) {
-    app.ctx.shadowColor = 'rgba(224, 124, 46, 0.28)';
+    app.ctx.shadowColor = U ? U.focusShadow : 'rgba(224, 124, 46, 0.28)';
     app.ctx.shadowBlur = app.rpx(14);
     app.ctx.shadowOffsetY = app.rpx(5);
   }
   var bgGrad = app.ctx.createLinearGradient(rx, ry, rx, ry + rh);
-  bgGrad.addColorStop(0, '#fffefb');
-  bgGrad.addColorStop(1, '#f5f1eb');
+  bgGrad.addColorStop(0, U ? U.cardG0 : '#fffefb');
+  bgGrad.addColorStop(1, U ? U.cardG1 : '#f5f1eb');
   app.ctx.fillStyle = bgGrad;
   app.roundRect(rx, ry, rw, rh, rr);
   app.ctx.fill();
   app.ctx.shadowBlur = 0;
   app.ctx.shadowOffsetY = 0;
-  app.ctx.strokeStyle = focused ? '#e07c2e' : 'rgba(200, 188, 172, 0.85)';
+  app.ctx.strokeStyle = focused
+    ? U
+      ? U.focusStroke
+      : '#e07c2e'
+    : U
+      ? U.stroke
+      : 'rgba(200, 188, 172, 0.85)';
   app.ctx.lineWidth = focused ? app.rpx(2.25) : app.rpx(1.25);
   app.roundRect(rx, ry, rw, rh, rr);
   app.ctx.stroke();
@@ -196,7 +207,7 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
   } else {
     app.ctx.font = '500 ' + titleFont + 'px ' + app.PIECE_SKIN_FONT_UI;
   }
-  app.ctx.fillStyle = '#3d342c';
+  app.ctx.fillStyle = U && U.title ? U.title : '#3d342c';
   app.ctx.textAlign = catalogLabelVertical ? 'center' : catalogLabelAlign;
   app.ctx.textBaseline = 'middle';
   var catLab = themes.getPieceSkinCatalogLabel(entry);
@@ -220,7 +231,7 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     );
   }
 
-  app.ctx.strokeStyle = 'rgba(92, 75, 58, 0.1)';
+  app.ctx.strokeStyle = U ? U.statusSep : 'rgba(92, 75, 58, 0.1)';
   app.ctx.lineWidth = app.rpx(1);
   app.ctx.beginPath();
   app.ctx.moveTo(app.snapPx(rx + cardPad), app.snapPx(statusBandTop));
@@ -238,7 +249,7 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     var pointsSlotRight = btnL - gapBeforeBtn;
     var pointsTextCx = (pointsSlotLeft + pointsSlotRight) / 2;
     app.ctx.font = app.rpx(18) + 'px ' + app.PIECE_SKIN_FONT_UI;
-    app.ctx.fillStyle = '#b08040';
+    app.ctx.fillStyle = U ? U.pointsCost : '#b08040';
     app.ctx.textAlign = 'center';
     app.ctx.textBaseline = 'middle';
     app.ctx.fillText(
@@ -247,12 +258,19 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
       app.snapPx(rowMidY)
     );
     var gBtn = app.ctx.createLinearGradient(btnL, btnTop, btnL, btnTop + btnH);
-    gBtn.addColorStop(0, '#f0a030');
-    gBtn.addColorStop(1, '#d97820');
+    if (U) {
+      gBtn.addColorStop(0, U.redeemBtnG0);
+      gBtn.addColorStop(1, U.redeemBtnG1);
+    } else {
+      gBtn.addColorStop(0, '#f0a030');
+      gBtn.addColorStop(1, '#d97820');
+    }
     app.ctx.fillStyle = gBtn;
     app.roundRect(btnL, btnTop, btnW, btnH, app.rpx(6));
     app.ctx.fill();
-    app.ctx.strokeStyle = 'rgba(180, 120, 40, 0.35)';
+    app.ctx.strokeStyle = U
+      ? th.btnPrimaryStroke || 'rgba(180, 120, 40, 0.35)'
+      : 'rgba(180, 120, 40, 0.35)';
     app.ctx.lineWidth = app.rpx(1);
     app.roundRect(btnL, btnTop, btnW, btnH, app.rpx(6));
     app.ctx.stroke();
@@ -266,7 +284,7 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
       app.snapPx(rowMidY)
     );
   } else {
-    var st = app.pieceSkinModalCardStatusStyle(entry);
+    var st = app.pieceSkinModalCardStatusStyle(entry, th);
     var statusLine = st && st.text != null ? String(st.text) : '';
     app.ctx.font = statusFont + 'px ' + app.PIECE_SKIN_FONT_UI;
     app.ctx.fillStyle = st && st.fill ? st.fill : '#8a7a68';
@@ -305,9 +323,15 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     app.ctx.translate(rx + rw - cornerOff, ry + cornerOff);
     app.ctx.rotate(Math.PI / 4);
     var gRibbon = app.ctx.createLinearGradient(0, by, 0, by + bandH);
-    gRibbon.addColorStop(0, '#3fc286');
-    gRibbon.addColorStop(0.5, '#2a9d4f');
-    gRibbon.addColorStop(1, '#176d34');
+    if (U) {
+      gRibbon.addColorStop(0, U.ribbon0);
+      gRibbon.addColorStop(0.5, U.ribbon1);
+      gRibbon.addColorStop(1, U.ribbon2);
+    } else {
+      gRibbon.addColorStop(0, '#3fc286');
+      gRibbon.addColorStop(0.5, '#2a9d4f');
+      gRibbon.addColorStop(1, '#176d34');
+    }
     app.ctx.fillStyle = gRibbon;
     app.roundRect(bx, by, bandW, bandH, bandR);
     app.ctx.fill();
@@ -315,10 +339,10 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     app.ctx.lineWidth = app.rpx(1);
     app.roundRect(bx, by, bandW, bandH, bandR);
     app.ctx.stroke();
-    app.ctx.fillStyle = '#fafff9';
+    app.ctx.fillStyle = U ? U.ribbonText : '#fafff9';
     app.ctx.textAlign = 'center';
     app.ctx.textBaseline = 'middle';
-    app.ctx.shadowColor = 'rgba(0, 35, 18, 0.45)';
+    app.ctx.shadowColor = U ? U.ribbonTextShadow : 'rgba(0, 35, 18, 0.45)';
     app.ctx.shadowBlur = app.rpx(2);
     app.ctx.shadowOffsetY = app.rpx(1);
     app.ctx.fillText(tagText, app.snapPx(0), app.snapPx(0));
@@ -332,10 +356,14 @@ app.drawPieceSkinModalOverlay = function(th) {
   if (!app.pieceSkinModalVisible) {
     return;
   }
+  th = th || (typeof app.getUiTheme === 'function' ? app.getUiTheme() : null);
+  var U =
+    th && typeof app.shopModalUiFromTheme === 'function'
+      ? app.shopModalUiFromTheme(th)
+      : null;
   var L = app.getPieceSkinModalLayout();
   var e = app.easeOutCubicModal(app.pieceSkinModalAnim);
   var sc = 0.86 + 0.14 * e;
-  var cream = '#f9f5ec';
   var x = L.x0;
   var y = L.y0;
   var pad = L.pad != null ? L.pad : L.innerPad;
@@ -354,7 +382,15 @@ app.drawPieceSkinModalOverlay = function(th) {
   app.ctx.shadowColor = 'rgba(0,0,0,0.2)';
   app.ctx.shadowBlur = app.rpx(28);
   app.ctx.shadowOffsetY = app.rpx(10);
-  app.ctx.fillStyle = cream;
+  if (U && U.panel && U.panel.length >= 3) {
+    var shellGrad = app.ctx.createLinearGradient(x, y, x, y + L.h);
+    shellGrad.addColorStop(0, U.panel[0]);
+    shellGrad.addColorStop(0.48, U.panel[1]);
+    shellGrad.addColorStop(1, U.panel[2]);
+    app.ctx.fillStyle = shellGrad;
+  } else {
+    app.ctx.fillStyle = '#f9f5ec';
+  }
   app.roundRect(x, y, L.w, L.h, L.r);
   app.ctx.fill();
   app.ctx.shadowBlur = 0;
@@ -364,19 +400,21 @@ app.drawPieceSkinModalOverlay = function(th) {
   var closeCx = x + L.w - pad - cr / 2;
   var closeCy = y + pad + cr / 2;
   app.ctx.font = 'bold ' + app.rpx(34) + 'px ' + app.PIECE_SKIN_FONT_UI;
-  app.ctx.fillStyle = 'rgba(92,75,58,0.38)';
+  app.ctx.fillStyle = U && U.muted ? U.muted : 'rgba(92,75,58,0.38)';
+  app.ctx.globalAlpha = U ? 0.45 : 1;
   app.ctx.textAlign = 'center';
   app.ctx.textBaseline = 'middle';
   app.ctx.fillText('×', app.snapPx(closeCx), app.snapPx(closeCy));
+  app.ctx.globalAlpha = 1;
 
   app.ctx.textAlign = 'center';
   app.ctx.textBaseline = 'middle';
   app.ctx.font = '600 ' + app.rpx(34) + 'px ' + app.PIECE_SKIN_FONT_UI;
-  app.ctx.fillStyle = '#4a3d32';
+  app.ctx.fillStyle = U && U.title ? U.title : '#4a3d32';
   app.ctx.fillText('杂货铺', app.snapPx(L.cx), app.snapPx(L.titleCy));
 
   var sepY = L.gridY0 - app.rpx(10);
-  app.ctx.strokeStyle = 'rgba(92, 75, 58, 0.12)';
+  app.ctx.strokeStyle = U ? U.sep : 'rgba(92, 75, 58, 0.12)';
   app.ctx.lineWidth = app.rpx(1);
   app.ctx.beginPath();
   app.ctx.moveTo(app.snapPx(x + pad), app.snapPx(sepY));
@@ -402,7 +440,8 @@ app.drawPieceSkinModalOverlay = function(th) {
         L.cellH,
         cat[gidx],
         gidx,
-        baseClassic
+        baseClassic,
+        th
       );
     }
   }
@@ -410,9 +449,21 @@ app.drawPieceSkinModalOverlay = function(th) {
   app.ctx.restore();
 }
 
+/**
+ * 微信小游戏 canvas 上下文状态跨帧保留。上一帧若以红色等大模糊阴影结束，
+ * 下一帧首次 fillRect 等也会带阴影，造成首页/战绩/匹配等整屏偏粉红。
+ */
+function resetCanvasShadowState(ctx) {
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+  ctx.shadowColor = 'rgba(0,0,0,0)';
+}
+
 app.draw = function() {
   /** 每帧重置为逻辑坐标系，避免某次 save/restore 失衡导致变换累积（画面套叠缩小） */
   app.ctx.setTransform(app.DPR, 0, 0, app.DPR, 0, 0);
+  resetCanvasShadowState(app.ctx);
   if (app.screen !== 'home') {
     app.stopHomeMascotAnimLoop();
     app.checkinModalVisible = false;
@@ -510,7 +561,18 @@ app.draw = function() {
   app.ctx.shadowBlur = 4;
   app.ctx.shadowOffsetY = 1;
   var titleFs = Math.max(14, Math.round(app.rpx(15)));
-  var titleCy = app.layout.topBar * 0.45;
+  var insetTop =
+    app.layout && app.layout.insetTop != null
+      ? app.layout.insetTop
+      : typeof app.getGameScreenInsetTop === 'function'
+        ? app.getGameScreenInsetTop()
+        : Math.max(
+            app.sys.statusBarHeight || 24,
+            app.sys.safeArea && app.sys.safeArea.top != null
+              ? app.sys.safeArea.top
+              : 0
+          );
+  var titleCy = insetTop + titleFs * 0.45;
   render.drawText(
     app.ctx,
     '团团五子棋',
@@ -520,7 +582,7 @@ app.draw = function() {
     th.subtitle != null ? th.subtitle : th.title
   );
   if (app.isPvpOnline) {
-    app.drawOnlineGameClockBelowTitle(app.ctx, th, titleFs, titleCy);
+    app.drawOnlineGameClockAboveBoard(app.ctx, th, app.layout);
   }
   app.ctx.restore();
 
@@ -633,7 +695,20 @@ app.draw = function() {
     }
   }
 
-  app.drawGameActionBar(undoLabel, undoActive);
+  var drawLabel = '和棋';
+  if (
+    app.isPvpOnline &&
+    !app.gameOver &&
+    app.getOnlineDrawCooldownRemainingMs &&
+    app.getOnlineDrawCooldownRemainingMs() > 0 &&
+    !app.onlineDrawPending &&
+    !app.onlineUndoPending
+  ) {
+    drawLabel =
+      Math.ceil(app.getOnlineDrawCooldownRemainingMs() / 1000) + '秒';
+  }
+
+  app.drawGameActionBar(undoLabel, undoActive, drawLabel);
 
   if (app.isPvpOnline) {
     app.ensureOnlineClockTick();
@@ -829,17 +904,18 @@ app.drawOnlineTurnClockRingBeforeBadge = function(ctx, cx, cy, avR, th, isMySide
   /** 最后 10 秒：红色进度弧 + 光晕随时间明暗脉冲 */
   var redPulse =
     urgent ? 0.42 + 0.58 * (0.5 + 0.5 * Math.sin(nowMs / 95)) : 1;
-  var redGlow = urgent ? 0.22 + 0.55 * redPulse : 0;
   if (urgent) {
-    ctx.shadowColor = 'rgba(240, 52, 40, ' + (0.2 + 0.55 * redPulse).toFixed(3) + ')';
-    ctx.shadowBlur = app.rpx(5 + 7 * redPulse);
+    /** 读秒紧急仅脉冲线色/线宽，不用红色 shadow：同帧染棋盘且 shadow 曾跨帧导致多页泛红 */
+    ctx.shadowColor = 'rgba(0,0,0,0)';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
   } else {
     ctx.shadowColor = mint || ink
       ? 'rgba(20, 52, 48, 0.22)'
       : 'rgba(40, 70, 140, 0.2)';
     ctx.shadowBlur = app.rpx(5);
+    ctx.shadowOffsetY = app.rpx(1);
   }
-  ctx.shadowOffsetY = app.rpx(1);
   ctx.beginPath();
   ctx.arc(cx, cy, ringR, start, start + sweep);
   if (urgent) {
@@ -912,58 +988,95 @@ app.buildOnlineClockSubline = function() {
 };
 
 /**
- * 顶栏：主标题「团团五子棋」下方居中，轻胶囊 + 等宽数字感局时限（仅联机对局）。
+ * 联机局时限：棋盘正上方（顶栏与棋盘木边之间），大号字，与棋盘水平居中对齐。
  */
-app.drawOnlineGameClockBelowTitle = function(ctx, th, titleFs, titleCenterY) {
-  if (!app.isPvpOnline || app.gameOver) {
+app.drawOnlineGameClockAboveBoard = function(ctx, th, layout) {
+  if (!app.isPvpOnline || app.gameOver || !layout) {
     return;
   }
   var line = app.buildOnlineClockSubline();
   if (!line || String(line).trim() === '') {
     return;
   }
+  var cell = layout.cell;
+  var ox = layout.originX;
+  var oy = layout.originY;
+  var boardPx = layout.boardPx;
+  if (!(cell > 0) || ox !== ox || oy !== oy || !(boardPx > 0)) {
+    return;
+  }
+  var boardOuterTop = oy - cell * 0.5;
+  var topBar = layout.topBar != null ? layout.topBar : 0;
   var ink = th && th.id === 'ink';
   var mint = th && th.id === 'mint';
-  var clockFs = Math.round(app.rpx(15));
-  var gap = app.rpx(9);
-  var cy = titleCenterY + titleFs * 0.52 + gap + clockFs * 0.35;
+  var clockFs = Math.max(18, Math.round(app.rpx(24)));
   ctx.save();
   ctx.shadowBlur = 0;
   ctx.shadowOffsetY = 0;
   ctx.font =
-    '600 ' +
+    '700 ' +
     clockFs +
-    'px "PingFang SC","Helvetica Neue","Arial",sans-serif';
+    'px "SF Mono","Menlo","Consolas","PingFang SC","Helvetica Neue",sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   var tw = ctx.measureText(line).width;
-  var padX = app.rpx(14);
-  var padY = app.rpx(6);
+  var padX = app.rpx(20);
+  var padY = app.rpx(10);
   var bw = tw + padX * 2;
   var bh = clockFs + padY * 2;
-  var bx = app.W / 2 - bw / 2;
-  var by = cy - bh / 2;
-  var rr = bh * 0.5;
+  var bandH = Math.max(0, boardOuterTop - topBar);
+  var cy =
+    bandH >= bh
+      ? topBar + bandH * 0.5
+      : boardOuterTop - app.rpx(8) - bh * 0.5;
+  var minCy = topBar + bh * 0.5 + app.rpx(4);
+  var maxCy = boardOuterTop - bh * 0.5 - app.rpx(4);
+  if (cy < minCy) {
+    cy = minCy;
+  }
+  if (cy > maxCy) {
+    cy = maxCy;
+  }
+  var boardCx = ox + boardPx * 0.5;
+  var bx = boardCx - bw * 0.5;
+  var by = cy - bh * 0.5;
+  var rr = Math.min(bh * 0.5, app.rpx(18));
+  var sa = app.sys.safeArea;
+  var safeLeft = sa && sa.left != null ? sa.left : 0;
+  var safeRight = app.W;
+  if (sa) {
+    if (typeof sa.right === 'number') {
+      safeRight = sa.right;
+    } else if (typeof sa.width === 'number' && typeof sa.left === 'number') {
+      safeRight = sa.left + sa.width;
+    }
+  }
+  if (bx < safeLeft + app.rpx(8)) {
+    bx = safeLeft + app.rpx(8);
+  }
+  if (bx + bw > safeRight - app.rpx(8)) {
+    bx = safeRight - app.rpx(8) - bw;
+  }
   if (ink) {
-    ctx.fillStyle = 'rgba(252, 246, 238, 0.55)';
-    ctx.strokeStyle = 'rgba(92, 82, 72, 0.12)';
+    ctx.fillStyle = 'rgba(252, 246, 238, 0.62)';
+    ctx.strokeStyle = 'rgba(92, 82, 72, 0.14)';
   } else if (mint) {
-    ctx.fillStyle = 'rgba(241, 247, 245, 0.65)';
-    ctx.strokeStyle = 'rgba(28, 58, 70, 0.1)';
+    ctx.fillStyle = 'rgba(241, 247, 245, 0.72)';
+    ctx.strokeStyle = 'rgba(28, 58, 70, 0.12)';
   } else {
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.62)';
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.07)';
   }
   ctx.lineWidth = 1;
   app.roundRect(bx, by, bw, bh, rr);
   ctx.fill();
   ctx.stroke();
   ctx.fillStyle = ink
-    ? 'rgba(88, 80, 72, 0.88)'
+    ? 'rgba(72, 64, 58, 0.92)'
     : mint
-      ? 'rgba(48, 82, 92, 0.9)'
-      : 'rgba(72, 68, 62, 0.88)';
-  ctx.fillText(line, app.snapPx(app.W / 2), app.snapPx(cy));
+      ? 'rgba(38, 72, 82, 0.94)'
+      : 'rgba(58, 54, 50, 0.92)';
+  ctx.fillText(line, app.snapPx(bx + bw * 0.5), app.snapPx(cy));
   ctx.restore();
 };
 
@@ -1080,7 +1193,7 @@ app.drawUndoRejectFloat = function() {
   ctx.restore();
 };
 
-app.drawGameActionBar = function(undoLabel, undoActive) {
+app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
   var th = app.getUiTheme();
   var L = app.getGameActionBarLayout();
   var ctx = app.ctx;
@@ -1164,9 +1277,17 @@ app.drawGameActionBar = function(undoLabel, undoActive) {
       }
     );
   }
+  var undoCaption =
+    undoLabel != null && String(undoLabel).trim() !== ''
+      ? String(undoLabel)
+      : '悔棋';
+  var drawCaption =
+    drawLabel != null && String(drawLabel).trim() !== ''
+      ? String(drawLabel)
+      : '和棋';
   var gameBarLabels = pveBarOnly
-    ? ['离开', '悔棋']
-    : ['离开', '悔棋', '和棋', '认输'];
+    ? ['离开', undoCaption]
+    : ['离开', undoCaption, drawCaption, '认输'];
   var M = app.gameBarIconSizeMul || {};
   var labelFsPx = Math.max(12, Math.round(L.labelFs));
   /** 底栏各列说明字同一基线，避免因各列图标倍率不同导致上下错位 */
@@ -1606,7 +1727,13 @@ app.hitHomeButton = function(clientX, clientY) {
 }
 
 app.hitMatchingCancel = function(clientX, clientY) {
-  return Math.abs(clientX - app.W / 2) <= 100 && Math.abs(clientY - app.H * 0.68) <= 28;
+  var M =
+    typeof app.getMatchingPageLayout === 'function'
+      ? app.getMatchingPageLayout()
+      : { titleCx: app.W / 2, cancelCy: app.H * 0.68 };
+  var cx = M.titleCx != null ? M.titleCx : app.W / 2;
+  var cy = M.cancelCy != null ? M.cancelCy : app.H * 0.68;
+  return Math.abs(clientX - cx) <= 100 && Math.abs(clientY - cy) <= 28;
 }
 
 app.hitPveColorButton = function(clientX, clientY) {

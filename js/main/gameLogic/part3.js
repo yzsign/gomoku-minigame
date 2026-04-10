@@ -1588,12 +1588,48 @@ app.maybeRequestOnlineGameSettle = function() {
           if (d && isFinite(bAfter) && isFinite(wAfter)) {
             var bDelta = numField(d, 'blackEloDelta', 'black_elo_delta');
             var wDelta = numField(d, 'whiteEloDelta', 'white_elo_delta');
+            var bApA = numField(
+              d,
+              'blackActivityPointsAfter',
+              'black_activity_points_after'
+            );
+            var wApA = numField(
+              d,
+              'whiteActivityPointsAfter',
+              'white_activity_points_after'
+            );
+            var bApD = numField(
+              d,
+              'blackActivityPointsDelta',
+              'black_activity_points_delta'
+            );
+            var wApD = numField(
+              d,
+              'whiteActivityPointsDelta',
+              'white_activity_points_delta'
+            );
             app.lastSettleRating = {
               blackEloAfter: Math.round(bAfter),
               whiteEloAfter: Math.round(wAfter),
               blackEloDelta: isFinite(bDelta) ? bDelta : 0,
               whiteEloDelta: isFinite(wDelta) ? wDelta : 0
             };
+            if (isFinite(bApA) && isFinite(wApA)) {
+              app.lastSettleRating.blackActivityPointsAfter = Math.max(
+                0,
+                Math.round(bApA)
+              );
+              app.lastSettleRating.whiteActivityPointsAfter = Math.max(
+                0,
+                Math.round(wApA)
+              );
+              app.lastSettleRating.blackActivityPointsDelta = isFinite(bApD)
+                ? bApD
+                : 0;
+              app.lastSettleRating.whiteActivityPointsDelta = isFinite(wApD)
+                ? wApD
+                : 0;
+            }
             if (app.isPvpOnline) {
               var mineAfter =
                 app.pvpOnlineYourColor === app.BLACK
@@ -1854,6 +1890,14 @@ app.getResultOverlayLayout = function() {
   var avatarS = 56;
   var dockH = 56;
   var statsH = 44;
+  if (
+    app.isPvpOnline &&
+    app.lastSettleRating &&
+    typeof app.lastSettleRating.blackActivityPointsAfter === 'number' &&
+    typeof app.lastSettleRating.whiteActivityPointsAfter === 'number'
+  ) {
+    statsH = 64;
+  }
   var gapPrimaryStats = 22;
   var clusterPadV = 14;
 
@@ -2175,6 +2219,45 @@ app.drawResultOverlay = function() {
       lw.delta,
       app.snapPx(ly.vsRightCx),
       app.snapPx(ly.vsCy + ly.avatarS * 0.5 + 34)
+    );
+  }
+
+  if (
+    app.isPvpOnline &&
+    app.lastSettleRating &&
+    typeof app.lastSettleRating.blackActivityPointsAfter === 'number' &&
+    typeof app.lastSettleRating.whiteActivityPointsAfter === 'number'
+  ) {
+    var srAp = app.lastSettleRating;
+    var meBlk = app.pvpOnlineYourColor === gomoku.BLACK;
+    function tuanLineAp(forBlack) {
+      var ap = forBlack
+        ? srAp.blackActivityPointsAfter
+        : srAp.whiteActivityPointsAfter;
+      var dd = forBlack
+        ? srAp.blackActivityPointsDelta
+        : srAp.whiteActivityPointsDelta;
+      var s = Math.max(0, Math.floor(ap));
+      var t = '团团 ' + s;
+      if (typeof dd === 'number' && dd !== 0) {
+        t += ' (' + (dd > 0 ? '+' : '') + dd + ')';
+      }
+      return t;
+    }
+    ctx.font = '600 12px "PingFang SC","Hiragino Sans GB",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#78716c';
+    var tuanY = ly.vsCy + ly.avatarS * 0.5 + 50;
+    ctx.fillText(
+      tuanLineAp(meBlk),
+      app.snapPx(ly.vsLeftCx),
+      app.snapPx(tuanY)
+    );
+    ctx.fillText(
+      tuanLineAp(!meBlk),
+      app.snapPx(ly.vsRightCx),
+      app.snapPx(tuanY)
     );
   }
 

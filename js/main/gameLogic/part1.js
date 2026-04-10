@@ -956,6 +956,180 @@ app.getUiTheme = function() {
   return app.getCurrentTheme();
 }
 
+/**
+ * 杂货铺弹窗：色板与当前界面风格（檀木 / 青瓷 / 水墨）一致。
+ */
+app.shopModalUiFromTheme = function(th) {
+  th = th || app.getUiTheme();
+  var id = th.id;
+  var bg = th.bg && th.bg.length ? th.bg : ['#fff9f4', '#fff6ed', '#fffcf9'];
+  return {
+    panel: bg,
+    title: th.title,
+    subtitle: th.subtitle,
+    muted: th.muted,
+    sep:
+      id === 'mint'
+        ? 'rgba(20, 57, 66, 0.14)'
+        : id === 'ink'
+          ? 'rgba(36, 32, 24, 0.13)'
+          : 'rgba(92, 75, 58, 0.12)',
+    cardG0:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.94)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 248, 0.97)'
+          : '#fffefb',
+    cardG1:
+      id === 'mint'
+        ? 'rgba(225, 241, 237, 0.95)'
+        : id === 'ink'
+          ? 'rgba(236, 228, 218, 0.95)'
+          : '#f5f1eb',
+    stroke:
+      id === 'mint'
+        ? 'rgba(46, 117, 134, 0.32)'
+        : id === 'ink'
+          ? 'rgba(74, 66, 58, 0.36)'
+          : 'rgba(200, 188, 172, 0.85)',
+    focusStroke: th.btnPrimary,
+    focusShadow:
+      id === 'mint'
+        ? 'rgba(31, 86, 100, 0.28)'
+        : id === 'ink'
+          ? 'rgba(34, 28, 24, 0.24)'
+          : 'rgba(224, 124, 46, 0.28)',
+    statusSep:
+      id === 'mint'
+        ? 'rgba(20, 57, 66, 0.11)'
+        : id === 'ink'
+          ? 'rgba(40, 36, 30, 0.11)'
+          : 'rgba(92, 75, 58, 0.1)',
+    ribbon0:
+      th.homeCards && th.homeCards[0] ? th.homeCards[0] : th.btnPrimary,
+    ribbon1: th.btnPrimary,
+    ribbon2:
+      th.homeCards && th.homeCards[2]
+        ? th.homeCards[2]
+        : th.homeCards && th.homeCards[1]
+          ? th.homeCards[1]
+          : th.btnPrimary,
+    ribbonText: '#fffef9',
+    ribbonTextShadow:
+      id === 'ink' ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 28, 22, 0.42)',
+    pointsCost: id === 'mint' ? '#2a7d8c' : id === 'ink' ? '#a07048' : '#b08040',
+    redeemBtnG0: th.homeCards && th.homeCards[1] ? th.homeCards[1] : th.btnPrimary,
+    redeemBtnG1: th.btnPrimary
+  };
+};
+
+/**
+ * 我的战绩页：统计卡、筛选条、列表行与胜负色随界面主题（与杂货铺同源色板扩展）。
+ */
+app.historyPageUiFromTheme = function(th) {
+  th = th || app.getUiTheme();
+  var id = th.id;
+  var S =
+    typeof app.shopModalUiFromTheme === 'function'
+      ? app.shopModalUiFromTheme(th)
+      : null;
+  var res = th.result || {};
+  var winC =
+    res.win && res.win.title ? res.win.title : '#a67c3d';
+  var loseC =
+    res.lose && res.lose.title ? res.lose.title : '#b06060';
+  var drawC =
+    res.draw && res.draw.title ? res.draw.title : th.subtitle;
+  return {
+    parchmentTint:
+      id === 'mint'
+        ? 'rgba(230, 242, 239, 0.34)'
+        : id === 'ink'
+          ? 'rgba(240, 232, 222, 0.36)'
+          : 'rgba(253, 245, 230, 0.32)',
+    statG0: S ? S.cardG0 : '#fff9f0',
+    statG1: S ? S.cardG1 : '#fff3e4',
+    statStroke: S ? S.stroke : 'rgba(92, 75, 58, 0.14)',
+    statShadow:
+      id === 'mint'
+        ? 'rgba(12, 52, 64, 0.1)'
+        : id === 'ink'
+          ? 'rgba(28, 22, 16, 0.11)'
+          : 'rgba(60, 48, 38, 0.12)',
+    statDivider: S ? S.statusSep : 'rgba(92, 75, 58, 0.12)',
+    tabBg:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.94)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 248, 0.92)'
+          : 'rgba(255, 252, 246, 0.97)',
+    tabBorder: S ? S.sep : 'rgba(92, 75, 58, 0.1)',
+    tabActive: th.btnPrimary,
+    tabTextActive: th.btnPrimary,
+    rowG0:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 1)'
+        : id === 'ink'
+          ? 'rgba(255, 253, 250, 1)'
+          : 'rgba(255, 254, 251, 1)',
+    rowG1:
+      id === 'mint'
+        ? 'rgba(248, 252, 251, 0.99)'
+        : id === 'ink'
+          ? 'rgba(252, 248, 244, 0.99)'
+          : 'rgba(255, 250, 242, 0.99)',
+    rowG2:
+      id === 'mint'
+        ? 'rgba(218, 234, 230, 0.96)'
+        : id === 'ink'
+          ? 'rgba(228, 218, 206, 0.96)'
+          : 'rgba(238, 228, 214, 0.97)',
+    rowStroke: S ? S.stroke : 'rgba(92, 75, 58, 0.13)',
+    rowShadow:
+      id === 'mint'
+        ? 'rgba(10, 45, 55, 0.14)'
+        : id === 'ink'
+          ? 'rgba(22, 18, 14, 0.16)'
+          : 'rgba(38, 28, 18, 0.2)',
+    rowFoot1:
+      id === 'mint'
+        ? 'rgba(20, 55, 62, 0.04)'
+        : id === 'ink'
+          ? 'rgba(40, 32, 24, 0.06)'
+          : 'rgba(72, 56, 40, 0.06)',
+    win: winC,
+    lose: loseC,
+    draw: drawC,
+    loadVeil: id === 'mint' ? 'rgba(55, 42, 32, 0.18)' : 'rgba(55, 42, 32, 0.22)',
+    loadPanel:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.92)'
+        : 'rgba(255, 252, 248, 0.88)',
+    loadTitle: th.title,
+    loadSub: th.muted,
+    replayBg:
+      id === 'mint'
+        ? 'rgba(31, 86, 100, 0.12)'
+        : id === 'ink'
+          ? 'rgba(60, 52, 44, 0.12)'
+          : 'rgba(123, 94, 63, 0.14)',
+    replayStroke:
+      id === 'mint'
+        ? 'rgba(31, 86, 100, 0.3)'
+        : id === 'ink'
+          ? 'rgba(70, 60, 50, 0.32)'
+          : 'rgba(123, 94, 63, 0.38)',
+    replayTri: th.btnPrimary,
+    emptySub: th.muted,
+    scrollbar:
+      id === 'mint'
+        ? 'rgba(20, 55, 62, 0.22)'
+        : id === 'ink'
+          ? 'rgba(32, 26, 20, 0.24)'
+          : 'rgba(0, 0, 0, 0.2)'
+  };
+};
+
 app.SIZE = gomoku.SIZE;
 app.BLACK = gomoku.BLACK;
 app.WHITE = gomoku.WHITE;
@@ -1139,8 +1313,9 @@ app.onlineMoveHistory = [];
 /** POST /api/games/settle 返回的 gameId，棋谱可事后拉取 */
 app.lastSettledGameId = null;
 /**
- * 最近一次 settle 返回的天梯分（用于结算页 VS 展示）；离开房间时清空。
- * { blackEloAfter, whiteEloAfter, blackEloDelta, whiteEloDelta }
+ * 最近一次 settle 返回的天梯分与团团积分（用于结算页 VS 展示）；离开房间时清空。
+ * { blackEloAfter, whiteEloAfter, blackEloDelta, whiteEloDelta,
+ *   blackActivityPointsAfter, whiteActivityPointsAfter, blackActivityPointsDelta, whiteActivityPointsDelta }
  */
 app.lastSettleRating = null;
 /** app.screen === 'replay'：棋谱数据与当前展示步数（0 表示空盘） */
@@ -1289,15 +1464,17 @@ app.onlineUndoCancelPending = false;
 app.onlineDrawCancelPending = false;
 app.onlineDrawPending = false;
 app.onlineDrawRequesterColor = null;
-/** 联机（随机匹配 / 好友房）：上次发起悔棋申请后的冷却截止时刻；人机与同桌不用 */
-app.ONLINE_UNDO_COOLDOWN_MS = 10000;
+/** 联机：发起悔棋 / 和棋后的冷却（毫秒）；人机与同桌不用 */
+app.ONLINE_UNDO_COOLDOWN_MS = 20000;
+app.ONLINE_DRAW_COOLDOWN_MS = 20000;
 app.onlineUndoCooldownUntilMs = 0;
-app.onlineUndoCooldownTimer = null;
+app.onlineDrawCooldownUntilMs = 0;
+app.onlineBarCooldownTimer = null;
 
-app.clearOnlineUndoCooldownTimer = function() {
-  if (app.onlineUndoCooldownTimer != null) {
-    clearInterval(app.onlineUndoCooldownTimer);
-    app.onlineUndoCooldownTimer = null;
+app.clearOnlineBarCooldownTimer = function() {
+  if (app.onlineBarCooldownTimer != null) {
+    clearInterval(app.onlineBarCooldownTimer);
+    app.onlineBarCooldownTimer = null;
   }
 };
 
@@ -1309,15 +1486,27 @@ app.getOnlineUndoCooldownRemainingMs = function() {
   return r > 0 ? r : 0;
 };
 
-app.startOnlineUndoCooldownTicker = function() {
-  app.clearOnlineUndoCooldownTimer();
-  app.onlineUndoCooldownTimer = setInterval(function() {
+app.getOnlineDrawCooldownRemainingMs = function() {
+  if (!app.onlineDrawCooldownUntilMs) {
+    return 0;
+  }
+  var r = app.onlineDrawCooldownUntilMs - Date.now();
+  return r > 0 ? r : 0;
+};
+
+/** 悔棋或和棋任一在冷却中时每秒 redraw，直至两者均结束 */
+app.startOnlineBarCooldownTicker = function() {
+  app.clearOnlineBarCooldownTimer();
+  app.onlineBarCooldownTimer = setInterval(function() {
+    if (app.screen !== 'game' || !app.isPvpOnline) {
+      app.clearOnlineBarCooldownTimer();
+      return;
+    }
     if (
-      app.screen !== 'game' ||
-      !app.isPvpOnline ||
-      !app.getOnlineUndoCooldownRemainingMs()
+      !app.getOnlineUndoCooldownRemainingMs() &&
+      !app.getOnlineDrawCooldownRemainingMs()
     ) {
-      app.clearOnlineUndoCooldownTimer();
+      app.clearOnlineBarCooldownTimer();
       if (app.screen === 'game' && app.isPvpOnline) {
         app.draw();
       }
@@ -1426,7 +1615,8 @@ app.disconnectOnline = function() {
   app.onlineUndoPending = false;
   app.onlineUndoRequesterColor = null;
   app.onlineUndoCooldownUntilMs = 0;
-  app.clearOnlineUndoCooldownTimer();
+  app.onlineDrawCooldownUntilMs = 0;
+  app.clearOnlineBarCooldownTimer();
   app.onlineDrawPending = false;
   app.onlineDrawRequesterColor = null;
   app.onlineRematchRequesterColor = null;
@@ -2023,7 +2213,7 @@ app.sendOnlineUndo = function(msgType) {
   });
   if (msgType === 'UNDO_REQUEST') {
     app.onlineUndoCooldownUntilMs = Date.now() + app.ONLINE_UNDO_COOLDOWN_MS;
-    app.startOnlineUndoCooldownTicker();
+    app.startOnlineBarCooldownTicker();
     if (typeof app.draw === 'function') {
       app.draw();
     }
@@ -2106,12 +2296,31 @@ app.sendOnlineDraw = function(msgType) {
     wx.showToast({ title: '网络未连接', icon: 'none' });
     return;
   }
+  if (msgType === 'DRAW_REQUEST') {
+    var remDraw = app.getOnlineDrawCooldownRemainingMs();
+    if (remDraw > 0) {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({
+          title: '请等待 ' + Math.ceil(remDraw / 1000) + ' 秒后再发起和棋',
+          icon: 'none'
+        });
+      }
+      return;
+    }
+  }
   if (msgType === 'DRAW_CANCEL') {
     app.onlineDrawCancelPending = true;
   }
   app.socketTask.send({
     data: JSON.stringify({ type: msgType })
   });
+  if (msgType === 'DRAW_REQUEST') {
+    app.onlineDrawCooldownUntilMs = Date.now() + app.ONLINE_DRAW_COOLDOWN_MS;
+    app.startOnlineBarCooldownTicker();
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+  }
 }
 
 /** 同桌：画布上显示同意/拒绝。联机改由弹框处理。 */
@@ -2189,6 +2398,12 @@ app.isDrawButtonActive = function() {
       return false;
     }
     if (app.onlineUndoPending) {
+      return false;
+    }
+    if (
+      app.getOnlineDrawCooldownRemainingMs &&
+      app.getOnlineDrawCooldownRemainingMs() > 0
+    ) {
       return false;
     }
     return true;

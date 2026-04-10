@@ -236,8 +236,59 @@ app.tryLaunchOnlineInvite = function(query) {
 
 /* ---------- 棋盘布局与菜单几何 ---------- */
 
+/** 对局/回放顶栏：取状态栏与 safeArea.top 较大值，避免标题与局时限落入刘海/灵动岛区域 */
+app.getGameScreenInsetTop = function() {
+  var sb = app.sys.statusBarHeight || 24;
+  var safeTop =
+    app.sys.safeArea && app.sys.safeArea.top != null ? app.sys.safeArea.top : 0;
+  return Math.max(sb, safeTop);
+};
+
+/**
+ * 随机匹配页：主标题 / 寻敌文案 / 取消 相对安全区排布，避免刘海与灵动岛遮挡。
+ */
+app.getMatchingPageLayout = function() {
+  var insetTop = app.getGameScreenInsetTop();
+  var safeBottom =
+    app.sys.safeArea && app.sys.safeArea.bottom != null
+      ? Math.max(0, app.H - app.sys.safeArea.bottom)
+      : 0;
+  var innerH = app.H - insetTop - safeBottom;
+  var titleCy = insetTop + app.rpx(52);
+  var ySeek = insetTop + innerH * 0.38;
+  if (ySeek < titleCy + app.rpx(80)) {
+    ySeek = titleCy + app.rpx(80);
+  }
+  var cancelCy = app.H - safeBottom - app.rpx(64);
+  var titleCx =
+    app.sys.safeArea &&
+    app.sys.safeArea.width != null &&
+    app.sys.safeArea.left != null
+      ? app.sys.safeArea.left + app.sys.safeArea.width * 0.5
+      : app.W * 0.5;
+  return {
+    insetTop: insetTop,
+    safeBottom: safeBottom,
+    innerH: innerH,
+    titleCx: titleCx,
+    titleCy: titleCy,
+    ySeek: ySeek,
+    cancelCy: cancelCy
+  };
+};
+
 app.computeLayout = function() {
-  var topBar = Math.max(44, app.sys.statusBarHeight + 8);
+  var insetTop = app.getGameScreenInsetTop();
+  var toPx = function(n) {
+    return (n * app.W) / 750;
+  };
+  var titleFsApprox = Math.max(14, Math.round(toPx(15)));
+  var titleCyApprox = insetTop + titleFsApprox * 0.45;
+  /* 联机：主标题下预留一条带，供大号局时限画在棋盘上方 */
+  var headerBottom = titleCyApprox + titleFsApprox * 0.48;
+  var onlineClockStrip =
+    app.isPvpOnline ? toPx(52) : 0;
+  var topBar = Math.max(44, headerBottom + toPx(8) + onlineClockStrip);
   var safeBottom = 0;
   if (
     app.sys &&
@@ -249,9 +300,6 @@ app.computeLayout = function() {
   var barHr = app.GAME_ACTION_BAR_H_RPX != null ? app.GAME_ACTION_BAR_H_RPX : 128;
   var stHr =
     app.GAME_STATUS_CHIP_H_RPX != null ? app.GAME_STATUS_CHIP_H_RPX : 0;
-  var toPx = function(n) {
-    return (n * app.W) / 750;
-  };
   var barH = toPx(barHr);
   var stH = toPx(stHr);
   /* 棋盘下缘与底栏之间的留白；底栏本身贴 safe area 底边（见 bottomY） */
@@ -279,6 +327,7 @@ app.computeLayout = function() {
     originY: originY,
     size: app.SIZE,
     topBar: topBar,
+    insetTop: insetTop,
     bottomY: bottomY
   };
 }
@@ -507,18 +556,21 @@ app.getHomeNavBarLayout = function() {
   var safeTop =
     app.sys.safeArea && app.sys.safeArea.top != null ? app.sys.safeArea.top : 0;
   var insetTop = Math.max(sb, safeTop);
+  var safeLeft =
+    app.sys.safeArea && app.sys.safeArea.left != null ? app.sys.safeArea.left : 0;
   var navH = app.rpx(120);
   var navTop = insetTop;
   var navBottom = navTop + navH;
   var padX = app.rpx(30);
   var avatarR = app.rpx(48);
   var avatarCy = navTop + navH / 2;
-  var avatarCx = padX + avatarR;
+  var avatarCx = safeLeft + padX + avatarR;
   return {
     navTop: navTop,
     navH: navH,
     navBottom: navBottom,
     insetTop: insetTop,
+    safeLeft: safeLeft,
     padX: padX,
     avatarR: avatarR,
     avatarCx: avatarCx,
@@ -1413,7 +1465,12 @@ app.drawHomeCopyrightBar = function(hl, th) {
  */
 app.getHomeLayout = function() {
   var nav = app.getHomeNavBarLayout();
-  var cx = app.W / 2;
+  var cx =
+    app.sys.safeArea &&
+    app.sys.safeArea.width != null &&
+    app.sys.safeArea.left != null
+      ? app.sys.safeArea.left + app.sys.safeArea.width * 0.5
+      : app.W / 2;
   var btnW = app.rpx(668);
   var btnH = app.rpx(116);
   var btnGap = app.rpx(36);
