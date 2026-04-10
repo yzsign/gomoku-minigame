@@ -456,7 +456,7 @@ app.drawHomeContentBelowPieceSkinModal = function() {
     );
     if (th.id === 'mint') {
       halo.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
-      halo.addColorStop(0.45, 'rgba(190, 240, 245, 0.28)');
+      halo.addColorStop(0.45, 'rgba(175, 232, 236, 0.26)');
       halo.addColorStop(1, 'rgba(255, 255, 255, 0)');
     } else if (th.id === 'ink') {
       halo.addColorStop(0, 'rgba(255, 252, 245, 0.42)');

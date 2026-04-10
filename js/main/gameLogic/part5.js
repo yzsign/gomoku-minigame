@@ -510,14 +510,18 @@ app.draw = function() {
   app.ctx.shadowBlur = 4;
   app.ctx.shadowOffsetY = 1;
   var titleFs = Math.max(14, Math.round(app.rpx(15)));
+  var titleCy = app.layout.topBar * 0.45;
   render.drawText(
     app.ctx,
     '团团五子棋',
     app.W / 2,
-    app.layout.topBar * 0.45,
+    titleCy,
     titleFs,
     th.subtitle != null ? th.subtitle : th.title
   );
+  if (app.isPvpOnline) {
+    app.drawOnlineGameClockBelowTitle(app.ctx, th, titleFs, titleCy);
+  }
   app.ctx.restore();
 
   var status = app.lastMsg;
@@ -607,6 +611,13 @@ app.draw = function() {
       undoActive = false;
     } else if (app.countStonesOnBoard(app.board) === 0) {
       undoActive = false;
+    } else if (
+      app.getOnlineUndoCooldownRemainingMs &&
+      app.getOnlineUndoCooldownRemainingMs() > 0
+    ) {
+      undoActive = false;
+      undoLabel =
+        Math.ceil(app.getOnlineUndoCooldownRemainingMs() / 1000) + '秒';
     }
   } else if (undoActive && app.isPvpLocal) {
     if (app.localUndoRequest) {
@@ -623,6 +634,12 @@ app.draw = function() {
   }
 
   app.drawGameActionBar(undoLabel, undoActive);
+
+  if (app.isPvpOnline) {
+    app.ensureOnlineClockTick();
+  } else if (typeof app.clearOnlineClockTick === 'function') {
+    app.clearOnlineClockTick();
+  }
 
   if (app.showUndoRespondRow()) {
     var Ls = app.getGameActionBarLayout();
@@ -713,58 +730,280 @@ app.getGameActionBarLayout = function() {
 }
 
 /**
- * 对局状态：圆角胶囊 + 居中字（人机 / 同桌 / 联机共用）
+ * 是否在本侧头像上绘制步时环（仅当前行棋一侧；对方头像保持干净）。
  */
-app.drawGameStatusPill = function(text, th) {
-  if (!text) {
+app.shouldDrawOnlineStepRingForSide = function(isMySide) {
+  if (!app.isPvpOnline || app.gameOver) {
+    return false;
+  }
+  if (
+    !app.onlineWsConnected ||
+    !app.onlineBlackConnected ||
+    !app.onlineWhiteConnected
+  ) {
+    return false;
+  }
+  if (
+    app.onlineClockMoveDeadlineWallMs == null ||
+    isNaN(app.onlineClockMoveDeadlineWallMs)
+  ) {
+    return false;
+  }
+  var im = app.current === app.pvpOnlineYourColor;
+  return isMySide ? im : !im;
+};
+
+/**
+ * 联机步时：仅在「当前行棋」头像上，于头像与执子徽章之间绘制细圆环进度（无头像下数字）。
+ * 剩余 ≤10 秒时进度弧红色脉冲闪烁；对方头像不装饰；暂停为虚线全环 +「停」。
+ */
+app.drawOnlineTurnClockRingBeforeBadge = function(ctx, cx, cy, avR, th, isMySide) {
+  if (!app.shouldDrawOnlineStepRingForSide(isMySide)) {
     return;
   }
-  var ctx = app.ctx;
-  var L = app.getGameActionBarLayout();
-  var chipH = L.statusChipH;
-  var cy = L.statusCenterY;
-  var fs = Math.round(app.rpx(15));
-  var padX = app.rpx(22);
-  var maxW = app.W - app.rpx(24);
-  var tw;
-  for (;;) {
+  var paused = !!app.onlineClockPaused;
+  var sec = paused
+    ? null
+    : Math.max(
+        0,
+        Math.ceil((app.onlineClockMoveDeadlineWallMs - Date.now()) / 1000)
+      );
+  var ink = th && th.id === 'ink';
+  var mint = th && th.id === 'mint';
+  var urgent = sec !== null && sec <= 10;
+  var accent = mint
+    ? 'rgba(32, 148, 132, 0.94)'
+    : ink
+      ? 'rgba(212, 168, 72, 0.96)'
+      : 'rgba(88, 128, 210, 0.94)';
+  var track = ink
+    ? 'rgba(72, 64, 56, 0.14)'
+    : mint
+      ? 'rgba(28, 72, 82, 0.12)'
+      : 'rgba(0, 0, 0, 0.09)';
+  /** 环略大于头像，避开与右下角执子徽章抢同一视觉层 */
+  var ringR = avR + app.rpx(5);
+  var lineW = Math.max(2.2, app.rpx(3));
+
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+  ctx.strokeStyle = track;
+  ctx.lineWidth = lineW;
+  ctx.stroke();
+
+  if (paused) {
+    ctx.setLineDash([app.rpx(5), app.rpx(4)]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+    ctx.strokeStyle = ink
+      ? 'rgba(110, 100, 90, 0.5)'
+      : mint
+        ? 'rgba(50, 88, 98, 0.45)'
+        : 'rgba(90, 86, 78, 0.45)';
+    ctx.stroke();
+    ctx.setLineDash([]);
     ctx.font =
       '600 ' +
-      fs +
-      'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
-    tw = ctx.measureText(text).width;
-    if (tw + padX * 2 <= maxW || fs <= 12) {
-      break;
-    }
-    fs -= 1;
+      Math.round(app.rpx(12)) +
+      'px "PingFang SC","Hiragino Sans GB",sans-serif';
+    ctx.fillStyle = ink
+      ? 'rgba(95, 88, 78, 0.88)'
+      : mint
+        ? 'rgba(48, 78, 88, 0.88)'
+        : 'rgba(88, 84, 76, 0.88)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('停', app.snapPx(cx), app.snapPx(cy + ringR + app.rpx(5)));
+    ctx.restore();
+    return;
   }
-  var bw = Math.min(maxW, tw + padX * 2);
-  var bx = app.W / 2 - bw / 2;
-  var by = cy - chipH / 2;
-  var rr = chipH / 2;
-  ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.06)';
-  ctx.shadowBlur = app.rpx(6);
-  ctx.shadowOffsetY = app.rpx(1);
-  if (th.id === 'ink') {
-    ctx.fillStyle = 'rgba(38, 34, 30, 0.92)';
-    ctx.strokeStyle = 'rgba(255, 250, 245, 0.14)';
+
+  var t = Math.min(1, sec / 30);
+  var start = -Math.PI / 2;
+  var sweep = t * Math.PI * 2;
+  var nowMs = Date.now();
+  /** 最后 10 秒：红色进度弧 + 光晕随时间明暗脉冲 */
+  var redPulse =
+    urgent ? 0.42 + 0.58 * (0.5 + 0.5 * Math.sin(nowMs / 95)) : 1;
+  var redGlow = urgent ? 0.22 + 0.55 * redPulse : 0;
+  if (urgent) {
+    ctx.shadowColor = 'rgba(240, 52, 40, ' + (0.2 + 0.55 * redPulse).toFixed(3) + ')';
+    ctx.shadowBlur = app.rpx(5 + 7 * redPulse);
   } else {
-    ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.07)';
+    ctx.shadowColor = mint || ink
+      ? 'rgba(20, 52, 48, 0.22)'
+      : 'rgba(40, 70, 140, 0.2)';
+    ctx.shadowBlur = app.rpx(5);
   }
-  ctx.lineWidth = 1;
-  app.roundRect(bx, by, bw, chipH, rr);
-  ctx.fill();
+  ctx.shadowOffsetY = app.rpx(1);
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringR, start, start + sweep);
+  if (urgent) {
+    ctx.strokeStyle =
+      'rgba(238, 64, 48, ' + (0.5 + 0.48 * redPulse).toFixed(3) + ')';
+  } else {
+    ctx.strokeStyle = accent;
+  }
+  ctx.lineWidth = lineW;
   ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.shadowOffsetY = 0;
-  ctx.fillStyle = th.id === 'ink' ? '#f0ebe6' : '#7a726a';
+  ctx.restore();
+};
+
+/**
+ * 局时限总剩余：MM:SS（如 09:34、10:00），分秒均两位；最长 99:59。
+ */
+app.formatGameTotalClockMmSs = function(totalSec) {
+  var sec = totalSec;
+  if (sec < 0 || sec !== sec) {
+    sec = 0;
+  }
+  sec = Math.min(5999, Math.floor(sec));
+  var m = Math.floor(sec / 60);
+  var s = sec % 60;
+  var mm = m < 10 ? '0' + m : String(m);
+  if (m > 99) {
+    mm = String(m);
+  }
+  var ss = s < 10 ? '0' + s : String(s);
+  return mm + ':' + ss;
+};
+
+/**
+ * 联机局时限文案：纯 MM:SS 或「读秒暂停」（无「局」字）；步时由头像环表示。
+ */
+app.buildOnlineClockSubline = function() {
+  if (!app.isPvpOnline || app.gameOver) {
+    return '';
+  }
+  if (!app.onlineWsConnected) {
+    return '';
+  }
+  if (!app.onlineBlackConnected || !app.onlineWhiteConnected) {
+    return '';
+  }
+  if (
+    app.onlineClockMoveDeadlineWallMs == null ||
+    isNaN(app.onlineClockMoveDeadlineWallMs)
+  ) {
+    return '';
+  }
+  var now = Date.now();
+  if (app.onlineClockPaused) {
+    return '读秒暂停';
+  }
+  if (
+    app.onlineClockGameDeadlineWallMs != null &&
+    !isNaN(app.onlineClockGameDeadlineWallMs) &&
+    app.onlineClockGameDeadlineWallMs > 0
+  ) {
+    var gameSec = Math.max(
+      0,
+      Math.ceil((app.onlineClockGameDeadlineWallMs - now) / 1000)
+    );
+    return app.formatGameTotalClockMmSs(gameSec);
+  }
+  return '';
+};
+
+/**
+ * 顶栏：主标题「团团五子棋」下方居中，轻胶囊 + 等宽数字感局时限（仅联机对局）。
+ */
+app.drawOnlineGameClockBelowTitle = function(ctx, th, titleFs, titleCenterY) {
+  if (!app.isPvpOnline || app.gameOver) {
+    return;
+  }
+  var line = app.buildOnlineClockSubline();
+  if (!line || String(line).trim() === '') {
+    return;
+  }
+  var ink = th && th.id === 'ink';
+  var mint = th && th.id === 'mint';
+  var clockFs = Math.round(app.rpx(15));
+  var gap = app.rpx(9);
+  var cy = titleCenterY + titleFs * 0.52 + gap + clockFs * 0.35;
+  ctx.save();
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+  ctx.font =
+    '600 ' +
+    clockFs +
+    'px "PingFang SC","Helvetica Neue","Arial",sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, app.snapPx(app.W / 2), app.snapPx(cy));
+  var tw = ctx.measureText(line).width;
+  var padX = app.rpx(14);
+  var padY = app.rpx(6);
+  var bw = tw + padX * 2;
+  var bh = clockFs + padY * 2;
+  var bx = app.W / 2 - bw / 2;
+  var by = cy - bh / 2;
+  var rr = bh * 0.5;
+  if (ink) {
+    ctx.fillStyle = 'rgba(252, 246, 238, 0.55)';
+    ctx.strokeStyle = 'rgba(92, 82, 72, 0.12)';
+  } else if (mint) {
+    ctx.fillStyle = 'rgba(241, 247, 245, 0.65)';
+    ctx.strokeStyle = 'rgba(28, 58, 70, 0.1)';
+  } else {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
+  }
+  ctx.lineWidth = 1;
+  app.roundRect(bx, by, bw, bh, rr);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = ink
+    ? 'rgba(88, 80, 72, 0.88)'
+    : mint
+      ? 'rgba(48, 82, 92, 0.9)'
+      : 'rgba(72, 68, 62, 0.88)';
+  ctx.fillText(line, app.snapPx(app.W / 2), app.snapPx(cy));
   ctx.restore();
-}
+};
+
+app.clearOnlineClockTick = function() {
+  if (app.onlineClockTickTimer != null) {
+    clearInterval(app.onlineClockTickTimer);
+    app.onlineClockTickTimer = null;
+  }
+};
+
+/** 联机对局未结束时定时 redraw，使倒计时平滑 */
+app.ensureOnlineClockTick = function() {
+  if (!app.shouldRunOnlineClockCountdown()) {
+    app.clearOnlineClockTick();
+    return;
+  }
+  if (app.onlineClockTickTimer != null) {
+    return;
+  }
+  app.onlineClockTickTimer = setInterval(function() {
+    if (!app.shouldRunOnlineClockCountdown()) {
+      app.clearOnlineClockTick();
+      return;
+    }
+    app.draw();
+  }, 280);
+};
+
+app.shouldRunOnlineClockCountdown = function() {
+  return (
+    app.isPvpOnline &&
+    app.screen === 'game' &&
+    !app.gameOver &&
+    app.onlineWsConnected &&
+    app.onlineBlackConnected &&
+    app.onlineWhiteConnected &&
+    app.onlineClockMoveDeadlineWallMs != null &&
+    !isNaN(app.onlineClockMoveDeadlineWallMs)
+  );
+};
 
 /** 联机：对方拒绝悔棋时横向飘过提示 */
 app.stopUndoRejectFloatAnim = function() {
@@ -846,13 +1085,28 @@ app.drawGameActionBar = function(undoLabel, undoActive) {
   var L = app.getGameActionBarLayout();
   var ctx = app.ctx;
   var rBar = app.rpx(12);
+  var barIconFg = th.btnGhostText || '#3a3836';
   ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.05)';
-  ctx.shadowBlur = app.rpx(8);
-  ctx.shadowOffsetY = app.rpx(2);
+  if (th.id === 'ink' || th.id === 'mint') {
+    ctx.shadowColor =
+      th.id === 'mint'
+        ? 'rgba(20, 52, 62, 0.06)'
+        : 'rgba(50, 42, 34, 0.06)';
+    ctx.shadowBlur = app.rpx(5);
+    ctx.shadowOffsetY = app.rpx(1);
+  } else {
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.05)';
+    ctx.shadowBlur = app.rpx(8);
+    ctx.shadowOffsetY = app.rpx(2);
+  }
   if (th.id === 'ink') {
-    ctx.fillStyle = 'rgba(32, 28, 26, 0.94)';
-    ctx.strokeStyle = 'rgba(255, 248, 240, 0.08)';
+    /** 宣纸浅底 + 淡赭墨边，融入 fillAmbientBackground 暖纸色 */
+    ctx.fillStyle = 'rgba(252, 246, 238, 0.95)';
+    ctx.strokeStyle = 'rgba(92, 82, 72, 0.14)';
+  } else if (th.id === 'mint') {
+    /** 与 mint.bg[2] 乳白青釉底一致，弱化「悬浮卡片」 */
+    ctx.fillStyle = 'rgba(241, 247, 245, 0.96)';
+    ctx.strokeStyle = 'rgba(28, 58, 70, 0.11)';
   } else {
     ctx.fillStyle = '#ffffff';
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
@@ -867,7 +1121,11 @@ app.drawGameActionBar = function(undoLabel, undoActive) {
   var divTop = L.y0 + app.rpx(9);
   var divBot = L.y0 + L.barH - app.rpx(9);
   ctx.strokeStyle =
-    th.id === 'ink' ? 'rgba(255, 245, 235, 0.1)' : 'rgba(0, 0, 0, 0.08)';
+    th.id === 'ink'
+      ? 'rgba(72, 66, 58, 0.14)'
+      : th.id === 'mint'
+        ? 'rgba(28, 58, 70, 0.12)'
+        : 'rgba(0, 0, 0, 0.08)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   var divI;
@@ -918,11 +1176,13 @@ app.drawGameActionBar = function(undoLabel, undoActive) {
   /** 底栏图标底边对齐线（与文字间距固定） */
   var alignBottomY = labelY - labelFsPx * 0.5 - L.iconLabelGap;
   var minIconTop = L.y0 + app.rpx(6);
-  /** 浅色条统一深灰字；水墨底栏用浅色字 */
+  /** 浅色条深灰字；水墨 / 青瓷用主题 subtitle，与对战页字色一致 */
   var gameBarLabelColor =
     th.id === 'ink'
-      ? 'rgba(238, 230, 220, 0.98)'
-      : '#3a3836';
+      ? th.subtitle || '#585046'
+      : th.id === 'mint'
+        ? th.subtitle || '#3a5862'
+        : '#3a3836';
   var i;
   for (i = 0; i < cols.length; i++) {
     var col = cols[i];
@@ -948,7 +1208,18 @@ app.drawGameActionBar = function(undoLabel, undoActive) {
     var cx = L.centers[i];
     var colLeft = L.x0 + i * L.colW;
     if (i === 1 && undoActive && th.id === 'ink') {
-      ctx.fillStyle = 'rgba(255, 200, 120, 0.08)';
+      ctx.fillStyle = 'rgba(88, 78, 68, 0.1)';
+      app.roundRect(
+        colLeft + app.rpx(3),
+        L.y0 + app.rpx(4),
+        L.colW - app.rpx(6),
+        L.barH - app.rpx(8),
+        app.rpx(8)
+      );
+      ctx.fill();
+    }
+    if (i === 1 && undoActive && th.id === 'mint') {
+      ctx.fillStyle = 'rgba(28, 72, 84, 0.09)';
       app.roundRect(
         colLeft + app.rpx(3),
         L.y0 + app.rpx(4),
@@ -959,7 +1230,18 @@ app.drawGameActionBar = function(undoLabel, undoActive) {
       ctx.fill();
     }
     if (!pveBarOnly && i === 2 && drawOk && app.onlineDrawPending && th.id === 'ink') {
-      ctx.fillStyle = 'rgba(255, 200, 120, 0.08)';
+      ctx.fillStyle = 'rgba(88, 78, 68, 0.1)';
+      app.roundRect(
+        colLeft + app.rpx(3),
+        L.y0 + app.rpx(4),
+        L.colW - app.rpx(6),
+        L.barH - app.rpx(8),
+        app.rpx(8)
+      );
+      ctx.fill();
+    }
+    if (!pveBarOnly && i === 2 && drawOk && app.onlineDrawPending && th.id === 'mint') {
+      ctx.fillStyle = 'rgba(28, 72, 84, 0.09)';
       app.roundRect(
         colLeft + app.rpx(3),
         L.y0 + app.rpx(4),
@@ -978,7 +1260,7 @@ app.drawGameActionBar = function(undoLabel, undoActive) {
       cx,
       iconTopCol,
       sz,
-      th.btnGhostText
+      barIconFg
     );
     ctx.restore();
     ctx.save();
@@ -1286,9 +1568,9 @@ app.hitHomeBottomNav = function(clientX, clientY) {
     return null;
   }
   var innerW = app.W - pad * 2;
-  var colW = innerW / 4;
+  var colW = innerW / 3;
   var col = Math.floor((clientX - pad) / colW);
-  if (col < 0 || col > 3) {
+  if (col < 0 || col > 2) {
     return null;
   }
   return col;
@@ -1447,6 +1729,20 @@ app.handleUndoButtonTap = function() {
             app.pvpOnlineYourColor === app.onlineUndoRequesterColor
               ? '请等待对方处理'
               : '请在弹窗中同意或拒绝',
+          icon: 'none'
+        });
+      }
+      return;
+    }
+    if (
+      app.getOnlineUndoCooldownRemainingMs &&
+      app.getOnlineUndoCooldownRemainingMs() > 0
+    ) {
+      var remTap = app.getOnlineUndoCooldownRemainingMs();
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({
+          title:
+            '请等待 ' + Math.ceil(remTap / 1000) + ' 秒后再发起悔棋',
           icon: 'none'
         });
       }
@@ -2063,7 +2359,11 @@ wx.onTouchStart(function (e) {
     }
   }
 
-  if (app.screen === 'game' && app.isOnlineFriendMatchNotStarted()) {
+  if (
+    app.screen === 'game' &&
+    app.isOnlineFriendMatchNotStarted() &&
+    !app.gameOver
+  ) {
     if (app.hitGameButton(x, y) !== 'back') {
       if (typeof wx.showToast === 'function') {
         wx.showToast({ title: '对局未开始', icon: 'none' });
@@ -2076,6 +2376,10 @@ wx.onTouchStart(function (e) {
     app.screen === 'replay' ||
     (app.screen === 'history' && app.historyReplayOverlayVisible)
       ? null
+      : app.screen === 'game' &&
+        app.showResultOverlay &&
+        (app.gameOver || app.onlineResultOverlaySticky)
+      ? app.hitResultOverlayAvatar(x, y)
       : app.hitWhichGameBoardNameAvatar(x, y);
   if (boardAv === 'my') {
     app.showMyRatingModal();
@@ -2222,7 +2526,28 @@ wx.onTouchStart(function (e) {
 
   var gbtn = app.hitGameButton(x, y);
   if (gbtn === 'back') {
-    app.backToHome();
+    if (typeof app.shouldSkipOnlineLeaveConfirm === 'function' && app.shouldSkipOnlineLeaveConfirm()) {
+      app.backToHome();
+      return;
+    }
+    if (typeof wx.showModal === 'function') {
+      var leaveOnlineMidGame = app.isPvpOnline && !app.gameOver;
+      wx.showModal({
+        title: '离开对局',
+        content: leaveOnlineMidGame
+          ? '直接离开会断开连接，可能被判定为逃跑：天梯分将按规则扣减，并影响信誉与匹配。\n若要认输结束本局，请使用底栏「认输」。\n\n仍要离开吗？'
+          : '确定要离开当前对局吗？',
+        confirmText: '离开',
+        cancelText: '取消',
+        success: function (res) {
+          if (res.confirm) {
+            app.backToHome();
+          }
+        }
+      });
+    } else {
+      app.backToHome();
+    }
     return;
   }
   if (gbtn === 'undo') {
@@ -2489,7 +2814,7 @@ if (typeof wx.onTouchEnd === 'function') {
       app.homePressedDockCol = null;
       app.draw();
       if (endDock === pdc) {
-        if (pdc === 3) {
+        if (pdc === 2) {
           app.openPieceSkinModal();
           return;
         }
@@ -2562,18 +2887,6 @@ if (typeof wx.onTouchEnd === 'function') {
           return;
         }
         if (pdc === 1) {
-          authApi.ensureSession(function (sessOk) {
-            if (!sessOk || !authApi.getSessionToken()) {
-              if (typeof wx.showToast === 'function') {
-                wx.showToast({ title: '请先登录', icon: 'none' });
-              }
-              return;
-            }
-            app.showMyRatingModal();
-          });
-          return;
-        }
-        if (pdc === 2) {
           app.openHistoryScreen();
           return;
         }

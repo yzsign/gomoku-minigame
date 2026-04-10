@@ -54,26 +54,19 @@ def process_one(src_path, out_path, max_side=160):
 
 
 def main():
-    base = os.path.join(
-        os.environ.get("USERPROFILE", ""),
-        ".cursor",
-        "projects",
-        "d-work",
-        "assets",
+    """
+    从「黑底截图」生成 game-bar-*.png。源图放在 images/ui/ 下，文件名见 mapping；
+    或通过环境变量 GOMOKU_GAME_BAR_ICON_SRC 指定目录（默认 images/ui）。
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    base = os.environ.get("GOMOKU_GAME_BAR_ICON_SRC") or os.path.join(
+        here, "..", "images", "ui"
     )
+    base = os.path.abspath(base)
     mapping = [
-        (
-            "c__Users_yangz_AppData_Roaming_Cursor_User_workspaceStorage_71c4c0cdf71117a474b7575726553898_images_22-b906b883-3694-4a7c-9be7-367f289985c7.png",
-            "game-bar-home.png",
-        ),
-        (
-            "c__Users_yangz_AppData_Roaming_Cursor_User_workspaceStorage_71c4c0cdf71117a474b7575726553898_images_11-71c66254-041e-4878-83ce-8f94daa56eb4.png",
-            "game-bar-undo.png",
-        ),
-        (
-            "c__Users_yangz_AppData_Roaming_Cursor_User_workspaceStorage_71c4c0cdf71117a474b7575726553898_images_33-00b1ed18-26ce-42be-bd5c-0f0da05146f7.png",
-            "game-bar-resign.png",
-        ),
+        ("game-bar-home-src.png", "game-bar-home.png"),
+        ("game-bar-undo-src.png", "game-bar-undo.png"),
+        ("game-bar-resign-src.png", "game-bar-resign.png"),
     ]
     out_dir = os.path.join(os.path.dirname(__file__), "..", "images", "ui")
     max_side = 160

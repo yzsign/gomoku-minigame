@@ -39,15 +39,13 @@ def union_corner_flood_fills(bgr, lo=26, up=26):
 
 
 def main():
-    default_src = os.path.join(
-        os.environ.get("USERPROFILE", ""),
-        ".cursor",
-        "projects",
-        "d-work",
-        "assets",
-        "c__Users_yangz_AppData_Roaming_Cursor_User_workspaceStorage_71c4c0cdf71117a474b7575726553898_images_image-2cd9beb6-a1c8-490a-ab43-855058a0afbc.png",
-    )
-    src = sys.argv[1] if len(sys.argv) >= 2 else default_src
+    if len(sys.argv) < 2:
+        print(
+            "Usage: python cutout_flag_icon.py <source.png> [out.png]",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    src = sys.argv[1]
     out = (
         sys.argv[2]
         if len(sys.argv) >= 3

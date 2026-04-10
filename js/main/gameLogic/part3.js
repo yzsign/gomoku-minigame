@@ -1827,7 +1827,7 @@ function resultOverlayTitlePack(app) {
       mood = 'draw';
       main = '和局';
       if (app.onlineGameEndReason === 'TIME_DRAW') {
-        sub = '本局已超过10分钟';
+        sub = '本局已超过30分钟';
       }
       titleColor = rs.draw.title;
       break;
@@ -1949,6 +1949,51 @@ app.getResultOverlayLayout = function() {
     rematchDeclineCx: rematchDeclineCx
   };
 }
+
+/**
+ * 结算全屏层 VS 区方头像命中（与 getResultOverlayLayout 一致）。
+ * 联机为左我右对手；其余模式为左黑右白，按 getMyAssignedStoneColor 映射到 my/opp。
+ */
+app.hitResultOverlayAvatar = function(clientX, clientY) {
+  if (app.screen !== 'game') {
+    return null;
+  }
+  if (
+    !app.showResultOverlay ||
+    (!app.gameOver && !app.onlineResultOverlaySticky)
+  ) {
+    return null;
+  }
+  var ly = app.getResultOverlayLayout();
+  var pad = 10;
+  var half = ly.avatarS * 0.5 + pad;
+  function inSquare(cx, cy) {
+    return (
+      Math.abs(clientX - cx) <= half && Math.abs(clientY - cy) <= half
+    );
+  }
+  var hitLeft = inSquare(ly.vsLeftCx, ly.vsCy);
+  var hitRight = inSquare(ly.vsRightCx, ly.vsCy);
+  if (!hitLeft && !hitRight) {
+    return null;
+  }
+  if (hitLeft && hitRight) {
+    var dl =
+      Math.abs(clientX - ly.vsLeftCx) + Math.abs(clientY - ly.vsCy);
+    var dr =
+      Math.abs(clientX - ly.vsRightCx) + Math.abs(clientY - ly.vsCy);
+    hitLeft = dl <= dr;
+    hitRight = !hitLeft;
+  }
+  if (app.isPvpOnline) {
+    return hitLeft ? 'my' : 'opp';
+  }
+  var leftIsMe = app.getMyAssignedStoneColor() === gomoku.BLACK;
+  if (hitLeft) {
+    return leftIsMe ? 'my' : 'opp';
+  }
+  return leftIsMe ? 'opp' : 'my';
+};
 
 app.drawResultOverlay = function() {
   var th = app.getUiTheme();

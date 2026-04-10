@@ -319,7 +319,7 @@ app.fillAmbientBackground = function() {
     topLight.addColorStop(1, 'rgba(255, 255, 255, 0)');
   } else if (th.id === 'mint') {
     topLight.addColorStop(0, 'rgba(255, 255, 255, 0.52)');
-    topLight.addColorStop(0.4, 'rgba(170, 230, 238, 0.18)');
+    topLight.addColorStop(0.4, 'rgba(165, 224, 228, 0.16)');
     topLight.addColorStop(1, 'rgba(255, 255, 255, 0)');
   } else {
     topLight.addColorStop(0, 'rgba(255, 255, 255, 0.38)');
@@ -345,9 +345,9 @@ app.fillAmbientBackground = function() {
     vignette.addColorStop(0.78, 'rgba(200, 120, 70, 0.03)');
     vignette.addColorStop(1, 'rgba(160, 90, 50, 0.05)');
   } else if (th.id === 'mint') {
-    vignette.addColorStop(0, 'rgba(80, 200, 210, 0)');
-    vignette.addColorStop(0.74, 'rgba(30, 110, 125, 0.04)');
-    vignette.addColorStop(1, 'rgba(15, 70, 88, 0.07)');
+    vignette.addColorStop(0, 'rgba(70, 185, 195, 0)');
+    vignette.addColorStop(0.74, 'rgba(28, 95, 108, 0.04)');
+    vignette.addColorStop(1, 'rgba(14, 58, 68, 0.07)');
   } else {
     vignette.addColorStop(0, 'rgba(20, 18, 28, 0)');
     vignette.addColorStop(0.72, 'rgba(18, 16, 24, 0.04)');
@@ -391,7 +391,7 @@ app.fillHomeBackground = function(th) {
     topLight.addColorStop(1, 'rgba(255, 255, 255, 0)');
   } else if (th.id === 'mint') {
     topLight.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
-    topLight.addColorStop(0.36, 'rgba(180, 235, 240, 0.2)');
+    topLight.addColorStop(0.36, 'rgba(172, 228, 232, 0.18)');
     topLight.addColorStop(1, 'rgba(255, 255, 255, 0)');
   } else if (th.id === 'classic') {
     topLight.addColorStop(0, 'rgba(255, 255, 255, 0.52)');
@@ -421,9 +421,9 @@ app.fillHomeBackground = function(th) {
     vignette.addColorStop(0.76, 'rgba(210, 130, 80, 0.04)');
     vignette.addColorStop(1, 'rgba(170, 95, 55, 0.07)');
   } else if (th.id === 'mint') {
-    vignette.addColorStop(0, 'rgba(80, 200, 210, 0)');
-    vignette.addColorStop(0.74, 'rgba(30, 110, 125, 0.04)');
-    vignette.addColorStop(1, 'rgba(15, 70, 88, 0.07)');
+    vignette.addColorStop(0, 'rgba(70, 185, 195, 0)');
+    vignette.addColorStop(0.74, 'rgba(28, 95, 108, 0.04)');
+    vignette.addColorStop(1, 'rgba(14, 58, 68, 0.07)');
   } else {
     vignette.addColorStop(0, 'rgba(24, 20, 18, 0)');
     vignette.addColorStop(0.72, 'rgba(20, 18, 22, 0.035)');
@@ -434,7 +434,7 @@ app.fillHomeBackground = function(th) {
   if (th.id === 'mint') {
     var footM = app.ctx.createLinearGradient(0, app.H * 0.65, 0, app.H);
     footM.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    footM.addColorStop(1, 'rgba(160, 220, 228, 0.28)');
+    footM.addColorStop(1, 'rgba(148, 212, 218, 0.26)');
     app.ctx.fillStyle = footM;
     app.ctx.fillRect(0, 0, app.W, app.H);
   } else if (th.id === 'ink') {
@@ -1294,7 +1294,8 @@ app.drawHomeBottomDock = function(hl, th) {
   app.ctx.save();
   var dockFill;
   if (th.id === 'mint') {
-    dockFill = 'rgba(225, 246, 248, 0.9)';
+    /** 与 mint.bg 底部 #f1f7f5 一体，避免底栏色块跳脱 */
+    dockFill = 'rgba(241, 247, 245, 0.94)';
   } else if (th.id === 'ink') {
     dockFill = 'rgba(255, 248, 238, 0.82)';
   } else {
@@ -1307,6 +1308,10 @@ app.drawHomeBottomDock = function(hl, th) {
     topLine.addColorStop(0, 'rgba(42, 38, 34, 0)');
     topLine.addColorStop(0.5, 'rgba(42, 38, 34, 0.14)');
     topLine.addColorStop(1, 'rgba(42, 38, 34, 0)');
+  } else if (th.id === 'mint') {
+    topLine.addColorStop(0, 'rgba(28, 58, 70, 0)');
+    topLine.addColorStop(0.5, 'rgba(28, 58, 70, 0.1)');
+    topLine.addColorStop(1, 'rgba(28, 58, 70, 0)');
   } else {
     topLine.addColorStop(0, 'rgba(90, 72, 58, 0)');
     topLine.addColorStop(0.5, 'rgba(90, 72, 58, 0.12)');
@@ -1320,45 +1325,43 @@ app.drawHomeBottomDock = function(hl, th) {
   app.ctx.stroke();
   var labels = [
     app.isHomeCheckinDoneToday() ? '今日已签' : '每日签到',
-    '对战排行',
     '我的战绩',
     '杂货铺'
   ];
   var innerW = app.W - padH * 2;
-  var colW = innerW / 4;
+  var colW = innerW / 3;
   var baseX = padH;
   var iconBox = app.rpx(78);
   var iconY = y0 + app.rpx(34) + iconBox / 2;
   var s = iconBox * 0.14;
-  var colMidY = y0 + h * 0.42;
+  /** 文案基线与图标中心的中点，作按下缩放轴心（勿用整块底栏 colMidY，否则与图标行错位） */
+  var labelCy = iconY + iconBox / 2 + app.rpx(20);
+  var dockPivotY = (iconY + labelCy) * 0.5;
   var i;
-  for (i = 0; i < 4; i++) {
+  /** 三格对应原四格资源列 0、2、3（已去掉对战排行列） */
+  var dockImgs = [
+    app.homeDockCheckinImg,
+    app.homeDockHistoryImg,
+    app.homeDockSkinImg
+  ];
+  var dockDrawVec = [
+    app.drawHomeDockIconCheckin,
+    app.drawHomeDockIconHistory,
+    app.drawHomeDockIconSkin
+  ];
+  for (i = 0; i < 3; i++) {
     var cxi = baseX + colW * i + colW / 2;
     var pressed = app.homePressedDockCol === i;
     var stroke = pressed ? th.title : th.subtitle;
     app.ctx.save();
     if (pressed) {
-      app.ctx.translate(cxi, colMidY);
+      app.ctx.translate(cxi, dockPivotY);
       app.ctx.scale(0.96, 0.96);
-      app.ctx.translate(-cxi, -colMidY);
+      app.ctx.translate(-cxi, -dockPivotY);
       app.ctx.translate(0, app.rpx(2));
     }
-    if (i === 0) {
-      if (!app.drawHomeUiImageContain(app.homeDockCheckinImg, cxi, iconY, iconBox)) {
-        app.drawHomeDockIconCheckin(cxi, iconY, s, stroke);
-      }
-    } else if (i === 1) {
-      if (!app.drawHomeUiImageContain(app.homeDockRankImg, cxi, iconY, iconBox)) {
-        app.drawHomeDockIconRank(cxi, iconY, s, stroke);
-      }
-    } else if (i === 2) {
-      if (!app.drawHomeUiImageContain(app.homeDockHistoryImg, cxi, iconY, iconBox)) {
-        app.drawHomeDockIconHistory(cxi, iconY, s, stroke);
-      }
-    } else {
-      if (!app.drawHomeUiImageContain(app.homeDockSkinImg, cxi, iconY, iconBox)) {
-        app.drawHomeDockIconSkin(cxi, iconY, s, stroke);
-      }
+    if (!app.drawHomeUiImageContain(dockImgs[i], cxi, iconY, iconBox)) {
+      dockDrawVec[i](cxi, iconY, s, stroke);
     }
     app.ctx.font =
       app.rpx(24) +
@@ -1370,7 +1373,7 @@ app.drawHomeBottomDock = function(hl, th) {
     app.ctx.fillText(
       labels[i],
       app.snapPx(cxi),
-      app.snapPx(iconY + iconBox / 2 + app.rpx(20))
+      app.snapPx(labelCy)
     );
     app.ctx.restore();
     if (pressed) {
@@ -1703,17 +1706,17 @@ app.checkinModalThemePalette = function(th) {
   var id = th.id || 'classic';
   var weekBar =
     id === 'mint'
-      ? 'rgba(21, 61, 82, 0.1)'
+      ? 'rgba(20, 57, 66, 0.1)'
       : id === 'ink'
       ? 'rgba(36, 32, 24, 0.08)'
       : 'rgba(92, 71, 56, 0.1)';
   var cardStroke =
-    id === 'ink'
+    id === 'ink' || id === 'mint'
       ? 'rgba(255, 255, 255, 0.65)'
       : 'rgba(255, 255, 255, 0.88)';
   var primaryDis =
     id === 'mint'
-      ? 'rgba(95, 122, 144, 0.48)'
+      ? 'rgba(92, 118, 128, 0.48)'
       : id === 'ink'
       ? 'rgba(133, 122, 112, 0.45)'
       : 'rgba(148, 136, 120, 0.48)';

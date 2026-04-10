@@ -1,5 +1,5 @@
 /**
- * 界面风格：柔和渐变底 / 深色主按钮 / 高对比标题（棋院质感；背景略偏明快）
+ * 界面风格：柔和渐变底 / 深色主按钮 / 高对比标题（棋院质感；青瓷 / 水墨为解锁主题，全屏与匹配页跟随后台所选）
  * 设计稿宽度 750rpx（与 main 中 rpx() 一致）。
  * 檀木 classic 与青瓷 mint、水墨 ink 各有一套色板，互不覆盖。
  */
@@ -9,37 +9,39 @@ var THEMES = {
   mint: {
     id: 'mint',
     name: '青瓷',
-    /** 偏青绿湖水感，略提高饱和更轻快 */
-    bg: ['#dff5f4', '#d5f0f4', '#ecf8fb'],
-    title: '#153d52',
-    subtitle: '#3d5f78',
-    muted: '#5f7a90',
-    homeCards: ['#1d5f74', '#2f7f94', '#4a93a5'],
+    /** 乳白青釉底：米青偏暖，与棋盘乳白釉/钴青框一体，避免与高饱和湖水青割裂 */
+    bg: ['#e8f4f1', '#dfeee9', '#f1f7f5'],
+    title: '#143942',
+    subtitle: '#3a5862',
+    muted: '#5c7680',
+    homeCards: ['#1f5664', '#2e7586', '#44919f'],
     /** 首页「人机 / 好友」主按钮（与 homeCards 前两色一致，单列避免与其它用途混淆） */
-    homePve: '#1d5f74',
-    homeFriend: '#2f7f94',
-    btnPrimary: '#1d5f74',
-    btnPrimaryStroke: 'rgba(255,255,255,0.4)',
-    btnShadow: 'rgba(18, 72, 92, 0.2)',
-    btnGhostFill: 'rgba(255,255,255,0.82)',
+    homePve: '#1f5664',
+    homeFriend: '#2e7586',
+    btnPrimary: '#1f5664',
+    btnPrimaryStroke: 'rgba(255,255,255,0.42)',
+    btnShadow: 'rgba(12, 52, 64, 0.2)',
+    btnGhostFill: 'rgba(255,255,255,0.85)',
     btnGhostStroke: 'rgba(255,255,255,0.94)',
-    btnGhostText: '#4a6278',
+    btnGhostText: '#3d5664',
+    /** 匹配页「正在寻找对手…」动画点，与檀木分页点同级用途 */
+    pageIndicator: '#44919f',
     result: {
-      defaultEnd: '#f2f8f9',
-      win: { bg: '#d0e8ec', title: '#145a68' },
-      lose: { bg: '#e2eaf0', title: '#2d4a62' },
-      draw: { bg: '#eef2f0', title: '#6a6048' },
-      sub: '#6a7890',
-      secondaryFill: 'rgba(255,255,255,0.62)',
+      defaultEnd: '#f0f7f5',
+      win: { bg: '#cce8e4', title: '#134c56' },
+      lose: { bg: '#dfe8ec', title: '#2c4552' },
+      draw: { bg: '#ecf0ee', title: '#5c5a48' },
+      sub: '#627888',
+      secondaryFill: 'rgba(255,255,255,0.64)',
       secondaryStroke: 'rgba(255,255,255,0.92)',
-      secondaryText: '#4a5870'
+      secondaryText: '#465a68'
     },
     /* 盘面：乳白青釉；格线/星位与首页主色同系 */
     board: {
-      g0: '#f0f7f7',
-      g1: '#dce8ea',
-      line: '#7a9ea8',
-      star: '#3d7584',
+      g0: '#eef6f4',
+      g1: '#dae8e8',
+      line: '#7299a0',
+      star: '#2f6570',
       gridLineWidth: 1
     },
     pieces: {
@@ -51,13 +53,13 @@ var THEMES = {
       },
       white: {
         g0: '#fffffc',
-        gm: '#e8ecf2',
-        g1: '#c8d0dc',
-        stroke: '#7a8ca0'
+        gm: '#e8eef0',
+        g1: '#c8d4dc',
+        stroke: '#6d8a96'
       }
     },
-    status: '#2d5060',
-    hint: '#5f7a8a'
+    status: '#284854',
+    hint: '#5c7884'
   },
   classic: {
     id: 'classic',
@@ -134,6 +136,8 @@ var THEMES = {
     btnGhostFill: 'rgba(255,252,246,0.88)',
     btnGhostStroke: 'rgba(255,255,255,0.92)',
     btnGhostText: '#524a42',
+    /** 匹配页加载动画点，与青瓷 / 檀木同级（浅赭灰点缀） */
+    pageIndicator: '#8f8578',
     result: {
       defaultEnd: '#f2ede4',
       win: { bg: '#e0e4dc', title: '#2d3d32' },

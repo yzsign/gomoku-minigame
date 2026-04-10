@@ -318,6 +318,16 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
       L.avR,
       th
     );
+    if (typeof app.drawOnlineTurnClockRingBeforeBadge === 'function') {
+      app.drawOnlineTurnClockRingBeforeBadge(
+        ctx,
+        L.oppCx,
+        L.oppCy,
+        L.avR,
+        th,
+        false
+      );
+    }
     app.drawAvatarStoneBadge(
       ctx,
       L.oppCx,
@@ -337,6 +347,16 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
       L.avR,
       th
     );
+    if (typeof app.drawOnlineTurnClockRingBeforeBadge === 'function') {
+      app.drawOnlineTurnClockRingBeforeBadge(
+        ctx,
+        L.myCx,
+        L.myCy,
+        L.avR,
+        th,
+        true
+      );
+    }
     app.drawAvatarStoneBadge(
       ctx,
       L.myCx,
@@ -1077,6 +1097,12 @@ app.onlineSettleRetryTimer = null;
 app.onlineMatchRound = 1;
 /** 联机终局原因：TIME_DRAW | MOVE_TIMEOUT 等，与 STATE.gameEndReason 一致 */
 app.onlineGameEndReason = null;
+/** 联机读秒：与 STATE.clock* 一致；null 表示未下发（旧服务端） */
+app.onlineClockMoveDeadlineWallMs = null;
+app.onlineClockGameDeadlineWallMs = null;
+app.onlineClockPaused = false;
+/** 联机对局页倒计时刷新用 */
+app.onlineClockTickTimer = null;
 /**
  * 联机 STATE：双方执子皮肤（服务端广播）；null 兼容旧服务端，绘制时回退为统一使用 app.pieceSkinId
  */
@@ -1092,6 +1118,19 @@ app.isOnlineFriendMatchNotStarted = function() {
     app.isPvpOnline &&
     !app.isRandomMatch &&
     (!app.onlineBlackConnected || !app.onlineWhiteConnected)
+  );
+};
+
+/**
+ * 好友房且对方从未进房：离开无逃跑风险，底栏「离开」可不弹确认直接返回。
+ * 与 onlineFriendBothEverConnected 一致：双方曾同时在线后为 true，此后即使断线仍弹窗。
+ */
+app.shouldSkipOnlineLeaveConfirm = function() {
+  return (
+    app.isPvpOnline &&
+    !app.gameOver &&
+    !app.isRandomMatch &&
+    !app.onlineFriendBothEverConnected
   );
 };
 
@@ -1394,6 +1433,12 @@ app.disconnectOnline = function() {
   app.onlineSettleSent = false;
   app.onlineMatchRound = 1;
   app.onlineGameEndReason = null;
+  app.onlineClockMoveDeadlineWallMs = null;
+  app.onlineClockGameDeadlineWallMs = null;
+  app.onlineClockPaused = false;
+  if (typeof app.clearOnlineClockTick === 'function') {
+    app.clearOnlineClockTick();
+  }
   app.randomMatchHostCancelToken = '';
   app.onlineBlackPieceSkinId = null;
   app.onlineWhitePieceSkinId = null;
@@ -2289,6 +2334,16 @@ app.applyOnlineState = function(data) {
   } else {
     app.onlineGameEndReason = null;
   }
+  function readClockMs(v) {
+    if (v === undefined || v === null) {
+      return null;
+    }
+    var n = Number(v);
+    return isNaN(n) ? null : n;
+  }
+  app.onlineClockMoveDeadlineWallMs = readClockMs(data.clockMoveDeadlineWallMs);
+  app.onlineClockGameDeadlineWallMs = readClockMs(data.clockGameDeadlineWallMs);
+  app.onlineClockPaused = !!data.clockPaused;
   if (data.matchRound !== undefined && data.matchRound !== null) {
     var mr = Number(data.matchRound);
     if (!isNaN(mr) && mr >= 1) {

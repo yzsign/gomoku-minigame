@@ -366,9 +366,9 @@ function drawQinghuaInnerPattern(ctx, ibx, iby, ibw, ibh) {
  */
 function drawQinghuaProceduralFallback(ctx, ibx, iby, ibw, ibh, cell) {
   var u = Math.min(ibw, ibh);
-  var ink = 'rgba(28, 58, 108, 0.12)';
-  var inkSoft = 'rgba(28, 58, 108, 0.075)';
-  var inkFill = 'rgba(28, 58, 108, 0.055)';
+  var ink = 'rgba(22, 56, 78, 0.12)';
+  var inkSoft = 'rgba(22, 56, 78, 0.075)';
+  var inkFill = 'rgba(22, 56, 78, 0.055)';
   var lw = Math.max(0.55, cell * 0.02);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -445,7 +445,7 @@ function drawQinghuaProceduralFallback(ctx, ibx, iby, ibw, ibh, cell) {
     }
   }
 
-  ctx.strokeStyle = 'rgba(28, 58, 108, 0.07)';
+  ctx.strokeStyle = 'rgba(22, 56, 78, 0.07)';
   ctx.lineWidth = lw * 0.45;
   var w;
   for (w = 0; w < 3; w++) {
@@ -476,10 +476,10 @@ function fillCeladonPorcelainBoard(ctx, bx, by, boardW, boardH, br, cell) {
 
   /* 外框：左上受光略亮、右下偏沉，做出厚度 */
   var fg = ctx.createLinearGradient(bx, by, bx + boardW * 1.05, by + boardH * 1.05);
-  fg.addColorStop(0, '#3d72a8');
-  fg.addColorStop(0.38, '#2e5c90');
-  fg.addColorStop(0.72, '#264d7c');
-  fg.addColorStop(1, '#1f3f68');
+  fg.addColorStop(0, '#3a6f90');
+  fg.addColorStop(0.38, '#2c5f82');
+  fg.addColorStop(0.72, '#245274');
+  fg.addColorStop(1, '#1d4562');
   ctx.fillStyle = fg;
   pathRoundRect(ctx, bx, by, boardW, boardH, br);
   ctx.fill();
@@ -580,10 +580,10 @@ function fillCeladonPorcelainBoard(ctx, bx, by, boardW, boardH, br, cell) {
   var rad = Math.max(ibw, ibh) * 0.72;
   var pg = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
   /* 乳白釉整体偏淡；中心略亮、边缘略沉，呈浅碟形 */
-  pg.addColorStop(0, '#f4f8fc');
-  pg.addColorStop(0.38, '#eef4fa');
-  pg.addColorStop(0.72, '#e4ecf6');
-  pg.addColorStop(1, '#d8e2ee');
+  pg.addColorStop(0, '#f2f7f6');
+  pg.addColorStop(0.38, '#ecf3f4');
+  pg.addColorStop(0.72, '#e2ebee');
+  pg.addColorStop(1, '#d5e2e8');
   ctx.fillStyle = pg;
   ctx.fillRect(ibx, iby, ibw, ibh);
   if (qinghuaPatternImg && qinghuaPatternImg.width && qinghuaPatternImg.height) {
@@ -605,13 +605,13 @@ function fillCeladonPorcelainBoard(ctx, bx, by, boardW, boardH, br, cell) {
     ibx + ibw * 0.38,
     iby + ibh * 0.38
   );
-  amb.addColorStop(0, 'rgba(28, 48, 82, 0.1)');
-  amb.addColorStop(0.4, 'rgba(28, 48, 82, 0.035)');
-  amb.addColorStop(1, 'rgba(28, 48, 82, 0)');
+  amb.addColorStop(0, 'rgba(24, 52, 72, 0.1)');
+  amb.addColorStop(0.4, 'rgba(24, 52, 72, 0.035)');
+  amb.addColorStop(1, 'rgba(24, 52, 72, 0)');
   ctx.fillStyle = amb;
   ctx.fillRect(ibx, iby, ibw, ibh);
   /* 内沿一圈浅凹槽感 */
-  ctx.strokeStyle = 'rgba(25, 45, 78, 0.14)';
+  ctx.strokeStyle = 'rgba(22, 48, 68, 0.14)';
   ctx.lineWidth = 1;
   pathRoundRect(ctx, ibx + 0.5, iby + 0.5, ibw - 1, ibh - 1, Math.max(3, brInner - 0.5));
   ctx.stroke();
@@ -704,7 +704,7 @@ function drawBoard(ctx, layout, theme) {
     theme.id === 'classic'
       ? 'rgba(72, 54, 38, 0.48)'
       : theme.id === 'mint'
-        ? 'rgba(32, 58, 98, 0.32)'
+        ? 'rgba(26, 52, 74, 0.34)'
         : theme.id === 'ink'
           ? 'rgba(42, 38, 34, 0.3)'
           : 'rgba(0, 0, 0, 0.16)';
