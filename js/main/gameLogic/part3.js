@@ -300,7 +300,7 @@ app.drawCheckinModalOverlay = function(th) {
   app.ctx.shadowOffsetY = 0;
 
   app.ctx.strokeStyle =
-    checkinShellThemeId === 'ink'
+    checkinShellThemeId === 'ink' || checkinShellThemeId === 'mint'
       ? 'rgba(255, 248, 240, 0.4)'
       : 'rgba(255,255,255,0.55)';
   app.ctx.lineWidth = app.rpx(2);
@@ -1061,6 +1061,41 @@ app.resetGame = function() {
 }
 
 /**
+ * 终局结算后是否应禁止「再来一局」：对方已离开或仅己方仍在线。
+ * 除 onlineOpponentLeft / 逃跑终局 resultKind 外，也看 STATE 里双方 connected，
+ * 避免胜局后对方下线但标志未带上「已离开」时仍误发邀请。
+ */
+app.isOnlineOpponentGoneForRematch = function() {
+  if (!app.isPvpOnline) {
+    return false;
+  }
+  if (app.onlineOpponentLeft || app.resultKind === 'online_opponent_left') {
+    return true;
+  }
+  if (app.onlineOpponentIsBot) {
+    return false;
+  }
+  var oppGone =
+    app.pvpOnlineYourColor === app.BLACK
+      ? !app.onlineWhiteConnected && app.onlineBlackConnected
+      : !app.onlineBlackConnected && app.onlineWhiteConnected;
+  return !!oppGone;
+};
+
+app.notifyCannotOnlineRematchOpponentLeft = function() {
+  if (typeof wx.showModal === 'function') {
+    wx.showModal({
+      title: '无法再来一局',
+      content: '对方已离开，无法发起再来一局邀请。',
+      showCancel: false,
+      confirmText: '知道了'
+    });
+  } else if (typeof wx.showToast === 'function') {
+    wx.showToast({ title: '对方已离开，无法再来一局', icon: 'none' });
+  }
+};
+
+/**
  * 再来一局：发 WebSocket 消息。使用 type RESET，与已部署的旧版云托管兼容；
  * 新版服务端将 RESET 与 REMATCH_REQUEST 同样视为「再来一局」邀请。
  */
@@ -1071,10 +1106,8 @@ app.sendOnlineRematchRequest = function() {
     }
     return;
   }
-  if (app.onlineOpponentLeft) {
-    if (typeof wx.showToast === 'function') {
-      wx.showToast({ title: '对方已离开，无法再来一局', icon: 'none' });
-    }
+  if (app.isOnlineOpponentGoneForRematch()) {
+    app.notifyCannotOnlineRematchOpponentLeft();
     return;
   }
   if (
@@ -1500,6 +1533,7 @@ app.maybeRequestOnlineGameSettle = function() {
       {
         success: function (res) {
           if (res.statusCode === 409) {
+            app.onlineSettleSent = false;
             return;
           }
           if (res.statusCode !== 200) {
@@ -1514,6 +1548,18 @@ app.maybeRequestOnlineGameSettle = function() {
               d = null;
             }
           }
+          if (
+            d &&
+            typeof d === 'object' &&
+            d.data &&
+            typeof d.data === 'object' &&
+            d.blackEloAfter === undefined &&
+            d.whiteEloAfter === undefined &&
+            d.black_elo_after === undefined &&
+            d.white_elo_after === undefined
+          ) {
+            d = d.data;
+          }
           function settleNum(v) {
             if (typeof v === 'number' && !isNaN(v)) {
               return v;
@@ -1521,17 +1567,27 @@ app.maybeRequestOnlineGameSettle = function() {
             var n = Number(v);
             return !isNaN(n) ? n : NaN;
           }
+          function numField(obj, camel, snake) {
+            if (!obj) {
+              return NaN;
+            }
+            var v = obj[camel];
+            if (v === undefined && snake) {
+              v = obj[snake];
+            }
+            return settleNum(v);
+          }
           if (d && d.gameId !== undefined && d.gameId !== null) {
             var gid = Number(d.gameId);
             if (!isNaN(gid)) {
               app.lastSettledGameId = gid;
             }
           }
-          var bAfter = d ? settleNum(d.blackEloAfter) : NaN;
-          var wAfter = d ? settleNum(d.whiteEloAfter) : NaN;
+          var bAfter = numField(d, 'blackEloAfter', 'black_elo_after');
+          var wAfter = numField(d, 'whiteEloAfter', 'white_elo_after');
           if (d && isFinite(bAfter) && isFinite(wAfter)) {
-            var bDelta = settleNum(d.blackEloDelta);
-            var wDelta = settleNum(d.whiteEloDelta);
+            var bDelta = numField(d, 'blackEloDelta', 'black_elo_delta');
+            var wDelta = numField(d, 'whiteEloDelta', 'white_elo_delta');
             app.lastSettleRating = {
               blackEloAfter: Math.round(bAfter),
               whiteEloAfter: Math.round(wAfter),
@@ -1546,6 +1602,8 @@ app.maybeRequestOnlineGameSettle = function() {
               app.homeRatingEloCache = mineAfter;
             }
             app.draw();
+          } else {
+            app.onlineSettleSent = false;
           }
         },
         fail: function () {
@@ -1574,8 +1632,29 @@ app.openResult = function() {
   app.clearWinRevealTimer();
   app.winningLineCells = null;
   if (app.isPvpOnline) {
-    var keepOppLeftKind = app.resultKind === 'online_opponent_left';
+    /** 和棋/认输等终局后 winner 与「逃跑胜」不一致时，不得以 online_opponent_left 盖住服务端结果 */
+    var keepOppLeftKind =
+      app.resultKind === 'online_opponent_left' &&
+      app.winner != null &&
+      app.winner === app.pvpOnlineYourColor;
+    if (app.onlineSettleRetryTimer != null) {
+      clearTimeout(app.onlineSettleRetryTimer);
+      app.onlineSettleRetryTimer = null;
+    }
     app.maybeRequestOnlineGameSettle();
+    app.onlineSettleRetryTimer = setTimeout(function () {
+      app.onlineSettleRetryTimer = null;
+      if (
+        app.showResultOverlay &&
+        app.isPvpOnline &&
+        app.gameOver &&
+        !app.lastSettleRating &&
+        authApi.getSessionToken()
+      ) {
+        app.onlineSettleSent = false;
+        app.maybeRequestOnlineGameSettle();
+      }
+    }, 1600);
     if (!keepOppLeftKind) {
       if (app.winner === null) {
         app.resultKind = 'online_draw';
@@ -1731,21 +1810,30 @@ function resultOverlayTitlePack(app) {
     case 'online_win':
       mood = 'win';
       main = app.winner === gomoku.WHITE ? '白棋获胜' : '黑棋获胜';
+      if (app.onlineGameEndReason === 'MOVE_TIMEOUT') {
+        sub = '对方思考超时';
+      }
       titleColor = rs.win.title;
       break;
     case 'online_lose':
       mood = 'lose';
       main = '失败';
+      if (app.onlineGameEndReason === 'MOVE_TIMEOUT') {
+        sub = '思考超时判负';
+      }
       titleColor = rs.lose.title;
       break;
     case 'online_draw':
       mood = 'draw';
       main = '和局';
+      if (app.onlineGameEndReason === 'TIME_DRAW') {
+        sub = '本局已超过10分钟';
+      }
       titleColor = rs.draw.title;
       break;
     case 'online_opponent_left':
       mood = 'win';
-      main = '对方离开';
+      main = app.winner === gomoku.WHITE ? '白棋获胜' : '黑棋获胜';
       titleColor = rs.win.title;
       break;
     default:

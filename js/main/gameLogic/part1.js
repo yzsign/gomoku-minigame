@@ -533,7 +533,7 @@ app.themeBubbleRafId = null;
 app.homeDrawerOpen = false;
 /** 首页三主按钮按下态：'random' | 'pvp' | 'pve' | null（松手在同类按钮上才触发逻辑） */
 app.homePressedButton = null;
-/** 首页底部 Dock 按下列：0～3 或 null（与 hitHomeBottomNav 一致：签、对战排行、战绩、杂货铺） */
+/** 首页底部 Dock 按下列：0～2 或 null（与 hitHomeBottomNav 一致：签、战绩、杂货铺） */
 app.homePressedDockCol = null;
 
 /** 我的战绩页：本机最近对局 + 滚动 */
@@ -929,18 +929,10 @@ app.getReplayPiecePairThemes = function(baseTheme) {
 }
 
 /**
- * 随机匹配页、联机随机/好友对局内固定檀木界面色；首页与棋谱等仍跟随后台所选主题。
+ * 界面用主题：全屏跟随后台所选界面风格（檀木 / 青瓷 / 水墨）。
+ * 含随机匹配页、联机随机/好友对战对局与结算层，与首页一致。
  */
 app.getUiTheme = function() {
-  if (app.screen === 'matching') {
-    return themes.getTheme('classic');
-  }
-  if (app.screen === 'history') {
-    return app.getCurrentTheme();
-  }
-  if (app.screen === 'game' && (app.isPvpOnline || app.isRandomMatch)) {
-    return themes.getTheme('classic');
-  }
   return app.getCurrentTheme();
 }
 
@@ -1059,6 +1051,11 @@ app.onlineBlackConnected = false;
 app.onlineWhiteConnected = false;
 /** 对方曾在线后断开，用于状态栏「对方已离开房间」 */
 app.onlineOpponentLeft = false;
+/**
+ * 好友房（非随机匹配）：是否曾出现「黑、白双方都在线」。
+ * 用于避免好友尚未进房时误判「对方离开 / 逃跑」终局与结算 runaway。
+ */
+app.onlineFriendBothEverConnected = false;
 app.socketTask = null;
 /** WebSocket 已 onOpen，可 send；断线后为 false，用于重连提示与拦截落子 */
 app.onlineWsConnected = false;
@@ -1074,8 +1071,12 @@ app.onlineWsEverOpened = false;
 app.onlineInviteConsumed = false;
 /** 本局是否已请求 POST /api/games/settle（防重复；新局由 applyOnlineState 置 false） */
 app.onlineSettleSent = false;
+/** 结算分未返回时延迟补拉一次 settle（仅一局内有效；离开房间时清除） */
+app.onlineSettleRetryTimer = null;
 /** 与 WS STATE.matchRound 一致：首局 1，再来一局后递增，用于结算上报 */
 app.onlineMatchRound = 1;
+/** 联机终局原因：TIME_DRAW | MOVE_TIMEOUT 等，与 STATE.gameEndReason 一致 */
+app.onlineGameEndReason = null;
 /**
  * 联机 STATE：双方执子皮肤（服务端广播）；null 兼容旧服务端，绘制时回退为统一使用 app.pieceSkinId
  */
@@ -1249,6 +1250,43 @@ app.onlineUndoCancelPending = false;
 app.onlineDrawCancelPending = false;
 app.onlineDrawPending = false;
 app.onlineDrawRequesterColor = null;
+/** 联机（随机匹配 / 好友房）：上次发起悔棋申请后的冷却截止时刻；人机与同桌不用 */
+app.ONLINE_UNDO_COOLDOWN_MS = 10000;
+app.onlineUndoCooldownUntilMs = 0;
+app.onlineUndoCooldownTimer = null;
+
+app.clearOnlineUndoCooldownTimer = function() {
+  if (app.onlineUndoCooldownTimer != null) {
+    clearInterval(app.onlineUndoCooldownTimer);
+    app.onlineUndoCooldownTimer = null;
+  }
+};
+
+app.getOnlineUndoCooldownRemainingMs = function() {
+  if (!app.onlineUndoCooldownUntilMs) {
+    return 0;
+  }
+  var r = app.onlineUndoCooldownUntilMs - Date.now();
+  return r > 0 ? r : 0;
+};
+
+app.startOnlineUndoCooldownTicker = function() {
+  app.clearOnlineUndoCooldownTimer();
+  app.onlineUndoCooldownTimer = setInterval(function() {
+    if (
+      app.screen !== 'game' ||
+      !app.isPvpOnline ||
+      !app.getOnlineUndoCooldownRemainingMs()
+    ) {
+      app.clearOnlineUndoCooldownTimer();
+      if (app.screen === 'game' && app.isPvpOnline) {
+        app.draw();
+      }
+      return;
+    }
+    app.draw();
+  }, 1000);
+};
 
 /* ---------- 联机：WebSocket 与房间 ---------- */
 
@@ -1327,8 +1365,13 @@ app.disconnectOnline = function() {
   app.onlineReconnectAttempt = 0;
   app.onlineSocketConnectGen++;
   app.onlineWsEverOpened = false;
+  if (app.onlineSettleRetryTimer != null) {
+    clearTimeout(app.onlineSettleRetryTimer);
+    app.onlineSettleRetryTimer = null;
+  }
   app.onlineResultOverlaySticky = false;
   app.onlineOpponentLeft = false;
+  app.onlineFriendBothEverConnected = false;
   app.closeSocketOnly();
   app.stopReplayAuto();
   app.onlineMoveHistory = [];
@@ -1343,11 +1386,14 @@ app.disconnectOnline = function() {
   app.onlineOpponentIsBot = false;
   app.onlineUndoPending = false;
   app.onlineUndoRequesterColor = null;
+  app.onlineUndoCooldownUntilMs = 0;
+  app.clearOnlineUndoCooldownTimer();
   app.onlineDrawPending = false;
   app.onlineDrawRequesterColor = null;
   app.onlineRematchRequesterColor = null;
   app.onlineSettleSent = false;
   app.onlineMatchRound = 1;
+  app.onlineGameEndReason = null;
   app.randomMatchHostCancelToken = '';
   app.onlineBlackPieceSkinId = null;
   app.onlineWhitePieceSkinId = null;
@@ -1912,12 +1958,31 @@ app.sendOnlineUndo = function(msgType) {
     wx.showToast({ title: '网络未连接', icon: 'none' });
     return;
   }
+  if (msgType === 'UNDO_REQUEST') {
+    var remCd = app.getOnlineUndoCooldownRemainingMs();
+    if (remCd > 0) {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({
+          title: '请等待 ' + Math.ceil(remCd / 1000) + ' 秒后再发起悔棋',
+          icon: 'none'
+        });
+      }
+      return;
+    }
+  }
   if (msgType === 'UNDO_CANCEL') {
     app.onlineUndoCancelPending = true;
   }
   app.socketTask.send({
     data: JSON.stringify({ type: msgType })
   });
+  if (msgType === 'UNDO_REQUEST') {
+    app.onlineUndoCooldownUntilMs = Date.now() + app.ONLINE_UNDO_COOLDOWN_MS;
+    app.startOnlineUndoCooldownTicker();
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+  }
 }
 
 /** 同桌：画布上显示同意/拒绝。联机改由弹框处理，不再画此行。 */
@@ -2185,6 +2250,8 @@ app.applyOnlineState = function(data) {
   var prevBlack = app.onlineBlackConnected;
   var prevWhite = app.onlineWhiteConnected;
   var wasOver = app.gameOver;
+  /** 本帧应用 STATE 前快照；用于终局后服务端修正胜负/和棋时重新弹出结算（如先误判断线再收到和棋） */
+  var prevWinner = app.winner;
   var prevBoard = app.copyBoardFromServer(app.board);
   var prevStoneCount = app.countStonesOnBoard(prevBoard);
   var prevWasMyUndoRequest =
@@ -2212,6 +2279,15 @@ app.applyOnlineState = function(data) {
   app.gameOver = !!data.gameOver;
   if (!app.gameOver) {
     app.onlineSettleSent = false;
+    app.onlineGameEndReason = null;
+  } else if (
+    data.gameEndReason !== undefined &&
+    data.gameEndReason !== null &&
+    String(data.gameEndReason).trim() !== ''
+  ) {
+    app.onlineGameEndReason = String(data.gameEndReason).trim();
+  } else {
+    app.onlineGameEndReason = null;
   }
   if (data.matchRound !== undefined && data.matchRound !== null) {
     var mr = Number(data.matchRound);
@@ -2248,6 +2324,15 @@ app.applyOnlineState = function(data) {
   if (data.whiteIsBot !== undefined && data.whiteIsBot !== null) {
     app.onlineOpponentIsBot = !!data.whiteIsBot;
   }
+  if (
+    app.isPvpOnline &&
+    !app.isRandomMatch &&
+    !app.onlineOpponentIsBot &&
+    app.onlineBlackConnected &&
+    app.onlineWhiteConnected
+  ) {
+    app.onlineFriendBothEverConnected = true;
+  }
   if (app.isPvpOnline && (app.screen === 'game' || app.screen === 'matching')) {
     var yc = app.pvpOnlineYourColor;
     var oppWas = yc === app.BLACK ? prevWhite : prevBlack;
@@ -2267,7 +2352,8 @@ app.applyOnlineState = function(data) {
         (data.winner === undefined || data.winner === null) &&
         prevBlack &&
         prevWhite &&
-        !app.onlineOpponentIsBot
+        !app.onlineOpponentIsBot &&
+        (app.isRandomMatch || app.onlineFriendBothEverConnected)
       ) {
         finishDueToOppLeave = true;
       }
@@ -2427,6 +2513,28 @@ app.applyOnlineState = function(data) {
       }
       return;
     }
+    app.openResult();
+    return;
+  }
+  if (
+    app.isPvpOnline &&
+    app.screen === 'game' &&
+    app.gameOver &&
+    wasOver &&
+    (function () {
+      var pa = prevWinner === null || prevWinner === undefined;
+      var pb = app.winner === null || app.winner === undefined;
+      if (pa && pb) {
+        return false;
+      }
+      if (pa !== pb) {
+        return true;
+      }
+      return prevWinner !== app.winner;
+    })()
+  ) {
+    app.onlineSettleSent = false;
+    app.lastSettleRating = null;
     app.openResult();
     return;
   }
