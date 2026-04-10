@@ -504,6 +504,18 @@ app.drawHomeContentBelowPieceSkinModal = function() {
 
   app.drawHomeMascotAsset(hl.mascotCx, hl.mascotCy, mascotBox);
 
+  if (app.userIsAdmin) {
+    var tipY = hl.bottomNavTop - app.rpx(30);
+    render.drawText(
+      app.ctx,
+      '残局管理：左上角菜单或左缘右滑打开侧栏',
+      hl.cx,
+      tipY,
+      app.rpx(22),
+      th.muted != null ? th.muted : th.subtitle
+    );
+  }
+
   app.drawHomeReferencePill(
     hl.cx,
     hl.yRandom,

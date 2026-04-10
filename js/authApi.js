@@ -11,6 +11,15 @@ var defaultAvatars = require('./defaultAvatars.js');
 
 var SESSION_TOKEN_KEY = 'gomoku_session_token';
 
+/** 静默登录 wx.request 成功回调后触发（loginOk, payload），用于同步管理员标记等 */
+var silentLoginCompleteListeners = [];
+
+function onSilentLoginComplete(fn) {
+  if (typeof fn === 'function') {
+    silentLoginCompleteListeners.push(fn);
+  }
+}
+
 function hasValidSessionToken(payload) {
   return (
     payload &&
@@ -137,8 +146,15 @@ function silentLogin(optionalProfile, onDone) {
               payload || res.data
             );
           }
+          var payFinal = payload || res.data;
+          var li;
+          for (li = 0; li < silentLoginCompleteListeners.length; li++) {
+            try {
+              silentLoginCompleteListeners[li](loginOk, payFinal);
+            } catch (eCb) {}
+          }
           if (typeof onDone === 'function') {
-            onDone(loginOk, payload || res.data);
+            onDone(loginOk, payFinal);
           }
         },
         fail: function (err) {
@@ -164,4 +180,5 @@ module.exports = {
   ensureSession: ensureSession,
   getSessionToken: getSessionToken,
   persistSession: persistSession,
+  onSilentLoginComplete: onSilentLoginComplete,
 };

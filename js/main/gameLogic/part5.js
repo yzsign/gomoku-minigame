@@ -3142,6 +3142,9 @@ if (typeof wx.onTouchEnd === 'function') {
     ) {
       app.homeDrawerOpen = true;
       app.draw();
+      if (typeof app.refreshAdminStatus === 'function') {
+        app.refreshAdminStatus();
+      }
     }
   });
 }

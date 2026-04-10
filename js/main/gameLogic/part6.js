@@ -12,6 +12,20 @@ module.exports = function register(app, deps) {
   var ratingTitle = deps.ratingTitle;
   var wx = deps.wx;
 
+  authApi.onSilentLoginComplete(function (loginOk, payload) {
+    if (!loginOk || !payload) {
+      return;
+    }
+    if (payload.admin === true) {
+      app.userIsAdmin = true;
+    } else if (payload.admin === false) {
+      app.userIsAdmin = false;
+    }
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+  });
+
 app.setupShareMessage = function() {
   if (typeof wx.onShareAppMessage === 'function') {
     wx.onShareAppMessage(function () {
@@ -471,7 +485,9 @@ function fetchAdminStatusFromServer() {
               d = null;
             }
           }
-          app.userIsAdmin = res.statusCode === 200 && d && d.admin === true;
+          if (res.statusCode === 200 && d && typeof d.admin === 'boolean') {
+            app.userIsAdmin = d.admin === true;
+          }
           app.draw();
         }
       })
@@ -480,5 +496,7 @@ function fetchAdminStatusFromServer() {
 }
 
 app.refreshAdminStatus = fetchAdminStatusFromServer;
-setTimeout(fetchAdminStatusFromServer, 500);
+[600, 2000, 4500].forEach(function (ms) {
+  setTimeout(fetchAdminStatusFromServer, ms);
+});
 };
