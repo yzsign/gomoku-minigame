@@ -108,6 +108,9 @@ app.getMyDisplayName = function() {
 }
 
 app.getOpponentDisplayName = function() {
+  if (app.isPvpOnline && app.onlineOpponentIsBot) {
+    return '电脑';
+  }
   if (app.isPvpOnline && app.onlineOppNickname) {
     return app.onlineOppNickname;
   }
@@ -2834,8 +2837,19 @@ app.applyOnlineState = function(data) {
   }
   app.onlineBlackConnected = !!data.blackConnected;
   app.onlineWhiteConnected = !!data.whiteConnected;
-  if (data.whiteIsBot !== undefined && data.whiteIsBot !== null) {
+  if (
+    data.whiteIsBot !== undefined &&
+    data.whiteIsBot !== null &&
+    data.blackIsBot !== undefined &&
+    data.blackIsBot !== null
+  ) {
+    app.onlineOpponentIsBot = !!data.whiteIsBot || !!data.blackIsBot;
+  } else if (data.whiteIsBot !== undefined && data.whiteIsBot !== null) {
     app.onlineOpponentIsBot = !!data.whiteIsBot;
+  } else if (data.blackIsBot !== undefined && data.blackIsBot !== null) {
+    app.onlineOpponentIsBot = !!data.blackIsBot;
+  } else {
+    app.onlineOpponentIsBot = false;
   }
   if (
     app.isPvpOnline &&

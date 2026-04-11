@@ -202,7 +202,7 @@ app.startPuzzleFriendInvite = function() {
           app.exitAdminPuzzleScreen();
           app.onlineRoomId = d.roomId;
           app.onlineToken = d.blackToken || d.spectatorToken;
-          app.onlineSpectatorMode = false;
+          app.onlineSpectatorMode = true;
           app.onlinePuzzleFriendRoom = true;
           app.pvpOnlineYourColor = app.BLACK;
           app.isPvpLocal = false;
@@ -239,7 +239,8 @@ app.startPuzzleFriendInvite = function() {
 };
 
 /**
- * 每日残局：按当前盘面与「下一手」创建好友房；房主执黑、好友执白；好友进房后服务端重置为邀请时残局。
+ * 每日残局：按当前盘面与「下一手」创建好友房；房主仅旁观（spectator token），好友执白与人机对局；
+ * 好友进房后服务端重置棋盘并启用黑/白人机。
  */
 app.startDailyPuzzleFriendInvite = function() {
   if (!app.isDailyPuzzle || !app.board) {
@@ -301,7 +302,7 @@ app.startDailyPuzzleFriendInvite = function() {
           app.onlineResultOverlaySticky = false;
           app.onlineRoomId = d.roomId;
           app.onlineToken = d.blackToken || d.spectatorToken;
-          app.onlineSpectatorMode = false;
+          app.onlineSpectatorMode = true;
           app.onlinePuzzleFriendRoom = true;
           app.pvpOnlineYourColor = app.BLACK;
           app.isPvpLocal = false;

@@ -638,6 +638,12 @@ app.draw = function() {
       } else {
         status = '对方申请悔棋（' + urOn + '方），请在弹窗中选择';
       }
+    } else if (app.onlineOpponentIsBot) {
+      if (app.current === app.pvpOnlineYourColor) {
+        status = '轮到你（' + sideName + '）';
+      } else {
+        status = '「电脑」思考中…';
+      }
     } else if (app.current === app.pvpOnlineYourColor) {
       status = '轮到你（' + sideName + '）';
     } else {
