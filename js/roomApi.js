@@ -183,6 +183,21 @@ function meDailyPuzzleHintOptions() {
   };
 }
 
+/** POST /api/me/puzzle-friend-room body: { board: number[][], sideToMove: 1|2 } */
+function mePuzzleFriendRoomOptions(boardArr, sideToMove) {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/puzzle-friend-room',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify({
+      board: boardArr,
+      sideToMove: sideToMove
+    })
+  };
+}
+
 /** GET /api/me/game-history?limit=&offset=&result=：已结算对局列表；result 可选 WIN|LOSS */
 function meGameHistoryOptions(limit, offset, result) {
   var lim =
@@ -344,6 +359,7 @@ module.exports = {
   meDailyPuzzleTodayOptions: meDailyPuzzleTodayOptions,
   meDailyPuzzleSubmitOptions: meDailyPuzzleSubmitOptions,
   meDailyPuzzleHintOptions: meDailyPuzzleHintOptions,
+  mePuzzleFriendRoomOptions: mePuzzleFriendRoomOptions,
   meGameHistoryOptions: meGameHistoryOptions,
   meCheckinOptions: meCheckinOptions,
   mePieceSkinRedeemOptions: mePieceSkinRedeemOptions,

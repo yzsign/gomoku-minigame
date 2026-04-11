@@ -599,6 +599,19 @@ app.draw = function() {
       status = app.onlineWsEverOpened
         ? '连接中断，正在重连…'
         : '正在连接服务器…';
+    } else if (app.onlineSpectatorMode) {
+      if (app.onlineOpponentLeft) {
+        status = '好友已离开房间';
+      } else if (!app.onlineWhiteConnected) {
+        status = '等待好友加入 · 房号 ' + app.onlineRoomId;
+      } else if (app.gameOver) {
+        status = '对局结束';
+      } else {
+        status =
+          '旁观中 · 当前轮到' +
+          (app.current === app.BLACK ? '黑' : '白') +
+          '方';
+      }
     } else if (app.onlineOpponentLeft) {
       status = '对方已离开房间';
     } else if (!app.onlineBlackConnected || !app.onlineWhiteConnected) {
@@ -650,10 +663,10 @@ app.draw = function() {
       status =
         '轮到你（' +
         (app.dailyPuzzleUserColor === app.BLACK ? '黑' : '白') +
-        '）· 对守关者';
+        '）· 对电脑';
     } else {
       status =
-        '守关者（' +
+        '电脑（' +
         (app.dailyPuzzleBotColor() === app.BLACK ? '黑' : '白') +
         '）思考中…';
     }
@@ -2252,6 +2265,9 @@ app.runAiMove = function() {
 
 app.tryPlace = function(r, c) {
   if (app.gameOver) return;
+  if (app.isPvpOnline && app.onlineSpectatorMode) {
+    return;
+  }
   if (app.localUndoRequest) {
     return;
   }
@@ -2361,6 +2377,17 @@ wx.onTouchStart(function (e) {
   app.lastTouchDownY = y;
 
   if (app.screen === 'admin_puzzle') {
+    if (
+      e.touches &&
+      e.touches[0] &&
+      typeof app.handleAdminPuzzleTouchStart === 'function'
+    ) {
+      app.handleAdminPuzzleTouchStart(
+        e.touches[0].clientX,
+        e.touches[0].clientY,
+        e.touches[0].identifier
+      );
+    }
     return;
   }
 
@@ -2933,6 +2960,13 @@ wx.onTouchStart(function (e) {
 if (typeof wx.onTouchMove === 'function') {
   wx.onTouchMove(function (e) {
     if (
+      app.screen === 'admin_puzzle' &&
+      typeof app.handleAdminPuzzleTouchMove === 'function' &&
+      app.handleAdminPuzzleTouchMove(e)
+    ) {
+      return;
+    }
+    if (
       app.screen === 'replay' ||
       (app.screen === 'history' && app.historyReplayOverlayVisible)
     ) {
@@ -3006,7 +3040,11 @@ if (typeof wx.onTouchEnd === 'function') {
     var t = e.changedTouches && e.changedTouches[0];
     if (app.screen === 'admin_puzzle' && t) {
       if (typeof app.handleAdminPuzzleTouchEnd === 'function') {
-        app.handleAdminPuzzleTouchEnd(t.clientX, t.clientY);
+        app.handleAdminPuzzleTouchEnd(
+          t.clientX,
+          t.clientY,
+          t.identifier
+        );
       }
       return;
     }
@@ -3307,6 +3345,16 @@ if (typeof wx.onTouchEnd === 'function') {
 
 if (typeof wx.onTouchCancel === 'function') {
   wx.onTouchCancel(function () {
+    if (app.screen === 'admin_puzzle') {
+      if (app.adminPuzzleSchedulePickerOpen) {
+        app.adminPuzzleSchedulePickerOpen = false;
+        app.adminPuzzleSchedulePickerData = null;
+      }
+      app.adminPuzzlePublishSwipeTouchId = null;
+      app.adminPuzzlePublishSwipePx = 0;
+      app.draw();
+      return;
+    }
     if (app.screen === 'history') {
       app.historyScrollTouchId = null;
       app.stopHistoryMomentum();

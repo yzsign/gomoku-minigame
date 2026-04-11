@@ -1759,7 +1759,12 @@ app.startPvpLocal = function() {
  * 双方都会调用；重复请求时服务端返回已结算的同一份分数（与先成功者一致）。
  */
 app.maybeRequestOnlineGameSettle = function() {
-  if (!app.isPvpOnline || !app.onlineRoomId || app.onlineSettleSent) {
+  if (
+    !app.isPvpOnline ||
+    !app.onlineRoomId ||
+    app.onlineSettleSent ||
+    app.onlineSpectatorMode
+  ) {
     return;
   }
   if (!authApi.getSessionToken()) {
@@ -1972,7 +1977,13 @@ app.openResult = function() {
       }
     }, 1600);
     if (!keepOppLeftKind) {
-      if (app.winner === null) {
+      if (app.onlineSpectatorMode) {
+        if (app.winner === null) {
+          app.resultKind = 'online_draw';
+        } else {
+          app.resultKind = 'online_spectate';
+        }
+      } else if (app.winner === null) {
         app.resultKind = 'online_draw';
       } else if (app.winner === app.pvpOnlineYourColor) {
         app.resultKind = 'online_win';
@@ -2033,6 +2044,17 @@ app.getResultVsAvatarImage = function(forBlack) {
       }
       return uBlack ? g : mine;
     }
+    if (!app.isPvpOnline && !app.isPvpLocal) {
+      var hum0 = app.pveHumanColor;
+      var mine0 = defaultAvatars.getMyAvatarImage();
+      var g0 =
+        defaultAvatars.getGuardianBotAvatarImage() ||
+        defaultAvatars.getOpponentAvatarImage();
+      if (forBlack) {
+        return hum0 === gomoku.BLACK ? mine0 : g0;
+      }
+      return hum0 === gomoku.BLACK ? g0 : mine0;
+    }
     return forBlack
       ? defaultAvatars.getImageForWeChatGender(1)
       : defaultAvatars.getImageForWeChatGender(2);
@@ -2058,9 +2080,9 @@ app.getResultVsAvatarImage = function(forBlack) {
   }
   var hum = app.pveHumanColor;
   if (forBlack) {
-    return hum === gomoku.BLACK ? L.myImg : defaultAvatars.getOpponentAvatarImage();
+    return hum === gomoku.BLACK ? L.myImg : L.oppImg;
   }
-  return hum === gomoku.WHITE ? L.myImg : defaultAvatars.getOpponentAvatarImage();
+  return hum === gomoku.WHITE ? L.myImg : L.oppImg;
 }
 
 function drawResultRoundedSquareAvatar(app, th, img, cx, cy, size, cornerR) {
@@ -2324,6 +2346,17 @@ function resultOverlayTitlePack(app) {
       main = app.winner === gomoku.WHITE ? '白棋获胜' : '黑棋获胜';
       titleColor = rs.win.title;
       break;
+    case 'online_spectate':
+      mood = 'draw';
+      main =
+        app.winner === null
+          ? '和局'
+          : app.winner === gomoku.WHITE
+            ? '白棋获胜'
+            : '黑棋获胜';
+      sub = '旁观对局';
+      titleColor = rs.draw.title;
+      break;
     case 'daily_puzzle_solved':
       mood = 'win';
       main = '残局完成';
@@ -2339,7 +2372,7 @@ function resultOverlayTitlePack(app) {
     case 'daily_puzzle_bot_win':
       mood = 'lose';
       main = '挑战失败';
-      sub = '守关者获胜';
+      sub = '电脑获胜';
       titleColor = rs.lose.title;
       break;
     default:
@@ -2591,7 +2624,6 @@ app.drawResultOverlay = function() {
   var gBotImg = defaultAvatars.getGuardianBotAvatarImage();
   function drawVsResultAvatar(img, vsCx, vsCy) {
     if (
-      app.isDailyPuzzle &&
       gBotImg &&
       img === gBotImg &&
       img &&

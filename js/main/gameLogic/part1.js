@@ -88,6 +88,9 @@ app.persistLocalNickname = function(userInfo) {
 }
 
 app.getMyDisplayName = function() {
+  if (app.isPvpOnline && app.onlineSpectatorMode) {
+    return '旁观';
+  }
   if (app.myDisplayNameCache !== null) {
     return app.myDisplayNameCache;
   }
@@ -115,7 +118,7 @@ app.getOpponentDisplayName = function() {
     return '对方';
   }
   if (app.isDailyPuzzle) {
-    return '守关者';
+    return '电脑';
   }
   if (app.isRandomMatch) {
     return app.randomOpponentName || '对手';
@@ -128,6 +131,9 @@ app.getOpponentDisplayName = function() {
  */
 app.getMyAssignedStoneColor = function() {
   if (app.isPvpOnline) {
+    if (app.onlineSpectatorMode) {
+      return null;
+    }
     return app.pvpOnlineYourColor;
   }
   if (app.isDailyPuzzle) {
@@ -161,7 +167,11 @@ app.refreshDailyPuzzleLastOpponentMove = function() {
 
 /** 对手执子色（与「我」相对） */
 app.getOpponentAssignedStoneColor = function() {
-  return app.oppositeColor(app.getMyAssignedStoneColor());
+  var mine = app.getMyAssignedStoneColor();
+  if (mine === null) {
+    return null;
+  }
+  return app.oppositeColor(mine);
 };
 
 /** 与 render.drawBoard 中棋盘外接矩形一致 */
@@ -233,6 +243,14 @@ app.computeBoardNameLabelLayout = function(layout) {
     app.onlineOppAvatarImg.height
   ) {
     oppImg = app.onlineOppAvatarImg;
+  } else if (app.isPvpLocal) {
+    oppImg = defaultAvatars.getOpponentAvatarImage();
+  } else if (!app.isPvpOnline) {
+    /** 人机对战（非同桌）：与每日残局电脑同一套头像 */
+    oppImg = defaultAvatars.getGuardianBotAvatarImage();
+    if (!oppImg) {
+      oppImg = defaultAvatars.getOpponentAvatarImage();
+    }
   } else {
     oppImg = defaultAvatars.getOnlineOpponentDefaultAvatarImage();
   }
@@ -361,7 +379,6 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
   ctx.fillText(oppName, app.snapPx(L.oppNameRightX), app.snapPx(L.oppCy));
   if (L.hasOppAv) {
     if (
-      app.isDailyPuzzle &&
       L.oppImg === defaultAvatars.getGuardianBotAvatarImage() &&
       L.oppImg &&
       L.oppImg.width > 0 &&
@@ -407,14 +424,16 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
         false
       );
     }
-    app.drawAvatarStoneBadge(
-      ctx,
-      L.oppCx,
-      L.oppCy,
-      L.avR,
-      app.getOpponentAssignedStoneColor(),
-      th
-    );
+    if (!app.onlineSpectatorMode) {
+      app.drawAvatarStoneBadge(
+        ctx,
+        L.oppCx,
+        L.oppCy,
+        L.avR,
+        app.getOpponentAssignedStoneColor(),
+        th
+      );
+    }
   }
   /** 我：棋盘左下角外侧；无网络图时用服务端 users.gender 对应默认 */
   if (L.hasMyAv) {
@@ -436,14 +455,16 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
         true
       );
     }
-    app.drawAvatarStoneBadge(
-      ctx,
-      L.myCx,
-      L.myCy,
-      L.avR,
-      app.getMyAssignedStoneColor(),
-      th
-    );
+    if (!app.onlineSpectatorMode) {
+      app.drawAvatarStoneBadge(
+        ctx,
+        L.myCx,
+        L.myCy,
+        L.avR,
+        app.getMyAssignedStoneColor(),
+        th
+      );
+    }
   }
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
@@ -882,7 +903,10 @@ app.resolveHistoryRowAvatarImage = function(rec) {
   }
   var def = defaultForRow();
   if (rec.mode === 'pve') {
-    return def;
+    return (
+      defaultAvatars.getGuardianBotAvatarImage() ||
+      defaultAvatars.getOpponentAvatarImage()
+    );
   }
   if (rec.mode !== 'server') {
     return def;
@@ -1283,6 +1307,14 @@ app.adminDraftBoard = null;
 app.adminPuzzleTitle = '新残局';
 app.adminPuzzleSideToMove = app.BLACK;
 app.adminPuzzleScheduleDate = '';
+/** 发布条：横向滑动确认，像素偏移与手势追踪 */
+app.adminPuzzlePublishSwipePx = 0;
+app.adminPuzzlePublishSwipeTouchId = null;
+app.adminPuzzlePublishSwipeStartClientX = 0;
+app.adminPuzzlePublishSwipeStartOffsetPx = 0;
+/** 残局排期：画布日历弹层（原生 picker 需 WXML，本工程为纯 Canvas） */
+app.adminPuzzleSchedulePickerOpen = false;
+app.adminPuzzleSchedulePickerData = null;
 
 /** 对局结束：在棋盘页上以半透明弹层展示（不再切全屏 result） */
 app.showResultOverlay = false;
@@ -1353,6 +1385,8 @@ app.onlineOpponentLeft = false;
  * 用于避免好友尚未进房时误判「对方离开 / 逃跑」终局与结算 runaway。
  */
 app.onlineFriendBothEverConnected = false;
+/** 残局好友房：房主 WS 使用旁观 token，不落子 */
+app.onlineSpectatorMode = false;
 app.socketTask = null;
 /** WebSocket 已 onOpen，可 send；断线后为 false，用于重连提示与拦截落子 */
 app.onlineWsConnected = false;
@@ -1391,11 +1425,13 @@ app.onlineWhitePieceSkinId = null;
  * 用于邀请后对面未进房、白方未加入、关闭转发面板后仍在等待等场景。
  */
 app.isOnlineFriendMatchNotStarted = function() {
-  return (
-    app.isPvpOnline &&
-    !app.isRandomMatch &&
-    (!app.onlineBlackConnected || !app.onlineWhiteConnected)
-  );
+  if (!app.isPvpOnline || app.isRandomMatch) {
+    return false;
+  }
+  if (app.onlineSpectatorMode) {
+    return !app.onlineWhiteConnected;
+  }
+  return !app.onlineBlackConnected || !app.onlineWhiteConnected;
 };
 
 /**
@@ -1720,6 +1756,7 @@ app.disconnectOnline = function() {
   app.isPvpOnline = false;
   app.onlineRoomId = '';
   app.onlineToken = '';
+  app.onlineSpectatorMode = false;
   app.pvpOnlineYourColor = app.BLACK;
   app.onlineBlackConnected = false;
   app.onlineWhiteConnected = false;
@@ -1844,7 +1881,11 @@ app.tryFetchOnlineOpponentProfile = function() {
   if (!app.isPvpOnline || !app.onlineRoomId || !authApi.getSessionToken()) {
     return;
   }
-  if (!app.onlineBlackConnected || !app.onlineWhiteConnected) {
+  if (app.onlineSpectatorMode) {
+    if (!app.onlineWhiteConnected) {
+      return;
+    }
+  } else if (!app.onlineBlackConnected || !app.onlineWhiteConnected) {
     return;
   }
   if (app.onlineOppFetchInFlight) {
@@ -2024,6 +2065,9 @@ app.shouldShowOpponentLastMoveMarker = function() {
   }
   var stoneColor = app.board[lr][lc];
   if (app.isPvpOnline) {
+    if (app.onlineSpectatorMode) {
+      return false;
+    }
     return (
       app.current === app.pvpOnlineYourColor &&
       stoneColor === app.oppositeColor(app.pvpOnlineYourColor)
@@ -2745,7 +2789,12 @@ app.applyOnlineState = function(data) {
   } else {
     app.winner = app.normalizeOnlineStoneInt(data.winner, null);
   }
-  app.pvpOnlineYourColor = app.normalizeOnlineStoneInt(data.yourColor, app.BLACK);
+  if (data.spectator === true) {
+    app.onlineSpectatorMode = true;
+  } else {
+    app.onlineSpectatorMode = false;
+    app.pvpOnlineYourColor = app.normalizeOnlineStoneInt(data.yourColor, app.BLACK);
+  }
   if (
     data.blackPieceSkinId !== undefined &&
     data.blackPieceSkinId !== null &&
@@ -2769,38 +2818,46 @@ app.applyOnlineState = function(data) {
   if (data.whiteIsBot !== undefined && data.whiteIsBot !== null) {
     app.onlineOpponentIsBot = !!data.whiteIsBot;
   }
-  if (
-    app.isPvpOnline &&
-    !app.isRandomMatch &&
-    !app.onlineOpponentIsBot &&
-    app.onlineBlackConnected &&
-    app.onlineWhiteConnected
-  ) {
-    app.onlineFriendBothEverConnected = true;
+  if (app.isPvpOnline && !app.isRandomMatch && !app.onlineOpponentIsBot) {
+    if (app.onlineSpectatorMode) {
+      if (app.onlineWhiteConnected) {
+        app.onlineFriendBothEverConnected = true;
+      }
+    } else if (app.onlineBlackConnected && app.onlineWhiteConnected) {
+      app.onlineFriendBothEverConnected = true;
+    }
   }
   if (app.isPvpOnline && (app.screen === 'game' || app.screen === 'matching')) {
-    var yc = app.pvpOnlineYourColor;
-    var oppWas = yc === app.BLACK ? prevWhite : prevBlack;
-    var oppNow = yc === app.BLACK ? app.onlineWhiteConnected : app.onlineBlackConnected;
-    if (oppNow) {
-      app.onlineOpponentLeft = false;
-    } else if (oppWas && !oppNow) {
-      app.onlineOpponentLeft = true;
-      /**
-       * 仅「对局未结束、尚无胜负」时按逃跑终局；若本帧已 gameOver 或已有 winner
-       *（含连五/认输等），走下方正常终局，避免胜局因对端断线被误判为「对方离开」。
-       */
-      if (
-        app.screen === 'game' &&
-        !wasOver &&
-        !data.gameOver &&
-        (data.winner === undefined || data.winner === null) &&
-        prevBlack &&
-        prevWhite &&
-        !app.onlineOpponentIsBot &&
-        (app.isRandomMatch || app.onlineFriendBothEverConnected)
-      ) {
-        finishDueToOppLeave = true;
+    if (app.onlineSpectatorMode) {
+      if (app.onlineWhiteConnected) {
+        app.onlineOpponentLeft = false;
+      } else if (prevWhite && !app.onlineWhiteConnected) {
+        app.onlineOpponentLeft = true;
+      }
+    } else {
+      var yc = app.pvpOnlineYourColor;
+      var oppWas = yc === app.BLACK ? prevWhite : prevBlack;
+      var oppNow = yc === app.BLACK ? app.onlineWhiteConnected : app.onlineBlackConnected;
+      if (oppNow) {
+        app.onlineOpponentLeft = false;
+      } else if (oppWas && !oppNow) {
+        app.onlineOpponentLeft = true;
+        /**
+         * 仅「对局未结束、尚无胜负」时按逃跑终局；若本帧已 gameOver 或已有 winner
+         *（含连五/认输等），走下方正常终局，避免胜局因对端断线被误判为「对方离开」。
+         */
+        if (
+          app.screen === 'game' &&
+          !wasOver &&
+          !data.gameOver &&
+          (data.winner === undefined || data.winner === null) &&
+          prevBlack &&
+          prevWhite &&
+          !app.onlineOpponentIsBot &&
+          (app.isRandomMatch || app.onlineFriendBothEverConnected)
+        ) {
+          finishDueToOppLeave = true;
+        }
       }
     }
   }
@@ -2831,6 +2888,7 @@ app.applyOnlineState = function(data) {
     );
   }
   if (
+    !app.onlineSpectatorMode &&
     app.isPvpOnline &&
     app.screen === 'game' &&
     prevRematchRequesterColor == null &&
@@ -2885,6 +2943,7 @@ app.applyOnlineState = function(data) {
     return;
   }
   if (
+    !app.onlineSpectatorMode &&
     app.isPvpOnline &&
     app.screen === 'game' &&
     !wasOver &&
@@ -2942,7 +3001,9 @@ app.applyOnlineState = function(data) {
     }
   }
   app.lastMsg = '';
-  app.syncLastOpponentMoveOnline(prevBoard, app.board, app.pvpOnlineYourColor);
+  if (!app.onlineSpectatorMode) {
+    app.syncLastOpponentMoveOnline(prevBoard, app.board, app.pvpOnlineYourColor);
+  }
 
   if (app.gameOver && !wasOver) {
     app.screen = 'game';
