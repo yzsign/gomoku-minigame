@@ -149,6 +149,33 @@ var DIRS = [
 
 /* ---------- 启发式、局面评估、候选与搜索 ---------- */
 
+/** 与后端 GomokuAiEngine.patternMagnitude 一致 */
+function patternMagnitude(len, leftOpen, rightOpen) {
+  var openEnds = (leftOpen ? 1 : 0) + (rightOpen ? 1 : 0);
+  if (len >= 5) return 10000000;
+  if (len === 4) {
+    if (openEnds === 2) return 500000;
+    if (openEnds === 1) return 120000;
+    return 8000;
+  }
+  if (len === 3) {
+    if (openEnds === 2) return 45000;
+    if (openEnds === 1) return 6000;
+    return 400;
+  }
+  if (len === 2) {
+    if (openEnds === 2) return 2200;
+    if (openEnds === 1) return 350;
+    return 40;
+  }
+  if (len === 1) {
+    if (openEnds === 2) return 120;
+    if (openEnds === 1) return 25;
+    return 3;
+  }
+  return 0;
+}
+
 /**
  * 单方向棋型分（假设 (r,c) 已落 color，只评估沿 dr,dc 这一条线）
  */
@@ -170,32 +197,9 @@ function linePatternScore(board, r, c, dr, dc, color) {
     nc += dc;
   }
   var rightEnd = inBounds(nr, nc) ? board[nr][nc] : -1;
-
   var leftOpen = leftEnd === EMPTY;
   var rightOpen = rightEnd === EMPTY;
-
-  if (len >= 5) return 10000000;
-  if (len === 4) {
-    if (leftOpen && rightOpen) return 500000;
-    if (leftOpen || rightOpen) return 120000;
-    return 8000;
-  }
-  if (len === 3) {
-    if (leftOpen && rightOpen) return 45000;
-    if (leftOpen || rightOpen) return 6000;
-    return 400;
-  }
-  if (len === 2) {
-    if (leftOpen && rightOpen) return 2200;
-    if (leftOpen || rightOpen) return 350;
-    return 40;
-  }
-  if (len === 1) {
-    if (leftOpen && rightOpen) return 120;
-    if (leftOpen || rightOpen) return 25;
-    return 3;
-  }
-  return 0;
+  return patternMagnitude(len, leftOpen, rightOpen);
 }
 
 /**
@@ -214,62 +218,87 @@ function heuristicMoveScore(board, r, c, color) {
   return s;
 }
 
+/** 对手线型威胁加权，与后端 OPP_LINE_PATTERN_MULT 一致 */
+var OPP_LINE_PATTERN_MULT = 1.18;
+
 /**
- * 棋盘上所有「五格窗口」的形势估计（站在 aiColor 一方，越大越有利）
+ * 沿每条线扫描连续棋块（活二/活三/活四等），比五格窗口更能反映防守压力
  */
 function evaluateBoard(board, aiColor) {
   var opp = aiColor === BLACK ? WHITE : BLACK;
   var score = 0;
+  var line = [];
   var r;
   var c;
-  var dr;
-  var dc;
+  var d;
+  var sumIdx;
 
-  function windowValue(br, bc, ddr, ddc) {
-    var ai = 0;
-    var op = 0;
-    var em = 0;
-    var k;
-    for (k = 0; k < 5; k++) {
-      var v = board[br + k * ddr][bc + k * ddc];
-      if (v === aiColor) ai++;
-      else if (v === opp) op++;
-      else em++;
+  function evalLine1d(arr, n) {
+    var i = 0;
+    while (i < n) {
+      if (arr[i] === EMPTY) {
+        i++;
+        continue;
+      }
+      var stone = arr[i];
+      var j = i;
+      while (j < n && arr[j] === stone) {
+        j++;
+      }
+      var runLen = j - i;
+      var leftOpen = i > 0 && arr[i - 1] === EMPTY;
+      var rightOpen = j < n && arr[j] === EMPTY;
+      var mag = patternMagnitude(runLen, leftOpen, rightOpen);
+      if (stone === aiColor) {
+        score += mag;
+      } else if (stone === opp) {
+        score -= mag * OPP_LINE_PATTERN_MULT;
+      }
+      i = j;
     }
-    if (op > 0 && ai > 0) return 0;
-    if (op > 0) {
-      if (op === 5) return -2600000;
-      if (op === 4 && em === 1) return -240000;
-      if (op === 3 && em === 2) return -12000;
-      if (op === 2 && em === 3) return -520;
-      return 0;
-    }
-    if (ai === 5) return 2600000;
-    if (ai === 4 && em === 1) return 210000;
-    if (ai === 3 && em === 2) return 10000;
-    if (ai === 2 && em === 3) return 480;
-    if (ai === 1 && em === 4) return 48;
-    return 0;
   }
 
   for (r = 0; r < SIZE; r++) {
-    for (c = 0; c <= SIZE - 5; c++) {
-      score += windowValue(r, c, 0, 1);
+    for (c = 0; c < SIZE; c++) {
+      line[c] = board[r][c];
     }
+    evalLine1d(line, SIZE);
   }
   for (c = 0; c < SIZE; c++) {
-    for (r = 0; r <= SIZE - 5; r++) {
-      score += windowValue(r, c, 1, 0);
+    for (r = 0; r < SIZE; r++) {
+      line[r] = board[r][c];
+    }
+    evalLine1d(line, SIZE);
+  }
+  for (d = -(SIZE - 1); d <= SIZE - 1; d++) {
+    var count = 0;
+    if (d >= 0) {
+      r = d;
+      c = 0;
+    } else {
+      r = 0;
+      c = -d;
+    }
+    while (r < SIZE && c < SIZE) {
+      line[count++] = board[r][c];
+      r++;
+      c++;
+    }
+    if (count > 0) {
+      evalLine1d(line, count);
     }
   }
-  for (r = 0; r <= SIZE - 5; r++) {
-    for (c = 0; c <= SIZE - 5; c++) {
-      score += windowValue(r, c, 1, 1);
+  for (sumIdx = 0; sumIdx <= 2 * (SIZE - 1); sumIdx++) {
+    r = Math.max(0, sumIdx - (SIZE - 1));
+    c = sumIdx - r;
+    count = 0;
+    while (r < SIZE && c >= 0) {
+      line[count++] = board[r][c];
+      r++;
+      c--;
     }
-  }
-  for (r = 0; r <= SIZE - 5; r++) {
-    for (c = 4; c < SIZE; c++) {
-      score += windowValue(r, c, 1, -1);
+    if (count > 0) {
+      evalLine1d(line, count);
     }
   }
 
