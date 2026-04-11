@@ -397,9 +397,6 @@ app.joinOnlineAsGuest = function(roomId) {
         return;
       }
       var d = res.data;
-      app.inviteGateDismissedRoomId = '';
-      app.showInviteJoinGate = false;
-      app.pendingInviteRoomId = '';
       app.isDailyPuzzle = false;
       app.dailyPuzzleMeta = null;
       app.dailyPuzzleMoves = [];
@@ -452,6 +449,7 @@ app.joinOnlineAsGuest = function(roomId) {
   });
 }
 
+/** 分享链接带 roomId：直接进入加入房间（不再展示 canvas「好友邀请你下棋」门闩） */
 app.tryLaunchOnlineInvite = function(query) {
   if (app.onlineInviteConsumed || app.isPvpOnline) {
     return;
@@ -460,80 +458,11 @@ app.tryLaunchOnlineInvite = function(query) {
     return;
   }
   var rid = String(query.roomId);
-  if (app.inviteGateDismissedRoomId && app.inviteGateDismissedRoomId === rid) {
-    return;
-  }
-  if (app.showInviteJoinGate && app.pendingInviteRoomId === rid) {
-    return;
-  }
-  app.pendingInviteRoomId = rid;
-  app.showInviteJoinGate = true;
   app.screen = 'home';
   if (typeof app.draw === 'function') {
     app.draw();
   }
-};
-
-app.completeInviteJoinFromGate = function() {
-  var rid = app.pendingInviteRoomId;
-  if (!rid) {
-    return;
-  }
-  app.showInviteJoinGate = false;
-  app.pendingInviteRoomId = '';
-  authApi.ensureSession(function(ok, errHint) {
-    if (!ok) {
-      if (typeof wx.showToast === 'function') {
-        wx.showToast({ title: errHint || '请先登录', icon: 'none' });
-      }
-      app.pendingInviteRoomId = rid;
-      app.showInviteJoinGate = true;
-      if (typeof app.draw === 'function') {
-        app.draw();
-      }
-      return;
-    }
-    function doJoin() {
-      app.joinOnlineAsGuest(rid);
-    }
-    if (typeof wx.getUserProfile === 'function') {
-      wx.getUserProfile({
-        desc: '用于房间内展示昵称与头像',
-        success: function(res) {
-          var u = res.userInfo;
-          authApi.silentLogin(
-            {
-              nickName: u.nickName,
-              avatarUrl: u.avatarUrl,
-              gender: typeof u.gender === 'number' ? u.gender : 0
-            },
-            function(loginOk, payload) {
-              if (loginOk && payload && typeof authApi.persistSession === 'function') {
-                authApi.persistSession(payload);
-              }
-              doJoin();
-            }
-          );
-        },
-        fail: function() {
-          doJoin();
-        }
-      });
-    } else {
-      doJoin();
-    }
-  });
-};
-
-app.cancelInviteJoinGate = function() {
-  if (app.pendingInviteRoomId) {
-    app.inviteGateDismissedRoomId = app.pendingInviteRoomId;
-  }
-  app.showInviteJoinGate = false;
-  app.pendingInviteRoomId = '';
-  if (typeof app.draw === 'function') {
-    app.draw();
-  }
+  app.joinOnlineAsGuest(rid);
 };
 
 /* ---------- 棋盘布局与菜单几何 ---------- */
@@ -1972,10 +1901,51 @@ app.getHomeLayout = function() {
 
 app.getRatingCardLayout = function() {
   var w = Math.min(app.W - 48, 300);
-  var h = 212;
+  var extra =
+    app.ratingCardVisible &&
+    app.ratingCardData &&
+    app.ratingCardData.showSyncProfileBtn
+      ? app.rpx(52)
+      : 0;
+  var h = 212 + extra;
   var cx = app.W / 2;
   var cy = app.H * 0.42;
   return { cx: cx, cy: cy, w: w, h: h, r: 18 };
+}
+
+/** 信息看板底部「同步头像昵称」按钮几何（与 drawRatingCardOverlay 一致） */
+app.getRatingCardSyncProfileLayout = function() {
+  if (!app.ratingCardData || !app.ratingCardData.showSyncProfileBtn) {
+    return null;
+  }
+  var L = app.getRatingCardLayout();
+  var x = L.cx - L.w / 2;
+  var y = L.cy - L.h / 2;
+  var btnW = L.w - app.rpx(28);
+  var btnH = app.rpx(40);
+  var pad = app.rpx(14);
+  var btnTop = y + L.h - pad - btnH;
+  return {
+    left: x + pad,
+    top: btnTop,
+    w: btnW,
+    h: btnH,
+    cx: x + pad + btnW * 0.5,
+    cy: btnTop + btnH * 0.5
+  };
+}
+
+app.hitRatingCardSyncProfile = function(clientX, clientY) {
+  var B = app.getRatingCardSyncProfileLayout();
+  if (!B) {
+    return false;
+  }
+  return (
+    clientX >= B.left &&
+    clientX <= B.left + B.w &&
+    clientY >= B.top &&
+    clientY <= B.top + B.h
+  );
 }
 
 app.hitRatingCardInside = function(x, y) {

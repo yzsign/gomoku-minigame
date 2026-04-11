@@ -2482,6 +2482,15 @@ wx.onTouchStart(function (e) {
         app.draw();
         return;
       }
+      if (
+        typeof app.hitRatingCardSyncProfile === 'function' &&
+        app.hitRatingCardSyncProfile(x, y)
+      ) {
+        if (typeof app.syncMyProfileFromWeChat === 'function') {
+          app.syncMyProfileFromWeChat();
+        }
+        return;
+      }
       if (!app.hitRatingCardInside(x, y)) {
         app.ratingCardVisible = false;
         app.ratingCardData = null;
@@ -2558,27 +2567,19 @@ wx.onTouchStart(function (e) {
       app.draw();
       return;
     }
+    if (
+      typeof app.hitRatingCardSyncProfile === 'function' &&
+      app.hitRatingCardSyncProfile(x, y)
+    ) {
+      if (typeof app.syncMyProfileFromWeChat === 'function') {
+        app.syncMyProfileFromWeChat();
+      }
+      return;
+    }
     if (!app.hitRatingCardInside(x, y)) {
       app.ratingCardVisible = false;
       app.ratingCardData = null;
       app.draw();
-      return;
-    }
-    return;
-  }
-
-  if (app.screen === 'home' && app.showInviteJoinGate) {
-    var ig = app.hitInviteJoinGate(x, y);
-    if (ig === 'join') {
-      if (typeof app.completeInviteJoinFromGate === 'function') {
-        app.completeInviteJoinFromGate();
-      }
-      return;
-    }
-    if (ig === 'cancel') {
-      if (typeof app.cancelInviteJoinGate === 'function') {
-        app.cancelInviteJoinGate();
-      }
       return;
     }
     return;
@@ -3501,24 +3502,29 @@ if (typeof wx.showShareMenu === 'function') {
 
 if (typeof wx.onShow === 'function') {
   wx.onShow(function (res) {
-    /** 每次进入小程序（冷启动或从后台切回）：无用户则插入，有则更新 last_login_at */
-    authApi.silentLogin();
-    app.loadHomeUiAssets();
-    setTimeout(function () {
-      app.tryFetchMyProfileAvatar();
-    }, 500);
-    setTimeout(function () {
-      if (typeof app.refreshAdminStatus === 'function') {
-        app.refreshAdminStatus();
+    /**
+     * 先完成静默登录再拉资源/分享进房，避免与首帧 silentLogin 并发导致进房失败（请先完成登录）。
+     */
+    authApi.silentLogin(null, function () {
+      app.loadHomeUiAssets();
+      setTimeout(function () {
+        app.tryFetchMyProfileAvatar();
+      }, 500);
+      setTimeout(function () {
+        if (typeof app.refreshAdminStatus === 'function') {
+          app.refreshAdminStatus();
+        }
+      }, 700);
+      if (res && res.query && String(res.query.online) === '1' && res.query.roomId) {
+        if (typeof app.tryLaunchOnlineInvite === 'function') {
+          app.tryLaunchOnlineInvite(res.query);
+        }
       }
-    }, 700);
-    if (res && res.query && String(res.query.online) === '1' && res.query.roomId) {
-      app.tryLaunchOnlineInvite(res.query);
-    }
-    if (app.shouldAutoReconnectOnline() && !app.onlineWsConnected) {
-      app.clearOnlineReconnectTimer();
-      app.scheduleOnlineReconnect(true);
-    }
+      if (app.shouldAutoReconnectOnline() && !app.onlineWsConnected) {
+        app.clearOnlineReconnectTimer();
+        app.scheduleOnlineReconnect(true);
+      }
+    });
   });
 } else {
   authApi.silentLogin();

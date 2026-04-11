@@ -79,7 +79,11 @@ function ensureSession(onDone) {
   });
 }
 
-function silentLogin(optionalProfile, onDone) {
+/** 串行执行，避免首屏 / onShow / 进房多处同时触发 wx.login 导致失败 */
+var silentLoginQueue = [];
+var silentLoginBusy = false;
+
+function silentLoginPerform(optionalProfile, onDone) {
   if (typeof wx === 'undefined' || !wx.login) {
     if (typeof onDone === 'function') {
       onDone(false);
@@ -173,6 +177,29 @@ function silentLogin(optionalProfile, onDone) {
       }
     },
   });
+}
+
+function silentLogin(optionalProfile, onDone) {
+  silentLoginQueue.push({ optionalProfile: optionalProfile, onDone: onDone });
+  function drain() {
+    if (silentLoginBusy || !silentLoginQueue.length) {
+      return;
+    }
+    silentLoginBusy = true;
+    var job = silentLoginQueue.shift();
+    silentLoginPerform(job.optionalProfile, function () {
+      var args = arguments;
+      try {
+        if (typeof job.onDone === 'function') {
+          job.onDone.apply(null, args);
+        }
+      } finally {
+        silentLoginBusy = false;
+        drain();
+      }
+    });
+  }
+  drain();
 }
 
 module.exports = {

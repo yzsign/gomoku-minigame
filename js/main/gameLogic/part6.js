@@ -53,12 +53,13 @@ app.setupShareMessage = function() {
 }
 app.setupShareMessage();
 
+var deferredOnlineInviteQuery = null;
 try {
   var launchOpt = wx.getLaunchOptionsSync && wx.getLaunchOptionsSync();
   if (launchOpt && launchOpt.query) {
     var lq = launchOpt.query;
     if (String(lq.online) === '1' && lq.roomId) {
-      app.tryLaunchOnlineInvite(lq);
+      deferredOnlineInviteQuery = lq;
     } else if (String(lq.from) === 'invite') {
       app.startPvpLocal();
     }
@@ -80,8 +81,19 @@ defaultAvatars.preloadAll(function () {
 app.draw();
 app.maybeFirstVisitProfileModal();
 
-/** 首屏再调一次：避免仅依赖 onShow 时，部分环境下首帧未触发或注册晚于首次 onShow */
-authApi.silentLogin();
+/**
+ * 先完成一次静默登录再处理分享进房，避免与 joinOnlineAsGuest 内 ensureSession 并发两次 wx.login，
+ * 减少「请先完成登录」误报；无分享参数时与普通首屏 silentLogin 等价。
+ */
+authApi.silentLogin(null, function () {
+  if (deferredOnlineInviteQuery) {
+    var q = deferredOnlineInviteQuery;
+    deferredOnlineInviteQuery = null;
+    if (typeof app.tryLaunchOnlineInvite === 'function') {
+      app.tryLaunchOnlineInvite(q);
+    }
+  }
+});
 setTimeout(function () {
   app.tryFetchMyProfileAvatar();
 }, 600);

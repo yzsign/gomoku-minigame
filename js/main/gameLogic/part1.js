@@ -68,8 +68,55 @@ app.checkinModalData = null;
 app.PROFILE_PROMPT_STORAGE_KEY = 'gomoku_profile_prompt_done';
 /** 授权后写入，棋盘左下角展示「我」的昵称 */
 app.LOCAL_NICKNAME_KEY = 'gomoku_local_nickname';
+/**
+ * 上次 wx.getUserProfile 成功时的 userInfo（JSON），用于再次点「同步」时 getUserProfile
+ * 可能失败（微信对重复调用的限制）仍能静默登录并刷新服务端资料。
+ */
+app.WX_USER_PROFILE_CACHE_KEY = 'gomoku_wx_user_profile_json';
 /** 避免每帧 draw 调用 getStorageSync（同步 IO 易卡顿） */
 app.myDisplayNameCache = null;
+
+app.saveCachedWeChatUserInfo = function(userInfo) {
+  if (!userInfo || !userInfo.nickName) {
+    return;
+  }
+  try {
+    if (typeof wx !== 'undefined' && wx.setStorageSync) {
+      wx.setStorageSync(
+        app.WX_USER_PROFILE_CACHE_KEY,
+        JSON.stringify({
+          nickName: String(userInfo.nickName).trim(),
+          avatarUrl:
+            typeof userInfo.avatarUrl === 'string' ? userInfo.avatarUrl : '',
+          gender: typeof userInfo.gender === 'number' ? userInfo.gender : 0
+        })
+      );
+    }
+  } catch (e) {}
+};
+
+app.readCachedWeChatUserInfo = function() {
+  try {
+    if (typeof wx === 'undefined' || !wx.getStorageSync) {
+      return null;
+    }
+    var raw = wx.getStorageSync(app.WX_USER_PROFILE_CACHE_KEY);
+    if (!raw || typeof raw !== 'string') {
+      return null;
+    }
+    var o = JSON.parse(raw);
+    if (!o || !o.nickName) {
+      return null;
+    }
+    return {
+      nickName: String(o.nickName).trim(),
+      avatarUrl: typeof o.avatarUrl === 'string' ? o.avatarUrl : '',
+      gender: typeof o.gender === 'number' ? o.gender : 0
+    };
+  } catch (e2) {
+    return null;
+  }
+};
 
 app.persistLocalNickname = function(userInfo) {
   if (userInfo) {
@@ -113,9 +160,15 @@ app.getOpponentDisplayName = function() {
     typeof app.isMyOnlineOpponentBot === 'function' &&
     app.isMyOnlineOpponentBot()
   ) {
+    if (app.onlineOppNickname) {
+      return app.onlineOppNickname;
+    }
     return '电脑';
   }
   if (app.isPvpOnline && app.onlineOpponentIsBot) {
+    if (app.onlineOppNickname) {
+      return app.onlineOppNickname;
+    }
     return '电脑';
   }
   if (app.isPvpOnline && app.onlineOppNickname) {
@@ -207,10 +260,8 @@ app.syncOnlineOpponentProfileForBotSeat = function() {
   app.onlineOppNickname = '';
   app.onlineOppUserId = 0;
   defaultAvatars.setOpponentGenderFromServer(null);
-  if (app.onlineRoomId) {
-    app.onlineOppProfileFetched = true;
-    app.onlineOppProfileRoomId = app.onlineRoomId;
-  }
+  app.onlineOppProfileFetched = false;
+  app.onlineOppProfileRoomId = '';
 };
 
 /** 与 render.drawBoard 中棋盘外接矩形一致 */
@@ -277,6 +328,13 @@ app.computeBoardNameLabelLayout = function(layout) {
     }
   } else if (
     app.isPvpOnline &&
+    app.onlineOppAvatarImg &&
+    app.onlineOppAvatarImg.width &&
+    app.onlineOppAvatarImg.height
+  ) {
+    oppImg = app.onlineOppAvatarImg;
+  } else if (
+    app.isPvpOnline &&
     typeof app.isMyOnlineOpponentBot === 'function' &&
     app.isMyOnlineOpponentBot()
   ) {
@@ -284,13 +342,6 @@ app.computeBoardNameLabelLayout = function(layout) {
     if (!oppImg) {
       oppImg = defaultAvatars.getOpponentAvatarImage();
     }
-  } else if (
-    app.isPvpOnline &&
-    app.onlineOppAvatarImg &&
-    app.onlineOppAvatarImg.width &&
-    app.onlineOppAvatarImg.height
-  ) {
-    oppImg = app.onlineOppAvatarImg;
   } else if (app.isPvpLocal) {
     oppImg = defaultAvatars.getOpponentAvatarImage();
   } else if (!app.isPvpOnline) {
@@ -548,8 +599,8 @@ app.hitWhichGameBoardNameAvatar = function(clientX, clientY) {
 }
 
 /**
- * 首次进入：系统弹窗询问是否授权昵称与头像（无页面内自定义按钮）。
- * 授权走 wx.getUserProfile；若因手势限制失败，则降级为一次性全屏透明授权层（仍无可见按钮）。
+ * 首次进入：系统弹窗「完善资料」，在 showModal 的 success 里调用 wx.getUserProfile（按产品要求保留该写法）。
+ * 若已通过分享链接进入对局，则不再弹出以免盖住棋盘。
  */
 app.maybeFirstVisitProfileModal = function() {
   if (typeof wx === 'undefined') {
@@ -564,6 +615,17 @@ app.maybeFirstVisitProfileModal = function() {
     return;
   }
   setTimeout(function () {
+    try {
+      if (wx.getStorageSync(app.PROFILE_PROMPT_STORAGE_KEY) === '1') {
+        return;
+      }
+    } catch (ePre) {}
+    if (app.isPvpOnline && app.screen === 'game') {
+      return;
+    }
+    if (app.onlineInviteConsumed) {
+      return;
+    }
     wx.showModal({
       title: '完善资料',
       content: '是否授权微信昵称与头像用于本游戏？（仅询问一次）',
@@ -577,7 +639,9 @@ app.maybeFirstVisitProfileModal = function() {
           return;
         }
         if (typeof wx.getUserProfile !== 'function') {
-          app.tryOneShotInvisibleUserInfoButton();
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '当前环境不支持授权', icon: 'none' });
+          }
           return;
         }
         wx.getUserProfile({
@@ -585,7 +649,16 @@ app.maybeFirstVisitProfileModal = function() {
           success: function (up) {
             if (up && up.userInfo) {
               app.persistLocalNickname(up.userInfo);
+              app.saveCachedWeChatUserInfo(up.userInfo);
+              var av = up.userInfo.avatarUrl;
+              if (typeof av === 'string' && av.trim()) {
+                app.loadMyNetworkAvatar(av.trim());
+              }
               authApi.silentLogin(up.userInfo, function (ok) {
+                app.myProfileAvatarFetched = false;
+                if (typeof app.tryFetchMyProfileAvatar === 'function') {
+                  app.tryFetchMyProfileAvatar();
+                }
                 if (typeof wx.showToast === 'function') {
                   wx.showToast({
                     title: ok ? '资料已保存' : '保存失败',
@@ -600,69 +673,14 @@ app.maybeFirstVisitProfileModal = function() {
             } catch (e2) {}
           },
           fail: function () {
-            app.tryOneShotInvisibleUserInfoButton();
+            if (typeof wx.showToast === 'function') {
+              wx.showToast({ title: '未授权', icon: 'none' });
+            }
           }
         });
       }
     });
   }, 450);
-}
-
-/** 降级：全屏透明原生层，用户点一下屏幕完成授权（无可见按钮文案） */
-app.tryOneShotInvisibleUserInfoButton = function() {
-  if (typeof wx === 'undefined' || typeof wx.createUserInfoButton !== 'function') {
-    try {
-      wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
-    } catch (e3) {}
-    if (typeof wx.showToast === 'function') {
-      wx.showToast({ title: '当前环境无法授权', icon: 'none' });
-    }
-    return;
-  }
-  app.syncCanvasWithWindow();
-  var w = app.W;
-  var h = app.H;
-  if (typeof wx.showToast === 'function') {
-    wx.showToast({ title: '请轻触屏幕完成授权', icon: 'none' });
-  }
-  var btn = wx.createUserInfoButton({
-    type: 'text',
-    text: '',
-    withCredentials: false,
-    style: {
-      left: 0,
-      top: 0,
-      width: w,
-      height: h,
-      lineHeight: h,
-      backgroundColor: 'rgba(0,0,0,0.01)',
-      color: 'transparent',
-      textAlign: 'center',
-      fontSize: 1,
-      borderRadius: 0
-    }
-  });
-  btn.onTap(function (res) {
-    var userInfo = res && (res.userInfo || (res.detail && res.detail.userInfo));
-    if (userInfo) {
-      app.persistLocalNickname(userInfo);
-      authApi.silentLogin(userInfo, function (ok) {
-        if (typeof wx.showToast === 'function') {
-          wx.showToast({
-            title: ok ? '资料已保存' : '保存失败',
-            icon: ok ? 'success' : 'none'
-          });
-        }
-        app.draw();
-      });
-    }
-    try {
-      btn.destroy();
-    } catch (e4) {}
-    try {
-      wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
-    } catch (e5) {}
-  });
 }
 
 themes.setTuanMoeUnlockedFromServer(false);
@@ -1451,11 +1469,6 @@ app.onlineSocketConnectGen = 0;
 app.onlineWsEverOpened = false;
 /** 避免冷启动与 onShow 各处理一次同一邀请 */
 app.onlineInviteConsumed = false;
-/** 从分享进入：先展示「授权并加入」门闩（满足 getUserProfile 需用户手势） */
-app.showInviteJoinGate = false;
-app.pendingInviteRoomId = '';
-/** 用户关闭门闩后，同一次会话内不再自动弹出同一房号 */
-app.inviteGateDismissedRoomId = '';
 /** 残局好友房：用于分享文案与「好友进房重置棋盘」提示 */
 app.onlinePuzzleFriendRoom = false;
 /** WS STATE.puzzleRoom：残局房不展示读秒、不依赖本机猜房型 */
@@ -2003,9 +2016,6 @@ app.applyOnlineOpponentProfilePayload = function(d) {
 /** 双方已入座后拉取对手公开资料，使棋盘头像与对端资料一致 */
 app.tryFetchOnlineOpponentProfile = function() {
   if (!app.isPvpOnline || !app.onlineRoomId || !authApi.getSessionToken()) {
-    return;
-  }
-  if (typeof app.isMyOnlineOpponentBot === 'function' && app.isMyOnlineOpponentBot()) {
     return;
   }
   if (app.onlineSpectatorMode) {
@@ -2817,6 +2827,14 @@ app.handleResignTap = function() {
 app.finishGameWithWin = function(r, c, winnerColor) {
   app.gameOver = true;
   app.winner = winnerColor;
+  if (
+    app.isDailyPuzzle &&
+    typeof app.dailyPuzzleBotColor === 'function' &&
+    winnerColor !== app.dailyPuzzleBotColor() &&
+    app.dailyPuzzleResultKind === 'daily_puzzle_bot_win'
+  ) {
+    app.dailyPuzzleResultKind = '';
+  }
   var line = gomoku.getWinningLineCells(app.board, r, c, winnerColor);
   if (!line || line.length < 2) {
     app.winningLineCells = null;

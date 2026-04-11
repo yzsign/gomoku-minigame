@@ -450,10 +450,18 @@ app.drawRatingCardOverlay = function(th) {
 
   var showActivityPoints = d.showActivityPoints !== false;
 
+  var syncBtnReserve =
+    d.showSyncProfileBtn ? app.rpx(52) : 0;
   var contentBottomPad = 18;
   var gapAboveContent = 14;
   var availH =
-    y + L.h - contentBottomPad - gapAboveContent - y - titleBlock;
+    y +
+    L.h -
+    contentBottomPad -
+    gapAboveContent -
+    y -
+    titleBlock -
+    syncBtnReserve;
   var row1H = 28;
   var sectGap = 9;
   var threeColInnerH = 48;
@@ -540,6 +548,25 @@ app.drawRatingCardOverlay = function(th) {
   app.ctx.textBaseline = 'middle';
   app.ctx.fillText('×', app.snapPx(closeCx), app.snapPx(closeCy));
 
+  if (d.showSyncProfileBtn) {
+    var B = app.getRatingCardSyncProfileLayout();
+    if (B) {
+      app.ctx.fillStyle = th.btnPrimary || '#16a34a';
+      app.roundRect(B.left, B.top, B.w, B.h, app.rpx(10));
+      app.ctx.fill();
+      app.ctx.font =
+        '600 13px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+      app.ctx.fillStyle = '#ffffff';
+      app.ctx.textAlign = 'center';
+      app.ctx.textBaseline = 'middle';
+      app.ctx.fillText(
+        '同步头像昵称',
+        app.snapPx(B.cx),
+        app.snapPx(B.cy)
+      );
+    }
+  }
+
   app.ctx.restore();
 }
 
@@ -589,7 +616,8 @@ app.fillRatingCardFromApiData = function(d, opts) {
     total: total,
     noGames: noGames,
     activityPoints: ap,
-    showActivityPoints: !opts.hideActivityPoints
+    showActivityPoints: !opts.hideActivityPoints,
+    showSyncProfileBtn: opts.showSyncProfileBtn === true
   };
   app.homeRatingEloCache = elo;
 }
@@ -644,7 +672,10 @@ app.showMyRatingModal = function() {
         if (typeof d.avatarUrl === 'string' && d.avatarUrl.trim()) {
           app.loadMyNetworkAvatar(d.avatarUrl.trim());
         }
-        app.fillRatingCardFromApiData(d, {});
+        app.fillRatingCardFromApiData(d, {
+          showSyncProfileBtn: true,
+          usePayloadNickname: true
+        });
         app.ratingCardVisible = true;
         app.draw();
       },
@@ -660,6 +691,160 @@ app.showMyRatingModal = function() {
     })
   );
 }
+
+/** 同步微信头像昵称后刷新信息看板（仅本人卡） */
+app.refetchMyRatingCardPayloadAndRedraw = function() {
+  if (!app.ratingCardVisible || !authApi.getSessionToken()) {
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+    return;
+  }
+  wx.request(
+    Object.assign(roomApi.meRatingOptions(), {
+      success: function (res) {
+        if (res.statusCode !== 200 || !res.data) {
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+          return;
+        }
+        var d = res.data;
+        if (d && typeof d === 'string') {
+          try {
+            d = JSON.parse(d);
+          } catch (pe) {
+            d = null;
+          }
+        }
+        if (!d) {
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+          return;
+        }
+        app.syncCheckinStateFromServerPayload(d);
+        app.applyMyGenderFromRatingPayload(d);
+        if (typeof d.avatarUrl === 'string' && d.avatarUrl.trim()) {
+          app.loadMyNetworkAvatar(d.avatarUrl.trim());
+        }
+        app.fillRatingCardFromApiData(d, {
+          showSyncProfileBtn: true,
+          usePayloadNickname: true
+        });
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '已同步', icon: 'success' });
+        }
+        if (typeof app.draw === 'function') {
+          app.draw();
+        }
+      },
+      fail: function () {
+        if (typeof app.draw === 'function') {
+          app.draw();
+        }
+      }
+    })
+  );
+};
+
+/**
+ * 信息看板内：用户点击「同步头像昵称」（须在触摸回调内调 wx.getUserProfile）
+ */
+app.profileSyncFromWeChatInFlight = false;
+app.syncMyProfileFromWeChat = function() {
+  if (app.profileSyncFromWeChatInFlight) {
+    return;
+  }
+  if (!authApi.getSessionToken()) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '请先完成登录', icon: 'none' });
+    }
+    return;
+  }
+  if (typeof wx.getUserProfile !== 'function') {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '当前环境不支持', icon: 'none' });
+    }
+    return;
+  }
+  app.profileSyncFromWeChatInFlight = true;
+  wx.getUserProfile({
+    desc: '用于展示昵称与头像',
+    success: function (up) {
+      app.profileSyncFromWeChatInFlight = false;
+      if (!up || !up.userInfo) {
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '未获取到资料', icon: 'none' });
+        }
+        return;
+      }
+      var ui = up.userInfo;
+      app.persistLocalNickname(ui);
+      app.saveCachedWeChatUserInfo(ui);
+      if (typeof ui.avatarUrl === 'string' && ui.avatarUrl.trim()) {
+        app.loadMyNetworkAvatar(ui.avatarUrl.trim());
+      }
+      authApi.silentLogin(ui, function (ok) {
+        app.myProfileAvatarFetched = false;
+        if (typeof app.tryFetchMyProfileAvatar === 'function') {
+          app.tryFetchMyProfileAvatar();
+        }
+        if (!ok) {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '保存失败', icon: 'none' });
+          }
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+          return;
+        }
+        if (typeof app.refetchMyRatingCardPayloadAndRedraw === 'function') {
+          app.refetchMyRatingCardPayloadAndRedraw();
+        } else if (typeof app.draw === 'function') {
+          app.draw();
+        }
+      });
+    },
+    fail: function () {
+      app.profileSyncFromWeChatInFlight = false;
+      var cached =
+        typeof app.readCachedWeChatUserInfo === 'function'
+          ? app.readCachedWeChatUserInfo()
+          : null;
+      if (cached && cached.nickName) {
+        app.persistLocalNickname(cached);
+        if (typeof cached.avatarUrl === 'string' && cached.avatarUrl.trim()) {
+          app.loadMyNetworkAvatar(cached.avatarUrl.trim());
+        }
+        authApi.silentLogin(cached, function (ok) {
+          app.myProfileAvatarFetched = false;
+          if (typeof app.tryFetchMyProfileAvatar === 'function') {
+            app.tryFetchMyProfileAvatar();
+          }
+          if (!ok) {
+            if (typeof wx.showToast === 'function') {
+              wx.showToast({ title: '保存失败', icon: 'none' });
+            }
+            if (typeof app.draw === 'function') {
+              app.draw();
+            }
+            return;
+          }
+          if (typeof app.refetchMyRatingCardPayloadAndRedraw === 'function') {
+            app.refetchMyRatingCardPayloadAndRedraw();
+          } else if (typeof app.draw === 'function') {
+            app.draw();
+          }
+        });
+        return;
+      }
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: '未授权', icon: 'none' });
+      }
+    }
+  });
+};
 
 /** 联机对局中：拉取当前房间对手的公开天梯 */
 app.showOpponentRatingModal = function() {
@@ -722,7 +907,8 @@ app.showOpponentRatingModal = function() {
         app.fillRatingCardFromApiData(d, {
           cardTitle: '对手战绩',
           usePayloadNickname: true,
-          hideActivityPoints: true
+          hideActivityPoints: true,
+          showSyncProfileBtn: false
         });
         app.ratingCardVisible = true;
         app.draw();
@@ -794,7 +980,8 @@ app.showHistoryOpponentRatingModal = function(opponentUserId) {
         app.fillRatingCardFromApiData(d, {
           cardTitle: '对手战绩',
           usePayloadNickname: true,
-          hideActivityPoints: true
+          hideActivityPoints: true,
+          showSyncProfileBtn: false
         });
         app.ratingCardVisible = true;
         app.draw();
@@ -1325,8 +1512,7 @@ app.submitDailyPuzzleMovesAndHandle = function(r, c, lastColor, wasWin) {
             app.dailyPuzzleSubmitActivityPointsDelta = null;
             app.gameOver = true;
             app.winner = null;
-            app.showResultOverlay = true;
-            app.draw();
+            app.openResult();
             return;
           }
           if (result === 'SOLVED') {
@@ -1985,10 +2171,14 @@ app.openResult = function() {
         }
       } else if (app.winner === null) {
         app.resultKind = 'online_draw';
-      } else if (app.winner === app.pvpOnlineYourColor) {
-        app.resultKind = 'online_win';
       } else {
-        app.resultKind = 'online_lose';
+        var wN = Number(app.winner);
+        var myN = Number(app.pvpOnlineYourColor);
+        if (!isNaN(wN) && !isNaN(myN) && wN === myN) {
+          app.resultKind = 'online_win';
+        } else {
+          app.resultKind = 'online_lose';
+        }
       }
     }
   } else if (app.isPvpLocal) {
@@ -2000,8 +2190,22 @@ app.openResult = function() {
       app.resultKind = 'pvp_white_win';
     }
   } else if (app.isDailyPuzzle) {
-    app.resultKind =
-      app.dailyPuzzleResultKind || 'daily_puzzle_solved';
+    /**
+     * 须以终局胜负为准：dailyPuzzleResultKind 可能残留上一局「人机胜」的 daily_puzzle_bot_win，
+     * 若仍用其覆盖 resultKind，会出现玩家已胜却显示「挑战失败」。
+     */
+    var botCw =
+      typeof app.dailyPuzzleBotColor === 'function'
+        ? app.dailyPuzzleBotColor()
+        : null;
+    if (app.winner != null && botCw != null && app.winner === botCw) {
+      app.resultKind = 'daily_puzzle_bot_win';
+    } else if (app.dailyPuzzleResultKind === 'daily_puzzle_bot_win') {
+      app.resultKind = 'daily_puzzle_solved';
+    } else {
+      app.resultKind =
+        app.dailyPuzzleResultKind || 'daily_puzzle_solved';
+    }
   } else if (app.winner === null) {
     app.resultKind = 'pve_draw';
   } else {
@@ -2273,13 +2477,61 @@ function drawResultOverlayTuanPointsAnim(app, ctx, th, ly) {
   ctx.restore();
 }
 
+/**
+ * resultKind 未写入时（如历史路径只拉了 showResultOverlay），按终局状态推断，避免标题落在默认「对局结束」。
+ */
+function inferOverlayResultKindWhenEmpty(app) {
+  if (!app.gameOver) {
+    return '';
+  }
+  if (app.isPvpOnline) {
+    if (app.onlineSpectatorMode) {
+      return app.winner == null ? 'online_draw' : 'online_spectate';
+    }
+    if (app.winner == null) {
+      return 'online_draw';
+    }
+    var wN = Number(app.winner);
+    var myN = Number(app.pvpOnlineYourColor);
+    if (!isNaN(wN) && !isNaN(myN) && wN === myN) {
+      return 'online_win';
+    }
+    return 'online_lose';
+  }
+  if (app.isDailyPuzzle) {
+    return app.dailyPuzzleResultKind || 'daily_puzzle_solved';
+  }
+  if (app.isPvpLocal) {
+    if (app.winner == null) {
+      return 'pvp_draw';
+    }
+    return app.winner === gomoku.BLACK ? 'pvp_black_win' : 'pvp_white_win';
+  }
+  if (app.winner == null) {
+    return 'pve_draw';
+  }
+  return app.winner === app.pveHumanColor ? 'pve_win' : 'pve_lose';
+}
+
 function resultOverlayTitlePack(app) {
   var rs = app.getUiTheme().result;
   var rk = app.resultKind;
+  if (!rk) {
+    rk = inferOverlayResultKindWhenEmpty(app);
+  }
   var main = '对局结束';
   var sub = '';
   var titleColor = app.getUiTheme().title;
   var mood = 'draw';
+  /** 联机残局房（房主创建或 STATE.puzzleRoom）：胜方展示「挑战成功」主标题 */
+  var onlinePuzzle =
+    !!app.isPvpOnline &&
+    (!!app.onlinePuzzleFriendRoom || !!app.onlinePuzzleRoomFromWs);
+  var winColorSub = '';
+  if (app.winner != null && app.winner !== undefined) {
+    winColorSub =
+      Number(app.winner) === gomoku.WHITE ? '白棋获胜' : '黑棋获胜';
+  }
   switch (rk) {
     case 'pve_win':
       mood = 'win';
@@ -2319,9 +2571,17 @@ function resultOverlayTitlePack(app) {
       break;
     case 'online_win':
       mood = 'win';
-      main = app.winner === gomoku.WHITE ? '白棋获胜' : '黑棋获胜';
-      if (app.onlineGameEndReason === 'MOVE_TIMEOUT') {
-        sub = '对方思考超时';
+      if (onlinePuzzle) {
+        main = '挑战成功';
+        sub = winColorSub;
+        if (app.onlineGameEndReason === 'MOVE_TIMEOUT') {
+          sub = '对方思考超时';
+        }
+      } else {
+        main = winColorSub;
+        if (app.onlineGameEndReason === 'MOVE_TIMEOUT') {
+          sub = '对方思考超时';
+        }
       }
       titleColor = rs.win.title;
       break;
@@ -2343,24 +2603,36 @@ function resultOverlayTitlePack(app) {
       break;
     case 'online_opponent_left':
       mood = 'win';
-      main = app.winner === gomoku.WHITE ? '白棋获胜' : '黑棋获胜';
+      if (onlinePuzzle) {
+        main = '挑战成功';
+        sub = winColorSub;
+      } else {
+        main = winColorSub;
+      }
       titleColor = rs.win.title;
       break;
     case 'online_spectate':
-      mood = 'draw';
-      main =
-        app.winner === null
-          ? '和局'
-          : app.winner === gomoku.WHITE
-            ? '白棋获胜'
-            : '黑棋获胜';
-      sub = '旁观对局';
-      titleColor = rs.draw.title;
+      if (onlinePuzzle && app.winner != null) {
+        mood = 'win';
+        main = '挑战成功';
+        sub = winColorSub + ' · 旁观对局';
+        titleColor = rs.win.title;
+      } else {
+        mood = 'draw';
+        main =
+          app.winner === null
+            ? '和局'
+            : app.winner === gomoku.WHITE
+              ? '白棋获胜'
+              : '黑棋获胜';
+        sub = '旁观对局';
+        titleColor = rs.draw.title;
+      }
       break;
     case 'daily_puzzle_solved':
       mood = 'win';
-      main = '残局完成';
-      sub = '今日挑战成功';
+      main = '挑战成功';
+      sub = '残局完成';
       titleColor = rs.win.title;
       break;
     case 'daily_puzzle_already':
@@ -2684,7 +2956,26 @@ app.drawResultOverlay = function() {
         dZero: dZero
       };
     }
-    if (app.isPvpOnline || app.isPvpLocal) {
+    if (app.isPvpOnline) {
+      var imBlackOnline = Number(app.pvpOnlineYourColor) === gomoku.BLACK;
+      var isMeOnline = forBlack === imBlackOnline;
+      if (
+        (app.onlinePuzzleFriendRoom || app.onlinePuzzleRoomFromWs) &&
+        !sr
+      ) {
+        if (isMeOnline) {
+          var eloPuzzleMe =
+            typeof app.homeRatingEloCache === 'number' &&
+            isFinite(app.homeRatingEloCache)
+              ? String(Math.round(app.homeRatingEloCache))
+              : '—';
+          return { elo: eloPuzzleMe, delta: '', dNeg: false, dZero: true };
+        }
+        return { elo: '人机', delta: '', dNeg: false, dZero: true };
+      }
+      return { elo: '--', delta: '', dNeg: false, dZero: false };
+    }
+    if (app.isPvpLocal) {
       return { elo: '--', delta: '', dNeg: false, dZero: false };
     }
     var hum = app.pveHumanColor;
@@ -2704,7 +2995,7 @@ app.drawResultOverlay = function() {
   var lb;
   var lw;
   if (app.isPvpOnline) {
-    var meBlack = app.pvpOnlineYourColor === gomoku.BLACK;
+    var meBlack = Number(app.pvpOnlineYourColor) === gomoku.BLACK;
     lb = eloLine(meBlack);
     lw = eloLine(!meBlack);
   } else {
