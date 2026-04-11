@@ -3,8 +3,7 @@
  * （需与微信后台「request 合法域名」一致；生产请用 https + wss）
  */
 // var GOMOKU_API_BASE = 'http://127.0.0.1:8080';
-var GOMOKU_API_BASE =
-  'https://springboot-emh7-prod-6gn1r1137409822f-1418403127.ap-shanghai.run.wxcloudrun.com';
+var GOMOKU_API_BASE ='https://springboot-emh7-241395-4-1418403127.sh.run.tcloudbase.com';
 
 function withAuthHeaders(baseHeader) {
   var h = baseHeader ? Object.assign({}, baseHeader) : {};

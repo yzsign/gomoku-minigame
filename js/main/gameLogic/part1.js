@@ -1400,6 +1400,13 @@ app.onlineSocketConnectGen = 0;
 app.onlineWsEverOpened = false;
 /** 避免冷启动与 onShow 各处理一次同一邀请 */
 app.onlineInviteConsumed = false;
+/** 从分享进入：先展示「授权并加入」门闩（满足 getUserProfile 需用户手势） */
+app.showInviteJoinGate = false;
+app.pendingInviteRoomId = '';
+/** 用户关闭门闩后，同一次会话内不再自动弹出同一房号 */
+app.inviteGateDismissedRoomId = '';
+/** 残局好友房：用于分享文案与「好友进房重置棋盘」提示 */
+app.onlinePuzzleFriendRoom = false;
 /** 本局是否已请求 POST /api/games/settle（防重复；新局由 applyOnlineState 置 false） */
 app.onlineSettleSent = false;
 /** 结算分未返回时延迟补拉一次 settle（仅一局内有效；离开房间时清除） */
@@ -1487,6 +1494,7 @@ app.gameBarIconSizeMul = {
   undo: 0.86,
   /** restart2：环形+中心点略「满」，倍率与悔棋 0.86 同档略抬一点对齐视觉 */
   reset: 0.88,
+  invite: 0.88,
   draw: 1,
   flag: 1
 };
@@ -1496,6 +1504,7 @@ app.GAME_STATUS_CHIP_H_RPX = 0;
 app.gameBarHomeImg = null;
 app.gameBarUndoImg = null;
 app.gameBarResetImg = null;
+app.gameBarInviteImg = null;
 app.gameBarDrawImg = null;
 app.gameBarResignImg = null;
 /** 战绩页：在当前页面上以遮罩弹出棋谱回放（不切换 screen） */
@@ -1757,6 +1766,7 @@ app.disconnectOnline = function() {
   app.onlineRoomId = '';
   app.onlineToken = '';
   app.onlineSpectatorMode = false;
+  app.onlinePuzzleFriendRoom = false;
   app.pvpOnlineYourColor = app.BLACK;
   app.onlineBlackConnected = false;
   app.onlineWhiteConnected = false;
@@ -1970,6 +1980,9 @@ app.getMyAvatarImageForUi = function() {
 }
 
 app.onlineSocketCanSend = function() {
+  if (app.onlineSpectatorMode) {
+    return false;
+  }
   return (
     app.socketTask &&
     typeof app.socketTask.send === 'function' &&
@@ -2609,6 +2622,9 @@ app.isDrawButtonActive = function() {
     return false;
   }
   if (app.isPvpOnline) {
+    if (app.onlineSpectatorMode) {
+      return false;
+    }
     if (!app.onlineWsConnected || app.onlineOpponentLeft) {
       return false;
     }
@@ -2647,6 +2663,9 @@ app.isResignButtonActive = function() {
     return false;
   }
   if (app.isPvpOnline) {
+    if (app.onlineSpectatorMode) {
+      return false;
+    }
     if (!app.onlineWsConnected || app.onlineOpponentLeft) {
       return false;
     }
@@ -2817,6 +2836,22 @@ app.applyOnlineState = function(data) {
   app.onlineWhiteConnected = !!data.whiteConnected;
   if (data.whiteIsBot !== undefined && data.whiteIsBot !== null) {
     app.onlineOpponentIsBot = !!data.whiteIsBot;
+  }
+  if (
+    app.isPvpOnline &&
+    app.onlinePuzzleFriendRoom &&
+    !prevWhite &&
+    data.whiteConnected
+  ) {
+    app.onlineMoveHistory = [];
+    app.winningLineCells = null;
+    app.lastOpponentMove = null;
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '好友已加入，棋盘已重置', icon: 'none' });
+    }
+    if (app.onlineSpectatorMode) {
+      app.lastMsg = '旁观中 · 好友已加入';
+    }
   }
   if (app.isPvpOnline && !app.isRandomMatch && !app.onlineOpponentIsBot) {
     if (app.onlineSpectatorMode) {

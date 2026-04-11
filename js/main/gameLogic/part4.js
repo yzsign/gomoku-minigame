@@ -682,7 +682,125 @@ app.drawHome = function() {
   var th = app.getCurrentTheme();
   app.drawHomeContentBelowPieceSkinModal();
   app.drawPieceSkinModalOverlay(th);
-}
+  app.drawInviteJoinGateOverlay(th);
+};
+
+/**
+ * 好友分享进入：半透明遮罩 +「授权并加入」（满足 getUserProfile 手势）。
+ */
+app.drawInviteJoinGateOverlay = function(th) {
+  if (!app.showInviteJoinGate || !app.pendingInviteRoomId) {
+    return;
+  }
+  var ctx = app.ctx;
+  var L = app.getInviteJoinGateLayout();
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.52)';
+  ctx.fillRect(0, 0, app.W, app.H);
+  ctx.fillStyle = 'rgba(255,252,248,0.98)';
+  app.roundRect(L.cardLeft, L.cardTop, L.cardW, L.cardH, app.rpx(16));
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  render.drawText(
+    ctx,
+    '好友邀请你下棋',
+    L.cardLeft + L.cardW * 0.5,
+    L.cardTop + app.rpx(52),
+    app.rpx(34),
+    th.title || '#333',
+    'bold'
+  );
+  render.drawText(
+    ctx,
+    '房号 ' + app.pendingInviteRoomId,
+    L.cardLeft + L.cardW * 0.5,
+    L.cardTop + app.rpx(102),
+    app.rpx(26),
+    th.subtitle || '#666',
+    'normal'
+  );
+  render.drawText(
+    ctx,
+    '加入后可与好友对局；首次将请求微信昵称与头像用于房间内展示',
+    L.cardLeft + L.cardW * 0.5,
+    L.cardTop + app.rpx(148),
+    app.rpx(22),
+    th.muted || '#888',
+    'normal'
+  );
+  ctx.fillStyle = th.btnPrimary || '#16a34a';
+  app.roundRect(
+    L.joinCx - L.joinW * 0.5,
+    L.joinCy - L.joinH * 0.5,
+    L.joinW,
+    L.joinH,
+    app.rpx(14)
+  );
+  ctx.fill();
+  render.drawText(
+    ctx,
+    '授权并加入房间',
+    L.joinCx,
+    L.joinCy,
+    app.rpx(30),
+    '#ffffff',
+    'bold'
+  );
+  render.drawText(
+    ctx,
+    '稍后再说',
+    L.cancelCx,
+    L.cancelCy,
+    app.rpx(26),
+    th.muted || '#78716c',
+    'normal'
+  );
+  ctx.restore();
+};
+
+app.getInviteJoinGateLayout = function() {
+  var cx = app.W * 0.5;
+  var cardW = Math.min(app.rpx(620), app.W - app.rpx(48));
+  var cardH = app.rpx(360);
+  var cy = app.H * 0.42;
+  var btnW = cardW - app.rpx(56);
+  var btnH = app.rpx(84);
+  var joinCy = cy + app.rpx(38);
+  return {
+    cardLeft: cx - cardW * 0.5,
+    cardTop: cy - cardH * 0.5,
+    cardW: cardW,
+    cardH: cardH,
+    joinCx: cx,
+    joinCy: joinCy,
+    joinW: btnW,
+    joinH: btnH,
+    cancelCx: cx,
+    cancelCy: joinCy + btnH * 0.5 + app.rpx(52)
+  };
+};
+
+app.hitInviteJoinGate = function(clientX, clientY) {
+  if (!app.showInviteJoinGate || !app.pendingInviteRoomId) {
+    return null;
+  }
+  var L = app.getInviteJoinGateLayout();
+  if (
+    Math.abs(clientX - L.joinCx) <= L.joinW * 0.5 + 8 &&
+    Math.abs(clientY - L.joinCy) <= L.joinH * 0.5 + 12
+  ) {
+    return 'join';
+  }
+  if (
+    Math.abs(clientX - L.cancelCx) <= app.rpx(160) &&
+    Math.abs(clientY - L.cancelCy) <= app.rpx(28)
+  ) {
+    return 'cancel';
+  }
+  return null;
+};
 
 app.drawMatching = function() {
   app.fillAmbientBackground();

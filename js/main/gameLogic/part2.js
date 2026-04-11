@@ -201,8 +201,9 @@ app.startPuzzleFriendInvite = function() {
           var d = res.data;
           app.exitAdminPuzzleScreen();
           app.onlineRoomId = d.roomId;
-          app.onlineToken = d.spectatorToken;
-          app.onlineSpectatorMode = true;
+          app.onlineToken = d.blackToken || d.spectatorToken;
+          app.onlineSpectatorMode = false;
+          app.onlinePuzzleFriendRoom = true;
           app.pvpOnlineYourColor = app.BLACK;
           app.isPvpLocal = false;
           app.isRandomMatch = false;
@@ -219,6 +220,105 @@ app.startPuzzleFriendInvite = function() {
           if (typeof wx.shareAppMessage === 'function') {
             wx.shareAppMessage({
               title: '五子棋残局 房号 ' + app.onlineRoomId,
+              query: 'roomId=' + app.onlineRoomId + '&online=1'
+            });
+          } else if (typeof wx.showToast === 'function') {
+            wx.showToast({
+              title: '请点右上角菜单转发给好友',
+              icon: 'none'
+            });
+          }
+        },
+        fail: function() {
+          wx.hideLoading();
+          wx.showToast({ title: '网络请求失败', icon: 'none' });
+        }
+      })
+    );
+  });
+};
+
+/**
+ * 每日残局：按当前盘面与「下一手」创建好友房；房主执黑、好友执白；好友进房后服务端重置为邀请时残局。
+ */
+app.startDailyPuzzleFriendInvite = function() {
+  if (!app.isDailyPuzzle || !app.board) {
+    return;
+  }
+  if (app.dailyPuzzleSubmitting) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '提交判题中…', icon: 'none' });
+    }
+    return;
+  }
+  if (app.gameOver) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '对局已结束', icon: 'none' });
+    }
+    return;
+  }
+  authApi.ensureSession(function(sessionOk, errHint) {
+    if (!sessionOk) {
+      wx.showToast({ title: errHint || '请先完成登录', icon: 'none' });
+      return;
+    }
+    if (typeof app.destroyAiWorker === 'function') {
+      app.destroyAiWorker();
+    }
+    app.dailyPuzzleBotGen++;
+    app.disconnectOnline();
+    wx.showLoading({ title: '创建房间…', mask: true });
+    var board = [];
+    var r;
+    var c;
+    for (r = 0; r < app.SIZE; r++) {
+      board[r] = [];
+      for (c = 0; c < app.SIZE; c++) {
+        board[r][c] = app.board[r][c];
+      }
+    }
+    var sideToMove = app.current;
+    wx.request(
+      Object.assign(roomApi.mePuzzleFriendRoomOptions(board, sideToMove), {
+        success: function(res) {
+          wx.hideLoading();
+          if ((res.statusCode !== 200 && res.statusCode !== 201) || !res.data) {
+            wx.showToast({
+              title: '创建失败 ' + (res.statusCode || ''),
+              icon: 'none'
+            });
+            return;
+          }
+          var d = res.data;
+          app.isDailyPuzzle = false;
+          app.dailyPuzzleMeta = null;
+          app.dailyPuzzleMoves = [];
+          app.dailyPuzzleInitialBoard = null;
+          app.dailyPuzzleSubmitting = false;
+          app.dailyPuzzleResultKind = '';
+          app.dailyPuzzleSubmitActivityPointsDelta = null;
+          app.showResultOverlay = false;
+          app.onlineResultOverlaySticky = false;
+          app.onlineRoomId = d.roomId;
+          app.onlineToken = d.blackToken || d.spectatorToken;
+          app.onlineSpectatorMode = false;
+          app.onlinePuzzleFriendRoom = true;
+          app.pvpOnlineYourColor = app.BLACK;
+          app.isPvpLocal = false;
+          app.isRandomMatch = false;
+          app.isPvpOnline = true;
+          app.screen = 'game';
+          app.lastOpponentMove = null;
+          app.board = gomoku.createBoard();
+          app.current = app.BLACK;
+          app.gameOver = false;
+          app.winner = null;
+          app.lastMsg = '等待好友加入…';
+          app.startOnlineSocket();
+          app.draw();
+          if (typeof wx.shareAppMessage === 'function') {
+            wx.shareAppMessage({
+              title: '来下这盘残局 · 房号 ' + app.onlineRoomId,
               query: 'roomId=' + app.onlineRoomId + '&online=1'
             });
           } else if (typeof wx.showToast === 'function') {
@@ -273,6 +373,20 @@ app.joinOnlineAsGuest = function(roomId) {
         return;
       }
       var d = res.data;
+      app.inviteGateDismissedRoomId = '';
+      app.showInviteJoinGate = false;
+      app.pendingInviteRoomId = '';
+      app.isDailyPuzzle = false;
+      app.dailyPuzzleMeta = null;
+      app.dailyPuzzleMoves = [];
+      app.dailyPuzzleInitialBoard = null;
+      app.dailyPuzzleSubmitting = false;
+      app.dailyPuzzleResultKind = '';
+      app.dailyPuzzleSubmitActivityPointsDelta = null;
+      if (typeof app.destroyAiWorker === 'function') {
+        app.destroyAiWorker();
+      }
+      app.dailyPuzzleBotGen = (app.dailyPuzzleBotGen || 0) + 1;
       app.onlineRoomId = roomId;
       app.onlineToken = d.whiteToken;
       app.onlineSpectatorMode = false;
@@ -306,8 +420,82 @@ app.tryLaunchOnlineInvite = function(query) {
   if (!query || String(query.online) !== '1' || !query.roomId) {
     return;
   }
-  app.joinOnlineAsGuest(String(query.roomId));
-}
+  var rid = String(query.roomId);
+  if (app.inviteGateDismissedRoomId && app.inviteGateDismissedRoomId === rid) {
+    return;
+  }
+  if (app.showInviteJoinGate && app.pendingInviteRoomId === rid) {
+    return;
+  }
+  app.pendingInviteRoomId = rid;
+  app.showInviteJoinGate = true;
+  app.screen = 'home';
+  if (typeof app.draw === 'function') {
+    app.draw();
+  }
+};
+
+app.completeInviteJoinFromGate = function() {
+  var rid = app.pendingInviteRoomId;
+  if (!rid) {
+    return;
+  }
+  app.showInviteJoinGate = false;
+  app.pendingInviteRoomId = '';
+  authApi.ensureSession(function(ok, errHint) {
+    if (!ok) {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: errHint || '请先登录', icon: 'none' });
+      }
+      app.pendingInviteRoomId = rid;
+      app.showInviteJoinGate = true;
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
+      return;
+    }
+    function doJoin() {
+      app.joinOnlineAsGuest(rid);
+    }
+    if (typeof wx.getUserProfile === 'function') {
+      wx.getUserProfile({
+        desc: '用于房间内展示昵称与头像',
+        success: function(res) {
+          var u = res.userInfo;
+          authApi.silentLogin(
+            {
+              nickName: u.nickName,
+              avatarUrl: u.avatarUrl,
+              gender: typeof u.gender === 'number' ? u.gender : 0
+            },
+            function(loginOk, payload) {
+              if (loginOk && payload && typeof authApi.persistSession === 'function') {
+                authApi.persistSession(payload);
+              }
+              doJoin();
+            }
+          );
+        },
+        fail: function() {
+          doJoin();
+        }
+      });
+    } else {
+      doJoin();
+    }
+  });
+};
+
+app.cancelInviteJoinGate = function() {
+  if (app.pendingInviteRoomId) {
+    app.inviteGateDismissedRoomId = app.pendingInviteRoomId;
+  }
+  app.showInviteJoinGate = false;
+  app.pendingInviteRoomId = '';
+  if (typeof app.draw === 'function') {
+    app.draw();
+  }
+};
 
 /* ---------- 棋盘布局与菜单几何 ---------- */
 
@@ -822,11 +1010,12 @@ app.loadHomeUiAssets = function() {
   app.gameBarHomeImg = null;
   app.gameBarUndoImg = null;
   app.gameBarResetImg = null;
+  app.gameBarInviteImg = null;
   app.gameBarDrawImg = null;
   app.gameBarResignImg = null;
 
   var loadPhase = 1;
-  var remaining = 15;
+  var remaining = 16;
   function oneDone() {
     remaining--;
     if (remaining > 0) {
@@ -972,6 +1161,9 @@ app.loadHomeUiAssets = function() {
   });
   bind('images/ui/game-bar-reset.png', function (im) {
     app.gameBarResetImg = im;
+  });
+  bind('images/ui/game-bar-invitation.png', function (im) {
+    app.gameBarInviteImg = im;
   });
   bind('images/ui/game-bar-draw.png', function (im) {
     app.gameBarDrawImg = im;

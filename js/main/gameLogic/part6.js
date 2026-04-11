@@ -29,9 +29,18 @@ module.exports = function register(app, deps) {
 app.setupShareMessage = function() {
   if (typeof wx.onShareAppMessage === 'function') {
     wx.onShareAppMessage(function () {
-      if (app.isPvpOnline && app.onlineRoomId && app.pvpOnlineYourColor === app.BLACK) {
+      if (
+        app.isPvpOnline &&
+        app.onlineRoomId &&
+        (app.onlinePuzzleFriendRoom ||
+          app.onlineSpectatorMode ||
+          app.pvpOnlineYourColor === app.BLACK)
+      ) {
         return {
-          title: '五子棋 房号 ' + app.onlineRoomId,
+          title:
+            app.onlinePuzzleFriendRoom || app.onlineSpectatorMode
+              ? '来下这盘残局 · 房号 ' + app.onlineRoomId
+              : '五子棋 房号 ' + app.onlineRoomId,
           query: 'roomId=' + app.onlineRoomId + '&online=1'
         };
       }
