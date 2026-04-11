@@ -369,6 +369,8 @@ app.joinOnlineAsGuest = function(roomId) {
           } else {
             msg = '房间已满';
           }
+        } else if (res.statusCode === 503) {
+          msg = '暂无人机账号，请稍后重试';
         }
         wx.showToast({ title: msg, icon: 'none' });
         return;
@@ -389,9 +391,24 @@ app.joinOnlineAsGuest = function(roomId) {
       }
       app.dailyPuzzleBotGen = (app.dailyPuzzleBotGen || 0) + 1;
       app.onlineRoomId = roomId;
-      app.onlineToken = d.whiteToken;
+      var joinTok =
+        d.yourToken != null && d.yourToken !== ''
+          ? d.yourToken
+          : d.blackToken != null && d.blackToken !== ''
+            ? d.blackToken
+            : d.whiteToken;
+      var joinColor;
+      if (d.yourColor != null && d.yourColor !== '') {
+        joinColor = Number(d.yourColor);
+      } else if (joinTok != null && joinTok === d.blackToken) {
+        joinColor = app.BLACK;
+      } else {
+        joinColor = app.WHITE;
+      }
+      app.onlineToken = joinTok;
       app.onlineSpectatorMode = false;
-      app.pvpOnlineYourColor = app.WHITE;
+      app.pvpOnlineYourColor =
+        joinColor === app.BLACK ? app.BLACK : app.WHITE;
       app.isPvpLocal = false;
       app.isRandomMatch = false;
       app.screen = 'game';
