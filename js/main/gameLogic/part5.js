@@ -587,7 +587,10 @@ app.draw = function() {
     titleFs,
     th.subtitle != null ? th.subtitle : th.title
   );
-  if (app.isPvpOnline) {
+  if (
+    typeof app.shouldShowOnlineGameClockUi === 'function' &&
+    app.shouldShowOnlineGameClockUi()
+  ) {
     app.drawOnlineGameClockAboveBoard(app.ctx, th, app.layout);
   }
   app.ctx.restore();
@@ -763,15 +766,18 @@ app.draw = function() {
    * 视觉上像图标重影/两个。仅在「不会在后面再画底栏」时画这一遍。
    */
   var dailyBarRedrawOnOverlay =
-    app.isDailyPuzzle &&
-    !app.isPvpOnline &&
+    typeof app.isDailyStyleGameActionBar === 'function' &&
+    app.isDailyStyleGameActionBar() &&
     app.showResultOverlay &&
     (app.gameOver || app.onlineResultOverlaySticky);
   if (!dailyBarRedrawOnOverlay) {
     app.drawGameActionBar(undoLabel, undoActive, drawLabel);
   }
 
-  if (app.isPvpOnline) {
+  if (
+    typeof app.shouldShowOnlineGameClockUi === 'function' &&
+    app.shouldShowOnlineGameClockUi()
+  ) {
     app.ensureOnlineClockTick();
   } else if (typeof app.clearOnlineClockTick === 'function') {
     app.clearOnlineClockTick();
@@ -823,7 +829,7 @@ app.getGameActionBarLayout = function() {
       : app.rpx(128);
   var x0 = pad;
   var y0 = btnY - barH / 2;
-  /** 人机：2 列；每日残局：4 列（重置 + 邀请好友）；联机：4 列（须优先于 isDailyPuzzle，避免入房后仍显示残局底栏） */
+  /** 人机：2 列；每日残局 / 残局好友房旁观：4 列（重置 + 邀请）；其余联机：4 列（和棋 + 认输，见 isDailyStyleGameActionBar） */
   var colCount =
     app.isPvpOnline || app.isPvpLocal
       ? 4
@@ -875,6 +881,12 @@ app.getGameActionBarLayout = function() {
  * 是否在本侧头像上绘制步时环（仅当前行棋一侧；对方头像保持干净）。
  */
 app.shouldDrawOnlineStepRingForSide = function(isMySide) {
+  if (
+    typeof app.shouldShowOnlineGameClockUi === 'function' &&
+    !app.shouldShowOnlineGameClockUi()
+  ) {
+    return false;
+  }
   if (!app.isPvpOnline || app.gameOver) {
     return false;
   }
@@ -1021,6 +1033,12 @@ app.formatGameTotalClockMmSs = function(totalSec) {
  * 联机局时限文案：纯 MM:SS 或「读秒暂停」（无「局」字）；步时由头像环表示。
  */
 app.buildOnlineClockSubline = function() {
+  if (
+    typeof app.shouldShowOnlineGameClockUi === 'function' &&
+    !app.shouldShowOnlineGameClockUi()
+  ) {
+    return '';
+  }
   if (!app.isPvpOnline || app.gameOver) {
     return '';
   }
@@ -1058,6 +1076,12 @@ app.buildOnlineClockSubline = function() {
  * 联机局时限：棋盘正上方（顶栏与棋盘木边之间），大号字，与棋盘水平居中对齐。
  */
 app.drawOnlineGameClockAboveBoard = function(ctx, th, layout) {
+  if (
+    typeof app.shouldShowOnlineGameClockUi === 'function' &&
+    !app.shouldShowOnlineGameClockUi()
+  ) {
+    return;
+  }
   if (!app.isPvpOnline || app.gameOver || !layout) {
     return;
   }
@@ -1174,6 +1198,8 @@ app.ensureOnlineClockTick = function() {
 
 app.shouldRunOnlineClockCountdown = function() {
   return (
+    typeof app.shouldShowOnlineGameClockUi === 'function' &&
+    app.shouldShowOnlineGameClockUi() &&
     app.isPvpOnline &&
     app.screen === 'game' &&
     !app.gameOver &&
@@ -1318,7 +1344,10 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
   var drawOk = app.isDrawButtonActive();
   var resignOk = app.isResignButtonActive();
   var pveBarOnly = L.colCount === 2;
-  var dailyBar = app.isDailyPuzzle && !app.isPvpOnline && L.colCount === 4;
+  var dailyBar =
+    typeof app.isDailyStyleGameActionBar === 'function' &&
+    app.isDailyStyleGameActionBar() &&
+    L.colCount === 4;
   var cols = [
     {
       img: app.gameBarHomeImg,
@@ -1340,7 +1369,10 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
     cols.push({
       img: app.gameBarInviteImg,
       kind: 'invite',
-      enabled: true
+      enabled:
+        typeof app.isPuzzleFriendInviteEnabled === 'function'
+          ? app.isPuzzleFriendInviteEnabled()
+          : true
     });
   } else if (!pveBarOnly) {
     cols.push(
@@ -1913,11 +1945,23 @@ app.hitGameButton = function(clientX, clientY) {
   if (col === 1) {
     return 'undo';
   }
+  var dailyStyleBar =
+    typeof app.isDailyStyleGameActionBar === 'function' &&
+    app.isDailyStyleGameActionBar();
   if (col === 2) {
-    return app.isDailyPuzzle && !app.isPvpOnline ? 'reset' : 'draw';
+    return dailyStyleBar ? 'reset' : 'draw';
   }
   if (col === 3) {
-    return app.isDailyPuzzle && !app.isPvpOnline ? 'invite_friend' : 'resign';
+    if (dailyStyleBar) {
+      if (
+        typeof app.isPuzzleFriendInviteEnabled === 'function' &&
+        !app.isPuzzleFriendInviteEnabled()
+      ) {
+        return null;
+      }
+      return 'invite_friend';
+    }
+    return 'resign';
   }
   return 'resign';
 }
@@ -2970,6 +3014,12 @@ wx.onTouchStart(function (e) {
     return;
   }
   if (gbtn === 'invite_friend') {
+    if (
+      typeof app.isPuzzleFriendInviteEnabled === 'function' &&
+      !app.isPuzzleFriendInviteEnabled()
+    ) {
+      return;
+    }
     if (typeof app.startDailyPuzzleFriendInvite === 'function') {
       app.startDailyPuzzleFriendInvite();
     }
@@ -3472,6 +3522,14 @@ if (typeof wx.onShow === 'function') {
   });
 } else {
   authApi.silentLogin();
+}
+
+if (typeof wx.onHide === 'function') {
+  wx.onHide(function () {
+    if (typeof app.clearOnlineClockTick === 'function') {
+      app.clearOnlineClockTick();
+    }
+  });
 }
 
 if (typeof wx.onNetworkStatusChange === 'function') {

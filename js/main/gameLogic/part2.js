@@ -201,7 +201,8 @@ app.startPuzzleFriendInvite = function() {
           var d = res.data;
           app.exitAdminPuzzleScreen();
           app.onlineRoomId = d.roomId;
-          app.onlineToken = d.blackToken || d.spectatorToken;
+          /** 须用 spectatorToken 连 WS：服务端仅该 token 视为旁观；用 blackToken 会当作黑方棋手，STATE.spectator=false 会清掉旁观态与残局底栏 */
+          app.onlineToken = d.spectatorToken || d.blackToken;
           app.onlineSpectatorMode = true;
           app.onlinePuzzleFriendRoom = true;
           app.pvpOnlineYourColor = app.BLACK;
@@ -243,6 +244,25 @@ app.startPuzzleFriendInvite = function() {
  * 好友进房后服务端重置棋盘并启用黑/白人机。
  */
 app.startDailyPuzzleFriendInvite = function() {
+  if (
+    app.isPvpOnline &&
+    app.onlineSpectatorMode &&
+    app.onlinePuzzleFriendRoom &&
+    app.onlineRoomId
+  ) {
+    if (typeof wx.shareAppMessage === 'function') {
+      wx.shareAppMessage({
+        title: '来下这盘残局 · 房号 ' + app.onlineRoomId,
+        query: 'roomId=' + app.onlineRoomId + '&online=1'
+      });
+    } else if (typeof wx.showToast === 'function') {
+      wx.showToast({
+        title: '请点右上角菜单转发给好友',
+        icon: 'none'
+      });
+    }
+    return;
+  }
   if (!app.isDailyPuzzle || !app.board) {
     return;
   }
@@ -301,7 +321,8 @@ app.startDailyPuzzleFriendInvite = function() {
           app.showResultOverlay = false;
           app.onlineResultOverlaySticky = false;
           app.onlineRoomId = d.roomId;
-          app.onlineToken = d.blackToken || d.spectatorToken;
+          /** 须用 spectatorToken 连 WS，否则房主被当作黑方棋手，STATE 会覆盖旁观态（见 admin 邀请同源注释） */
+          app.onlineToken = d.spectatorToken || d.blackToken;
           app.onlineSpectatorMode = true;
           app.onlinePuzzleFriendRoom = true;
           app.pvpOnlineYourColor = app.BLACK;
@@ -568,7 +589,11 @@ app.computeLayout = function() {
   /* 联机：主标题下预留一条带，供大号局时限画在棋盘上方 */
   var headerBottom = titleCyApprox + titleFsApprox * 0.48;
   var onlineClockStrip =
-    app.isPvpOnline ? toPx(52) : 0;
+    app.isPvpOnline &&
+    typeof app.shouldShowOnlineGameClockUi === 'function' &&
+    app.shouldShowOnlineGameClockUi()
+      ? toPx(52)
+      : 0;
   var topBar = Math.max(44, headerBottom + toPx(8) + onlineClockStrip);
   /* 残局管理：为「题目标题/排期」横条与棋盘间留白（与 part6 getAdminPuzzleMetaBarLayout 配套） */
   if (app.screen === 'admin_puzzle') {

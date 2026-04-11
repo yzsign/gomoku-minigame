@@ -1410,6 +1410,8 @@ app.pendingInviteRoomId = '';
 app.inviteGateDismissedRoomId = '';
 /** 残局好友房：用于分享文案与「好友进房重置棋盘」提示 */
 app.onlinePuzzleFriendRoom = false;
+/** WS STATE.puzzleRoom：残局房不展示读秒、不依赖本机猜房型 */
+app.onlinePuzzleRoomFromWs = false;
 /** 本局是否已请求 POST /api/games/settle（防重复；新局由 applyOnlineState 置 false） */
 app.onlineSettleSent = false;
 /** 结算分未返回时延迟补拉一次 settle（仅一局内有效；离开房间时清除） */
@@ -1442,6 +1444,54 @@ app.isOnlineFriendMatchNotStarted = function() {
     return !app.onlineWhiteConnected;
   }
   return !app.onlineBlackConnected || !app.onlineWhiteConnected;
+};
+
+/**
+ * 底栏使用「每日残局」四键样式：离开 / 悔棋 / 重置 / 邀请。
+ * - 单机每日残局：isDailyPuzzle && !isPvpOnline
+ * - 残局好友房：房主有 onlinePuzzleFriendRoom；好友凭 STATE.puzzleRoom（onlinePuzzleRoomFromWs）
+ */
+app.isDailyStyleGameActionBar = function() {
+  if (app.isDailyPuzzle && !app.isPvpOnline) {
+    return true;
+  }
+  return (
+    !!app.isPvpOnline &&
+    (!!app.onlinePuzzleFriendRoom || !!app.onlinePuzzleRoomFromWs)
+  );
+};
+
+/**
+ * 「邀请」仅房主可用；好友进入残局房后置灰不可点。
+ */
+app.isPuzzleFriendInviteEnabled = function() {
+  if (app.isDailyPuzzle && !app.isPvpOnline) {
+    return true;
+  }
+  if (
+    app.isPvpOnline &&
+    typeof app.isDailyStyleGameActionBar === 'function' &&
+    app.isDailyStyleGameActionBar()
+  ) {
+    return !!app.onlinePuzzleFriendRoom;
+  }
+  return true;
+};
+
+/**
+ * 是否绘制/刷新联机读秒（局时条、头像环、setInterval）；残局房（好友创建或 STATE.puzzleRoom）一律关闭。
+ */
+app.shouldShowOnlineGameClockUi = function() {
+  if (!app.isPvpOnline) {
+    return false;
+  }
+  if (app.onlinePuzzleFriendRoom) {
+    return false;
+  }
+  if (app.onlinePuzzleRoomFromWs) {
+    return false;
+  }
+  return true;
 };
 
 /**
@@ -1770,6 +1820,7 @@ app.disconnectOnline = function() {
   app.onlineToken = '';
   app.onlineSpectatorMode = false;
   app.onlinePuzzleFriendRoom = false;
+  app.onlinePuzzleRoomFromWs = false;
   app.pvpOnlineYourColor = app.BLACK;
   app.onlineBlackConnected = false;
   app.onlineWhiteConnected = false;
@@ -2797,9 +2848,25 @@ app.applyOnlineState = function(data) {
     var n = Number(v);
     return isNaN(n) ? null : n;
   }
-  app.onlineClockMoveDeadlineWallMs = readClockMs(data.clockMoveDeadlineWallMs);
-  app.onlineClockGameDeadlineWallMs = readClockMs(data.clockGameDeadlineWallMs);
-  app.onlineClockPaused = !!data.clockPaused;
+  if (data.puzzleRoom !== undefined && data.puzzleRoom !== null) {
+    app.onlinePuzzleRoomFromWs =
+      data.puzzleRoom === true ||
+      data.puzzleRoom === 'true' ||
+      data.puzzleRoom === 1 ||
+      data.puzzleRoom === '1';
+  }
+  var noOnlineClock =
+    app.onlinePuzzleFriendRoom ||
+    app.onlinePuzzleRoomFromWs;
+  if (noOnlineClock) {
+    app.onlineClockMoveDeadlineWallMs = null;
+    app.onlineClockGameDeadlineWallMs = null;
+    app.onlineClockPaused = false;
+  } else {
+    app.onlineClockMoveDeadlineWallMs = readClockMs(data.clockMoveDeadlineWallMs);
+    app.onlineClockGameDeadlineWallMs = readClockMs(data.clockGameDeadlineWallMs);
+    app.onlineClockPaused = !!data.clockPaused;
+  }
   if (data.matchRound !== undefined && data.matchRound !== null) {
     var mr = Number(data.matchRound);
     if (!isNaN(mr) && mr >= 1) {
@@ -2811,12 +2878,33 @@ app.applyOnlineState = function(data) {
   } else {
     app.winner = app.normalizeOnlineStoneInt(data.winner, null);
   }
-  if (data.spectator === true) {
-    app.onlineSpectatorMode = true;
-  } else {
-    app.onlineSpectatorMode = false;
-    app.pvpOnlineYourColor = app.normalizeOnlineStoneInt(data.yourColor, app.BLACK);
-  }
+  /**
+   * spectator 须严格区分「明确为 false」与「缺省/异常」：若仅写 else 则缺字段时会把旁观清掉，
+   * 从「选择聊天」点返回后偶发不完整帧或重连首包会导致残局好友房主底栏误变成和棋/认输样式。
+   */
+  (function () {
+    var s = data.spectator;
+    var explicitTrue =
+      s === true || s === 'true' || s === 1 || s === '1';
+    var explicitFalse =
+      s === false || s === 'false' || s === 0 || s === '0';
+    if (explicitTrue) {
+      app.onlineSpectatorMode = true;
+    } else if (explicitFalse) {
+      app.onlineSpectatorMode = false;
+      app.pvpOnlineYourColor = app.normalizeOnlineStoneInt(
+        data.yourColor,
+        app.BLACK
+      );
+    } else if (app.onlinePuzzleFriendRoom && app.onlineSpectatorMode) {
+      /* 缺字段：保持旁观 */
+    } else if (!app.onlineSpectatorMode) {
+      app.pvpOnlineYourColor = app.normalizeOnlineStoneInt(
+        data.yourColor,
+        app.BLACK
+      );
+    }
+  })();
   if (
     data.blackPieceSkinId !== undefined &&
     data.blackPieceSkinId !== null &&
