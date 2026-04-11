@@ -197,31 +197,48 @@ app.truncateNameToWidth = function(ctx, text, maxW) {
  * 棋盘两侧昵称与头像几何（绘制与点击共用）
  */
 app.computeBoardNameLabelLayout = function(layout) {
-  var r = app.getBoardOuterRect(layout);
-  var pad = Math.max(8, layout.cell * 0.22);
+  var lay = layout || app.layout;
+  if ((!lay || typeof lay.cell !== 'number') && typeof app.computeLayout === 'function') {
+    lay = app.computeLayout();
+  }
+  if (!lay || typeof lay.cell !== 'number') {
+    return null;
+  }
+  var r = app.getBoardOuterRect(lay);
+  var pad = Math.max(8, lay.cell * 0.22);
   var maxW = r.bw * 0.48;
   var fontPx = Math.max(
     15,
-    Math.min(20, Math.round(14 + layout.cell * 0.22))
+    Math.min(20, Math.round(14 + lay.cell * 0.22))
   );
-  var avR = Math.max(22, Math.min(44, Math.round(layout.cell * 0.64)));
+  var avR = Math.max(22, Math.min(44, Math.round(lay.cell * 0.64)));
   /** 头像圆与棋盘边至少留空，避免大头像压住格线（与 oppCy/myCy 推导一致） */
   var boardEdgePad = Math.max(6, app.rpx(8));
   var outerGap = Math.max(
     10,
-    layout.cell * 0.34,
+    lay.cell * 0.34,
     avR - fontPx * 0.5 + boardEdgePad
   );
   var myImg = app.getMyAvatarImageForUi();
-  var oppImg =
+  var oppImg;
+  if (app.isDailyPuzzle) {
+    oppImg = defaultAvatars.getGuardianBotAvatarImage();
+    if (!oppImg) {
+      oppImg = defaultAvatars.getOpponentAvatarImage();
+    }
+  } else if (
     app.isPvpOnline &&
     app.onlineOppAvatarImg &&
     app.onlineOppAvatarImg.width &&
     app.onlineOppAvatarImg.height
-      ? app.onlineOppAvatarImg
-      : defaultAvatars.getOnlineOpponentDefaultAvatarImage();
-  var hasMyAv = myImg && myImg.width && myImg.height;
-  var hasOppAv = oppImg && oppImg.width && oppImg.height;
+  ) {
+    oppImg = app.onlineOppAvatarImg;
+  } else {
+    oppImg = defaultAvatars.getOnlineOpponentDefaultAvatarImage();
+  }
+  /** 有 Image 对象即预留头像位并在圆内绘制（未解码完时 drawCircleAvatar 走占位字） */
+  var hasMyAv = !!myImg;
+  var hasOppAv = !!oppImg;
   var textTop = r.by + r.bh + outerGap;
   var myNameExtra = hasMyAv ? 2 * avR + 6 : 0;
   var myTextX = r.bx + pad + myNameExtra;
@@ -311,10 +328,14 @@ app.drawAvatarStoneBadge = function(ctx, cxAvatar, cyAvatar, avR, stoneColor, th
 
 app.drawBoardNameLabels = function(ctx, layout, th) {
   var L = app.computeBoardNameLabelLayout(layout);
+  if (!L || !L.r) {
+    return;
+  }
+  th = th || (typeof app.getUiTheme === 'function' ? app.getUiTheme() : {});
   var oppName = app.getOpponentDisplayName();
   var myName = app.getMyDisplayName();
   ctx.save();
-  var ink = th.id === 'ink';
+  var ink = th && th.id === 'ink';
   ctx.shadowColor = ink ? 'rgba(0, 0, 0, 0.35)' : 'rgba(255, 252, 248, 0.75)';
   ctx.shadowBlur = ink ? 3 : 4;
   ctx.shadowOffsetX = 0;
@@ -323,7 +344,7 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
     'bold ' +
     L.fontPx +
     'px "PingFang SC","Hiragino Sans GB",sans-serif';
-  ctx.fillStyle = th.title || th.subtitle;
+  ctx.fillStyle = (th && th.title) || (th && th.subtitle) || '#333';
   oppName = app.truncateNameToWidth(
     ctx,
     oppName,
@@ -339,14 +360,43 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
   ctx.textBaseline = 'middle';
   ctx.fillText(oppName, app.snapPx(L.oppNameRightX), app.snapPx(L.oppCy));
   if (L.hasOppAv) {
-    defaultAvatars.drawCircleAvatar(
-      ctx,
-      L.oppImg,
-      L.oppCx,
-      L.oppCy,
-      L.avR,
-      th
-    );
+    if (
+      app.isDailyPuzzle &&
+      L.oppImg === defaultAvatars.getGuardianBotAvatarImage() &&
+      L.oppImg &&
+      L.oppImg.width > 0 &&
+      L.oppImg.height > 0
+    ) {
+      if (typeof defaultAvatars.drawGuardianBotCircleAvatar === 'function') {
+        defaultAvatars.drawGuardianBotCircleAvatar(
+          ctx,
+          L.oppImg,
+          L.oppCx,
+          L.oppCy,
+          L.avR,
+          th,
+          0.88
+        );
+      } else {
+        defaultAvatars.drawCircleAvatar(
+          ctx,
+          L.oppImg,
+          L.oppCx,
+          L.oppCy,
+          L.avR,
+          th
+        );
+      }
+    } else {
+      defaultAvatars.drawCircleAvatar(
+        ctx,
+        L.oppImg,
+        L.oppCx,
+        L.oppCy,
+        L.avR,
+        th
+      );
+    }
     if (typeof app.drawOnlineTurnClockRingBeforeBadge === 'function') {
       app.drawOnlineTurnClockRingBeforeBadge(
         ctx,
@@ -397,7 +447,7 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
   }
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = th.title || th.subtitle;
+  ctx.fillStyle = (th && th.title) || (th && th.subtitle) || '#333';
   ctx.fillText(myName, app.snapPx(L.myTextX), app.snapPx(L.myCy));
   ctx.shadowBlur = 0;
   ctx.shadowOffsetY = 0;
@@ -1288,6 +1338,8 @@ app.dailyPuzzleUserColor = app.BLACK;
 app.dailyPuzzleBotGen = 0;
 app.dailyPuzzleSubmitting = false;
 app.dailyPuzzleResultKind = '';
+/** 当日第一次通关每日残局时 submit 返回的团团积分增量，在 openResult 时触发飘字 */
+app.dailyPuzzleSubmitActivityPointsDelta = null;
 app.onlineRoomId = '';
 app.onlineToken = '';
 /** 本客户端执子 gomoku.BLACK | gomoku.WHITE，与服务器 STATE.yourColor 一致 */
@@ -1397,6 +1449,8 @@ app.GAME_ACTION_BAR_ICON_LABEL_GAP_RPX = 6;
 app.gameBarIconSizeMul = {
   home: 0.86,
   undo: 0.86,
+  /** restart2：环形+中心点略「满」，倍率与悔棋 0.86 同档略抬一点对齐视觉 */
+  reset: 0.88,
   draw: 1,
   flag: 1
 };
@@ -1405,6 +1459,7 @@ app.GAME_STATUS_CHIP_H_RPX = 0;
 /** 扁平彩色图标 PNG（images/ui/game-bar-*.png），失败时回退矢量 */
 app.gameBarHomeImg = null;
 app.gameBarUndoImg = null;
+app.gameBarResetImg = null;
 app.gameBarDrawImg = null;
 app.gameBarResignImg = null;
 /** 战绩页：在当前页面上以遮罩弹出棋谱回放（不切换 screen） */
@@ -1453,7 +1508,7 @@ app.homeMascotSheetImg = null;
 app.MASCOT_SHEET_FRAME_COUNT = 41;
 app.MASCOT_SHEET_FPS = 8;
 /** 修改首页 PNG 或路径时递增，避免热重载仍认为「已加载」而跳过 */
-app.HOME_UI_ASSETS_REV = 31;
+app.HOME_UI_ASSETS_REV = 47;
 /** 吉祥物资源所在分包（见 game.json）；wx.loadSubpackage 成功后再加载大图 */
 app.HOME_SUBPACKAGE_NAME = 'res-mascot';
 /** 分包内吉祥物路径前缀；失败时回退主包 images/ui/ */

@@ -5,10 +5,13 @@
 
 var PATH_GIRL = 'images/default/girl.png';
 var PATH_BOY = 'images/default/boy.png';
+/** 每日残局守关者头像 */
+var PATH_GUARDIAN_BOT = 'images/default/guardian-bot.png';
 var STORAGE_KEY = 'gomoku_user_gender';
 
 var imgGirl = null;
 var imgBoy = null;
+var imgGuardianBot = null;
 
 /** 本人：GET /api/me/rating 的 gender（微信 0/1/2）；null 表示尚未从库同步 */
 var serverMyWeChatGender = null;
@@ -118,12 +121,56 @@ function getOpponentAvatarImage() {
   return getImageForWeChatGender(oppCode);
 }
 
+function getGuardianBotAvatarImage() {
+  return imgGuardianBot;
+}
+
 /** 联机对手：有服务端 gender 时用其，否则同 getOpponentAvatarImage */
 function getOnlineOpponentDefaultAvatarImage() {
   if (typeof serverOppWeChatGender === 'number') {
     return getImageForWeChatGender(serverOppWeChatGender);
   }
   return getOpponentAvatarImage();
+}
+
+/**
+ * 守关机器人头像：整图按比例装入圆内（contain），避免居中裁方切掉两侧装饰
+ * @param {number} [padding] 相对直径留白系数，默认 0.88（略缩进圆内）
+ */
+function drawGuardianBotCircleAvatar(ctx, img, cx, cy, r, th, padding) {
+  if (r <= 0) {
+    return;
+  }
+  var pad =
+    typeof padding === 'number' && padding > 0 && padding <= 1 ? padding : 0.88;
+  if (!img || !img.width || !img.height) {
+    drawCircleAvatar(ctx, img, cx, cy, r, th);
+    return;
+  }
+  var diam = 2 * r * pad;
+  var iw = img.width;
+  var ih = img.height;
+  var scale = Math.min(diam / iw, diam / ih);
+  var dw = iw * scale;
+  var dh = ih * scale;
+  var dx = cx - dw * 0.5;
+  var dy = cy - dh * 0.5;
+  var rcx = cx;
+  var rcy = cy;
+  var rr = r;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(rcx, rcy, rr, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.drawImage(img, 0, 0, iw, ih, dx, dy, dw, dh);
+  ctx.restore();
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(rcx, rcy, rr, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.94)';
+  ctx.lineWidth = 1.65;
+  ctx.stroke();
+  ctx.restore();
 }
 
 /**
@@ -176,7 +223,7 @@ function drawCircleAvatar(ctx, img, cx, cy, r, th) {
 }
 
 function preloadAll(onDone) {
-  var left = 2;
+  var left = 3;
   function oneDone() {
     left--;
     if (left <= 0 && typeof onDone === 'function') {
@@ -197,11 +244,16 @@ function preloadAll(onDone) {
   imgBoy.onload = oneDone;
   imgBoy.onerror = oneDone;
   imgBoy.src = PATH_BOY;
+  imgGuardianBot = wx.createImage();
+  imgGuardianBot.onload = oneDone;
+  imgGuardianBot.onerror = oneDone;
+  imgGuardianBot.src = PATH_GUARDIAN_BOT;
 }
 
 module.exports = {
   PATH_GIRL: PATH_GIRL,
   PATH_BOY: PATH_BOY,
+  PATH_GUARDIAN_BOT: PATH_GUARDIAN_BOT,
   getGender: getGender,
   setGenderFromUserInfo: setGenderFromUserInfo,
   setMyGenderFromServer: setMyGenderFromServer,
@@ -210,7 +262,9 @@ module.exports = {
   getMyAvatarImage: getMyAvatarImage,
   getImageForWeChatGender: getImageForWeChatGender,
   getOpponentAvatarImage: getOpponentAvatarImage,
+  getGuardianBotAvatarImage: getGuardianBotAvatarImage,
   getOnlineOpponentDefaultAvatarImage: getOnlineOpponentDefaultAvatarImage,
   drawCircleAvatar: drawCircleAvatar,
+  drawGuardianBotCircleAvatar: drawGuardianBotCircleAvatar,
   preloadAll: preloadAll,
 };

@@ -737,7 +737,17 @@ app.draw = function() {
       Math.ceil(app.getOnlineDrawCooldownRemainingMs() / 1000) + '秒';
   }
 
-  app.drawGameActionBar(undoLabel, undoActive, drawLabel);
+  /**
+   * 每日残局 + 结算层：底栏会在结算层之上再画一遍；若此处先画一遍，半透明底叠在全屏层下会透出，
+   * 视觉上像图标重影/两个。仅在「不会在后面再画底栏」时画这一遍。
+   */
+  var dailyBarRedrawOnOverlay =
+    app.isDailyPuzzle &&
+    app.showResultOverlay &&
+    (app.gameOver || app.onlineResultOverlaySticky);
+  if (!dailyBarRedrawOnOverlay) {
+    app.drawGameActionBar(undoLabel, undoActive, drawLabel);
+  }
 
   if (app.isPvpOnline) {
     app.ensureOnlineClockTick();
@@ -772,6 +782,7 @@ app.draw = function() {
     (app.gameOver || app.onlineResultOverlaySticky)
   ) {
     app.drawResultOverlay();
+    /** 每日残局结算与其它模式一致：仅用结算层主按钮 + 底部 dock，不叠画对局底栏 */
   }
 
   app.drawRatingCardOverlay(th);
@@ -790,7 +801,7 @@ app.getGameActionBarLayout = function() {
       : app.rpx(128);
   var x0 = pad;
   var y0 = btnY - barH / 2;
-  /** 人机：2 列；每日残局：3 列（提示）；联机：4 列 */
+  /** 人机：2 列；每日残局：3 列（重置）；联机：4 列 */
   var colCount = app.isDailyPuzzle
     ? 3
     : !app.isPvpLocal && !app.isPvpOnline
@@ -1299,8 +1310,8 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
   ];
   if (dailyBar) {
     cols.push({
-      img: app.gameBarDrawImg,
-      kind: 'draw',
+      img: app.gameBarResetImg,
+      kind: 'reset',
       enabled: true
     });
   } else if (!pveBarOnly) {
@@ -1326,7 +1337,7 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
       ? String(drawLabel)
       : '和棋';
   var gameBarLabels = dailyBar
-    ? ['离开', undoCaption, '提示']
+    ? ['离开', undoCaption, '重置']
     : pveBarOnly
       ? ['离开', undoCaption]
       : ['离开', undoCaption, drawCaption, '认输'];
@@ -1547,6 +1558,26 @@ app.drawGameActionIcon = function(ctx, iconKind, icx, icy, s, fg) {
     ctx.moveTo(icx - s * 0.28, icy - s * 0.22);
     ctx.lineTo(icx - s * 0.52, icy - s * 0.02);
     ctx.lineTo(icx - s * 0.32, icy + s * 0.12);
+    ctx.stroke();
+  } else if (iconKind === 'reset') {
+    /** PNG 为主；兜底仍用悔棋形 + 小空圈（单色 fg，与位图染色一致） */
+    ctx.beginPath();
+    ctx.arc(
+      icx + s * 0.22,
+      icy + s * 0.12,
+      s * 0.52,
+      Math.PI * 0.72,
+      Math.PI * 1.48,
+      true
+    );
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(icx - s * 0.28, icy - s * 0.22);
+    ctx.lineTo(icx - s * 0.52, icy - s * 0.02);
+    ctx.lineTo(icx - s * 0.32, icy + s * 0.12);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(icx + s * 0.48, icy + s * 0.4, s * 0.1, 0, Math.PI * 2);
     ctx.stroke();
   } else if (iconKind === 'draw') {
     ctx.beginPath();
@@ -1839,7 +1870,7 @@ app.hitGameButton = function(clientX, clientY) {
     return 'undo';
   }
   if (col === 2) {
-    return app.isDailyPuzzle ? 'hint' : 'draw';
+    return app.isDailyPuzzle ? 'reset' : 'draw';
   }
   return 'resign';
 }
@@ -2849,12 +2880,14 @@ wx.onTouchStart(function (e) {
     app.handleUndoButtonTap();
     return;
   }
-  if (gbtn === 'draw') {
-    if (app.isDailyPuzzle) {
-      app.requestDailyPuzzleHint();
-    } else {
-      app.handleDrawButtonTap();
+  if (gbtn === 'reset') {
+    if (app.isDailyPuzzle && typeof app.restoreDailyPuzzleInitial === 'function') {
+      app.restoreDailyPuzzleInitial();
     }
+    return;
+  }
+  if (gbtn === 'draw') {
+    app.handleDrawButtonTap();
     return;
   }
   if (gbtn === 'resign') {

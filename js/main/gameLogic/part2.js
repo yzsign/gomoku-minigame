@@ -742,11 +742,12 @@ app.loadHomeUiAssets = function() {
   app.homeMascotSheetImg = null;
   app.gameBarHomeImg = null;
   app.gameBarUndoImg = null;
+  app.gameBarResetImg = null;
   app.gameBarDrawImg = null;
   app.gameBarResignImg = null;
 
   var loadPhase = 1;
-  var remaining = 14;
+  var remaining = 15;
   function oneDone() {
     remaining--;
     if (remaining > 0) {
@@ -828,7 +829,7 @@ app.loadHomeUiAssets = function() {
     loadPhase = 2;
     remaining = 2;
     bindFirstMatch(
-      [prefix + 'home-mascot.gif', prefix + 'home-mascot.png'],
+      [prefix + 'home-mascot.png', prefix + 'home-mascot.gif'],
       function (im) {
         app.homeMascotImg = im;
       }
@@ -889,6 +890,9 @@ app.loadHomeUiAssets = function() {
   });
   bind('images/ui/game-bar-undo.png', function (im) {
     app.gameBarUndoImg = im;
+  });
+  bind('images/ui/game-bar-reset.png', function (im) {
+    app.gameBarResetImg = im;
   });
   bind('images/ui/game-bar-draw.png', function (im) {
     app.gameBarDrawImg = im;

@@ -1031,14 +1031,8 @@ app.resetGame = function() {
     return;
   }
   if (app.isDailyPuzzle) {
-    app.showResultOverlay = false;
-    app.onlineResultOverlaySticky = false;
-    app.stopResultTuanPointsAnim();
-    app.clearWinRevealTimer();
-    app.winningLineCells = null;
     app.restoreDailyPuzzleInitial();
     app.screen = 'game';
-    app.draw();
     return;
   }
   app.showResultOverlay = false;
@@ -1181,21 +1175,32 @@ app.restoreDailyPuzzleInitial = function() {
   if (!app.dailyPuzzleInitialBoard) {
     return;
   }
+  app.showResultOverlay = false;
+  app.onlineResultOverlaySticky = false;
+  if (typeof app.stopResultTuanPointsAnim === 'function') {
+    app.stopResultTuanPointsAnim();
+  }
+  app.dailyPuzzleSubmitting = false;
+  app.dailyPuzzleResultKind = '';
+  app.dailyPuzzleSubmitActivityPointsDelta = null;
   app.dailyPuzzleBotGen++;
   app.board = app.copyBoardFromServer(app.dailyPuzzleInitialBoard);
   app.dailyPuzzleMoves = [];
   app.current = app.dailyPuzzleSideToMoveStart;
+  app.dailyPuzzleUserColor = app.dailyPuzzleSideToMoveStart;
   app.gameOver = false;
   app.winner = null;
   app.clearWinRevealTimer();
   app.winningLineCells = null;
   app.lastOpponentMove = null;
+  app.lastMsg = '每日残局';
   if (typeof app.refreshDailyPuzzleLastOpponentMove === 'function') {
     app.refreshDailyPuzzleLastOpponentMove();
   }
   if (typeof app.scheduleDailyPuzzleBotIfNeeded === 'function') {
     app.scheduleDailyPuzzleBotIfNeeded();
   }
+  app.draw();
 };
 
 app.startDailyPuzzleFromApiData = function(d) {
@@ -1216,6 +1221,7 @@ app.startDailyPuzzleFromApiData = function(d) {
   app.dailyPuzzleMoves = [];
   app.dailyPuzzleSubmitting = false;
   app.dailyPuzzleResultKind = '';
+  app.dailyPuzzleSubmitActivityPointsDelta = null;
   app.board = app.copyBoardFromServer(d.board);
   app.dailyPuzzleInitialBoard = app.copyBoardFromServer(d.board);
   app.dailyPuzzleSideToMoveStart =
@@ -1316,6 +1322,7 @@ app.submitDailyPuzzleMovesAndHandle = function(r, c, lastColor, wasWin) {
           var result = data.result;
           if (result === 'ALREADY_SOLVED') {
             app.dailyPuzzleResultKind = 'daily_puzzle_already';
+            app.dailyPuzzleSubmitActivityPointsDelta = null;
             app.gameOver = true;
             app.winner = null;
             app.showResultOverlay = true;
@@ -1324,6 +1331,34 @@ app.submitDailyPuzzleMovesAndHandle = function(r, c, lastColor, wasWin) {
           }
           if (result === 'SOLVED') {
             app.dailyPuzzleResultKind = 'daily_puzzle_solved';
+            var apD =
+              typeof data.activityPointsDelta === 'number' && !isNaN(data.activityPointsDelta)
+                ? data.activityPointsDelta
+                : Number(data.activityPointsDelta);
+            if (typeof apD !== 'number' || isNaN(apD)) {
+              apD =
+                typeof data.activity_points_delta === 'number' && !isNaN(data.activity_points_delta)
+                  ? data.activity_points_delta
+                  : Number(data.activity_points_delta);
+            }
+            if (typeof apD === 'number' && !isNaN(apD) && apD > 0) {
+              app.dailyPuzzleSubmitActivityPointsDelta = Math.floor(apD);
+            } else {
+              app.dailyPuzzleSubmitActivityPointsDelta = null;
+            }
+            var apAfter =
+              typeof data.activityPointsAfter === 'number' && !isNaN(data.activityPointsAfter)
+                ? data.activityPointsAfter
+                : Number(data.activityPointsAfter);
+            if (typeof apAfter !== 'number' || isNaN(apAfter)) {
+              apAfter =
+                typeof data.activity_points_after === 'number' && !isNaN(data.activity_points_after)
+                  ? data.activity_points_after
+                  : Number(data.activity_points_after);
+            }
+            if (typeof apAfter === 'number' && !isNaN(apAfter)) {
+              app.getCheckinState().tuanPoints = Math.max(0, Math.floor(apAfter));
+            }
             app.gameOver = true;
             app.winner = wasWin ? lastColor : null;
             if (wasWin) {
@@ -1687,6 +1722,7 @@ app.backToHome = function() {
   app.dailyPuzzleInitialBoard = null;
   app.dailyPuzzleSubmitting = false;
   app.dailyPuzzleResultKind = '';
+  app.dailyPuzzleSubmitActivityPointsDelta = null;
   app.onlineInviteConsumed = false;
   app.homeDrawerOpen = false;
   app.homePressedButton = null;
@@ -1962,6 +1998,15 @@ app.openResult = function() {
   }
   app.onlineResultOverlaySticky = false;
   app.showResultOverlay = true;
+  if (
+    app.isDailyPuzzle &&
+    app.dailyPuzzleSubmitActivityPointsDelta != null &&
+    app.dailyPuzzleSubmitActivityPointsDelta > 0
+  ) {
+    var dpd = app.dailyPuzzleSubmitActivityPointsDelta;
+    app.dailyPuzzleSubmitActivityPointsDelta = null;
+    app.startResultTuanPointsAnim(dpd);
+  }
   app.recordMatchHistoryFromGameEnd();
   app.screen = 'game';
   app.draw();
@@ -1976,6 +2021,22 @@ app.canShowOnlineReplayButton = function() {
  */
 app.getResultVsAvatarImage = function(forBlack) {
   var L = app.computeBoardNameLabelLayout(app.layout);
+  if (!L) {
+    if (app.isDailyPuzzle) {
+      var uBlack = app.dailyPuzzleUserColor === gomoku.BLACK;
+      var mine = defaultAvatars.getMyAvatarImage();
+      var g =
+        defaultAvatars.getGuardianBotAvatarImage() ||
+        defaultAvatars.getOpponentAvatarImage();
+      if (forBlack) {
+        return uBlack ? mine : g;
+      }
+      return uBlack ? g : mine;
+    }
+    return forBlack
+      ? defaultAvatars.getImageForWeChatGender(1)
+      : defaultAvatars.getImageForWeChatGender(2);
+  }
   if (app.isPvpOnline) {
     var imBlack = app.pvpOnlineYourColor === gomoku.BLACK;
     if (forBlack) {
@@ -1989,9 +2050,11 @@ app.getResultVsAvatarImage = function(forBlack) {
       : defaultAvatars.getImageForWeChatGender(2);
   }
   if (app.isDailyPuzzle) {
-    return forBlack
-      ? defaultAvatars.getImageForWeChatGender(1)
-      : defaultAvatars.getImageForWeChatGender(2);
+    var imBlackUser = app.dailyPuzzleUserColor === gomoku.BLACK;
+    if (forBlack) {
+      return imBlackUser ? L.myImg : L.oppImg;
+    }
+    return imBlackUser ? L.oppImg : L.myImg;
   }
   var hum = app.pveHumanColor;
   if (forBlack) {
@@ -2021,6 +2084,44 @@ function drawResultRoundedSquareAvatar(app, th, img, cx, cy, size, cornerR) {
     ctx.textBaseline = 'middle';
     ctx.fillText('?', app.snapPx(cx), app.snapPx(cy));
   }
+  ctx.restore();
+  ctx.save();
+  app.roundRect(x, y, size, size, cornerR);
+  ctx.strokeStyle = 'rgba(255,255,255,0.96)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** 结算页守关头像：整图 contain 入圆角方，避免方裁切（须在 drawResultRoundedSquareAvatar 之后定义以便安全调用） */
+function drawResultGuardianRoundedAvatar(app, th, img, cx, cy, size, cornerR) {
+  var ctx = app.ctx;
+  var x = cx - size * 0.5;
+  var y = cy - size * 0.5;
+  if (!img || !img.width || !img.height) {
+    drawResultRoundedSquareAvatar(app, th, img, cx, cy, size, cornerR);
+    return;
+  }
+  var iw = img.width;
+  var ih = img.height;
+  var inner = size * 0.9;
+  var scale = Math.min(inner / iw, inner / ih);
+  if (!isFinite(scale) || scale <= 0) {
+    drawResultRoundedSquareAvatar(app, th, img, cx, cy, size, cornerR);
+    return;
+  }
+  var dw = iw * scale;
+  var dh = ih * scale;
+  var dx = cx - dw * 0.5;
+  var dy = cy - dh * 0.5;
+  if (typeof app.roundRect !== 'function') {
+    drawResultRoundedSquareAvatar(app, th, img, cx, cy, size, cornerR);
+    return;
+  }
+  ctx.save();
+  app.roundRect(x, y, size, size, cornerR);
+  ctx.clip();
+  ctx.drawImage(img, 0, 0, iw, ih, dx, dy, dw, dh);
   ctx.restore();
   ctx.save();
   app.roundRect(x, y, size, size, cornerR);
@@ -2080,7 +2181,7 @@ app.startResultTuanPointsAnim = function(delta) {
       app.resultTuanPointsRafId = null;
       return;
     }
-    if (!app.showResultOverlay || !app.isPvpOnline) {
+    if (!app.showResultOverlay || (!app.isPvpOnline && !app.isDailyPuzzle)) {
       app.stopResultTuanPointsAnim();
       return;
     }
@@ -2100,7 +2201,7 @@ app.startResultTuanPointsAnim = function(delta) {
  * 在「我」的头像上方绘制飘字（联机左侧为本人）；依赖 getResultOverlayLayout。
  */
 function drawResultOverlayTuanPointsAnim(app, ctx, th, ly) {
-  if (!app.resultTuanPointsAnim || !app.isPvpOnline) {
+  if (!app.resultTuanPointsAnim || (!app.isPvpOnline && !app.isDailyPuzzle)) {
     return;
   }
   if (!app.showResultOverlay) {
@@ -2487,24 +2588,39 @@ app.drawResultOverlay = function() {
     imgLeft = app.getResultVsAvatarImage(true);
     imgRight = app.getResultVsAvatarImage(false);
   }
-  drawResultRoundedSquareAvatar(
-    app,
-    th,
-    imgLeft,
-    ly.vsLeftCx,
-    ly.vsCy,
-    ly.avatarS,
-    ly.avatarR
-  );
-  drawResultRoundedSquareAvatar(
-    app,
-    th,
-    imgRight,
-    ly.vsRightCx,
-    ly.vsCy,
-    ly.avatarS,
-    ly.avatarR
-  );
+  var gBotImg = defaultAvatars.getGuardianBotAvatarImage();
+  function drawVsResultAvatar(img, vsCx, vsCy) {
+    if (
+      app.isDailyPuzzle &&
+      gBotImg &&
+      img === gBotImg &&
+      img &&
+      img.width &&
+      img.height
+    ) {
+      drawResultGuardianRoundedAvatar(
+        app,
+        th,
+        img,
+        vsCx,
+        vsCy,
+        ly.avatarS,
+        ly.avatarR
+      );
+    } else {
+      drawResultRoundedSquareAvatar(
+        app,
+        th,
+        img,
+        vsCx,
+        vsCy,
+        ly.avatarS,
+        ly.avatarR
+      );
+    }
+  }
+  drawVsResultAvatar(imgLeft, ly.vsLeftCx, ly.vsCy);
+  drawVsResultAvatar(imgRight, ly.vsRightCx, ly.vsCy);
 
   ctx.font = 'bold 28px "PingFang SC","Hiragino Sans GB",sans-serif';
   ctx.fillStyle = th.pageIndicator != null ? th.pageIndicator : '#ea580c';
