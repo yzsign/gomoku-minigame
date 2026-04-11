@@ -646,11 +646,16 @@ app.draw = function() {
   } else if (app.isDailyPuzzle) {
     if (app.dailyPuzzleSubmitting) {
       status = '提交判题中…';
+    } else if (app.current === app.dailyPuzzleUserColor) {
+      status =
+        '轮到你（' +
+        (app.dailyPuzzleUserColor === app.BLACK ? '黑' : '白') +
+        '）· 对守关者';
     } else {
       status =
-        '请下「' +
-        (app.current === app.BLACK ? '黑' : '白') +
-        '」棋 · 黑白交替';
+        '守关者（' +
+        (app.dailyPuzzleBotColor() === app.BLACK ? '黑' : '白') +
+        '）思考中…';
     }
   } else if (!status) {
     if (app.current === app.pveHumanColor) {
@@ -2007,20 +2012,30 @@ app.ensureAiWorker = function() {
       if (!res || res.type !== 'AI_MOVE_RESULT') {
         return;
       }
-      if (res.gen !== app.aiMoveGeneration) {
-        return;
-      }
       if (res.seq !== app.aiWorkerSeq) {
         return;
       }
       if (app.gameOver || app.isPvpLocal || app.isPvpOnline) {
         return;
       }
-      if (app.current !== app.pveAiColor()) {
-        return;
-      }
       if (app.screen !== 'game') {
         return;
+      }
+      var isDaily = app.isDailyPuzzle;
+      if (isDaily) {
+        if (res.gen !== app.dailyPuzzleBotGen) {
+          return;
+        }
+        if (app.current !== app.dailyPuzzleBotColor()) {
+          return;
+        }
+      } else {
+        if (res.gen !== app.aiMoveGeneration) {
+          return;
+        }
+        if (app.current !== app.pveAiColor()) {
+          return;
+        }
       }
       var mv = res.move;
       if (res.err) {
@@ -2036,7 +2051,11 @@ app.ensureAiWorker = function() {
           return;
         }
       }
-      app.applyAiMoveResult(mv);
+      if (isDaily) {
+        app.applyDailyBotMoveResult(mv);
+      } else {
+        app.applyAiMoveResult(mv);
+      }
     });
     if (typeof app.aiWorkerInstance.onProcessKilled === 'function') {
       app.aiWorkerInstance.onProcessKilled(function () {
@@ -2072,6 +2091,93 @@ app.applyAiMoveResult = function(mv) {
 app.openingOptionsForAi = function() {
   return { rif: true };
 }
+
+/** 每日残局守关 AI：difficulty 1–3 映射至 workers/gomoku_ai.js 搜索强度 */
+app.openingOptionsForDailyBot = function() {
+  var lv = 3;
+  if (app.dailyPuzzleMeta && app.dailyPuzzleMeta.difficulty != null) {
+    lv = Number(app.dailyPuzzleMeta.difficulty);
+    if (isNaN(lv) || lv < 1) {
+      lv = 3;
+    }
+    if (lv > 3) {
+      lv = 3;
+    }
+  }
+  return { rif: true, dailyDifficulty: lv };
+};
+
+app.scheduleDailyPuzzleBotIfNeeded = function() {
+  if (!app.isDailyPuzzle || app.gameOver || app.dailyPuzzleSubmitting) {
+    return;
+  }
+  if (app.current !== app.dailyPuzzleBotColor()) {
+    return;
+  }
+  setTimeout(function() {
+    app.runDailyPuzzleBotMove();
+  }, 220);
+};
+
+app.applyDailyBotMoveResult = function(mv) {
+  var bot = app.dailyPuzzleBotColor();
+  app.board[mv.r][mv.c] = bot;
+  app.dailyPuzzleMoves.push({ r: mv.r, c: mv.c, color: bot });
+  app.lastOpponentMove = { r: mv.r, c: mv.c };
+  app.playPlaceStoneSound();
+  if (gomoku.checkWin(app.board, mv.r, mv.c, bot)) {
+    app.finishDailyPuzzleBotWin(mv.r, mv.c);
+    return;
+  }
+  if (gomoku.isBoardFull(app.board)) {
+    app.submitDailyPuzzleMovesAndHandle(mv.r, mv.c, bot, false);
+    return;
+  }
+  app.current = app.dailyPuzzleUserColor;
+  app.draw();
+};
+
+app.finishDailyPuzzleBotWin = function(r, c) {
+  app.dailyPuzzleResultKind = 'daily_puzzle_bot_win';
+  app.finishGameWithWin(r, c, app.dailyPuzzleBotColor());
+};
+
+app.runDailyPuzzleBotMove = function() {
+  if (app.gameOver || !app.isDailyPuzzle || app.dailyPuzzleSubmitting) {
+    return;
+  }
+  var bot = app.dailyPuzzleBotColor();
+  if (app.current !== bot) {
+    return;
+  }
+  if (app.ensureAiWorker()) {
+    app.aiWorkerSeq++;
+    app.aiWorkerInstance.postMessage({
+      type: 'AI_MOVE',
+      seq: app.aiWorkerSeq,
+      gen: app.dailyPuzzleBotGen,
+      board: app.copyBoardForAiWorker(app.board),
+      aiColor: bot,
+      openingOptions: app.openingOptionsForDailyBot()
+    });
+    return;
+  }
+  var mv;
+  try {
+    mv = gomoku.aiMove(app.board, bot, app.openingOptionsForDailyBot());
+  } catch (err) {
+    console.error('daily aiMove', err);
+    mv = null;
+  }
+  if (!mv) {
+    mv = app.firstEmptyCellForBoard();
+    if (!mv) {
+      app.submitDailyPuzzleMovesAndHandle(0, 0, bot, false);
+      return;
+    }
+  }
+  app.applyDailyBotMoveResult(mv);
+};
 
 app.runAiMove = function() {
   if (app.gameOver || app.isPvpLocal || app.isPvpOnline || app.isDailyPuzzle) {
@@ -2148,6 +2254,9 @@ app.tryPlace = function(r, c) {
     if (app.dailyPuzzleSubmitting) {
       return;
     }
+    if (app.current !== app.dailyPuzzleUserColor) {
+      return;
+    }
     if (app.board[r][c] !== gomoku.EMPTY) {
       return;
     }
@@ -2163,9 +2272,10 @@ app.tryPlace = function(r, c) {
       app.submitDailyPuzzleMovesAndHandle(r, c, dPlaced, false);
       return;
     }
-    app.current = dPlaced === app.BLACK ? app.WHITE : app.BLACK;
+    app.current = app.dailyPuzzleBotColor();
     app.lastMsg = '';
     app.draw();
+    app.scheduleDailyPuzzleBotIfNeeded();
     return;
   }
   if (app.board[r][c] !== gomoku.EMPTY) return;
@@ -2511,34 +2621,21 @@ wx.onTouchStart(function (e) {
       app.draw();
       return;
     }
-    if (kind === 'theme') {
-      app.cycleThemeNext();
-      app.homeDrawerOpen = false;
-      app.draw();
-      return;
-    }
-    if (kind === 'piece_skin') {
-      app.homeDrawerOpen = false;
-      app.openPieceSkinModal();
-      app.draw();
-      return;
-    }
-    if (kind === 'feedback') {
-      if (typeof wx.showToast === 'function') {
-        wx.showToast({ title: '敬请期待', icon: 'none' });
-      }
-      app.homeDrawerOpen = false;
-      app.draw();
-      return;
-    }
-    if (kind === 'about') {
-      if (typeof wx.showToast === 'function') {
-        wx.showToast({ title: '团团五子棋', icon: 'none' });
-      }
-      app.homeDrawerOpen = false;
-      app.draw();
-      return;
-    }
+    return;
+  }
+
+  if (
+    app.screen === 'home' &&
+    app.userIsAdmin &&
+    !app.homeDrawerOpen &&
+    !app.ratingCardVisible &&
+    !app.checkinModalVisible &&
+    !app.pieceSkinModalVisible &&
+    typeof app.hitHomeDrawerTab === 'function' &&
+    app.hitHomeDrawerTab(x, y)
+  ) {
+    app.homeDrawerTabPressed = true;
+    app.draw();
     return;
   }
 
@@ -2788,7 +2885,9 @@ wx.onTouchStart(function (e) {
       return;
     }
   } else if (app.isDailyPuzzle) {
-    /* 黑白均在同一设备交替落子 */
+    if (app.current !== app.dailyPuzzleUserColor) {
+      return;
+    }
   } else if (!app.isPvpLocal && app.current !== app.pveHumanColor) {
     return;
   }
@@ -2971,6 +3070,27 @@ if (typeof wx.onTouchEnd === 'function') {
         app.scheduleHistoryScrollbarFadeRedraw();
       }
     }
+    if (app.screen === 'home' && app.homeDrawerTabPressed) {
+      app.homeDrawerTabPressed = false;
+      if (
+        t &&
+        !app.homeDrawerOpen &&
+        !app.ratingCardVisible &&
+        !app.checkinModalVisible &&
+        !app.pieceSkinModalVisible &&
+        typeof app.hitHomeDrawerTab === 'function' &&
+        app.hitHomeDrawerTab(t.clientX, t.clientY)
+      ) {
+        app.homeDrawerOpen = true;
+        app.draw();
+        if (typeof app.refreshAdminStatus === 'function') {
+          app.refreshAdminStatus();
+        }
+      } else {
+        app.draw();
+      }
+      return;
+    }
     if (app.screen === 'home' && app.homePressedButton) {
       if (
         !t ||
@@ -3140,6 +3260,9 @@ if (typeof wx.onTouchEnd === 'function') {
       dx > app.rpx(56) &&
       Math.abs(dy) < app.rpx(72)
     ) {
+      if (!app.userIsAdmin) {
+        return;
+      }
       app.homeDrawerOpen = true;
       app.draw();
       if (typeof app.refreshAdminStatus === 'function') {
@@ -3164,6 +3287,10 @@ if (typeof wx.onTouchCancel === 'function') {
     if (app.homePressedButton || app.homePressedDockCol !== null) {
       app.homePressedButton = null;
       app.homePressedDockCol = null;
+      app.draw();
+    }
+    if (app.homeDrawerTabPressed) {
+      app.homeDrawerTabPressed = false;
       app.draw();
     }
   });

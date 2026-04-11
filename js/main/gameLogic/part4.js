@@ -460,6 +460,129 @@ app.ensureHomeMascotAnimLoop = function() {
   }, interval);
 }
 
+/** 管理员：顶栏下方左侧小按钮（图标），点击打开侧栏 */
+app.getHomeDrawerTabLayout = function() {
+  if (!app.userIsAdmin || app.screen !== 'home' || app.homeDrawerOpen) {
+    return null;
+  }
+  var nav = app.getHomeNavBarLayout();
+  var leftInset =
+    app.sys.safeArea && app.sys.safeArea.left != null
+      ? app.sys.safeArea.left
+      : 0;
+  var w = app.rpx(56);
+  var h = app.rpx(56);
+  var gap = app.rpx(12);
+  var cx = leftInset + w * 0.5;
+  var cy = nav.navBottom + gap + h * 0.5;
+  return { cx: cx, cy: cy, w: w, h: h, leftInset: leftInset, navBottom: nav.navBottom };
+};
+
+/** 侧栏按钮：三道横线（汉堡图标） */
+app.drawHomeDrawerTabIcon = function(cx, cy, color) {
+  var lineW = app.rpx(22);
+  var gap = app.rpx(6);
+  var lw = Math.max(2, app.rpx(3));
+  app.ctx.save();
+  app.ctx.strokeStyle = color;
+  app.ctx.lineWidth = lw;
+  app.ctx.lineCap = 'round';
+  var j;
+  for (j = -1; j <= 1; j++) {
+    app.ctx.beginPath();
+    app.ctx.moveTo(cx - lineW * 0.5, cy + j * gap);
+    app.ctx.lineTo(cx + lineW * 0.5, cy + j * gap);
+    app.ctx.stroke();
+  }
+  app.ctx.restore();
+};
+
+app.drawHomeDrawerTab = function(th) {
+  var L = app.getHomeDrawerTabLayout();
+  if (!L) {
+    return;
+  }
+  var leftInset = L.leftInset != null ? L.leftInset : 0;
+  var cx0 = leftInset + L.w * 0.5;
+  var cy0 = L.cy;
+  var bw = L.w;
+  var bh = L.h;
+  var x0 = cx0 - bw / 2;
+  var y0 = cy0 - bh / 2;
+  var rr = app.rpx(14);
+  var baseHex = th.btnGhostFill;
+  var rgb = app.homePillHexToRgb(baseHex);
+  var fillStyle;
+  if (rgb) {
+    var c0 = app.homePillMixRgb(rgb, 0.38, { r: 255, g: 255, b: 255 });
+    var c1 = app.homePillMixRgb(rgb, 0.06, { r: 0, g: 0, b: 0 });
+    var lg = app.ctx.createLinearGradient(x0, y0, x0, y0 + bh);
+    lg.addColorStop(0, app.homePillRgbCss(c0));
+    lg.addColorStop(1, app.homePillRgbCss(c1));
+    fillStyle = lg;
+  } else {
+    fillStyle = baseHex;
+  }
+  app.ctx.save();
+  if (app.homeDrawerTabPressed) {
+    app.ctx.translate(cx0, cy0);
+    app.ctx.scale(0.982, 0.982);
+    app.ctx.translate(-cx0, -cy0);
+    app.ctx.translate(0, app.rpx(2));
+  }
+  var blurBase = app.homeDrawerTabPressed
+    ? Math.max(app.rpx(4), app.rpx(10) * 0.55)
+    : app.rpx(10);
+  var offY = app.homeDrawerTabPressed ? app.rpx(4) * 0.45 : app.rpx(4);
+  app.ctx.shadowColor = 'rgba(0, 0, 0, 0.07)';
+  app.ctx.shadowBlur = blurBase;
+  app.ctx.shadowOffsetX = 0;
+  app.ctx.shadowOffsetY = offY;
+  app.ctx.fillStyle = fillStyle;
+  app.roundRect(x0, y0, bw, bh, rr);
+  app.ctx.fill();
+  app.ctx.shadowBlur = 0;
+  app.ctx.shadowOffsetY = 0;
+  app.ctx.save();
+  app.roundRect(x0, y0, bw, bh, rr);
+  app.ctx.clip();
+  var gh = bh * 0.52;
+  var gl = app.ctx.createLinearGradient(x0, y0, x0, y0 + gh);
+  gl.addColorStop(0, 'rgba(255,255,255,0.5)');
+  gl.addColorStop(0.55, 'rgba(255,255,255,0.12)');
+  gl.addColorStop(1, 'rgba(255,255,255,0)');
+  app.ctx.fillStyle = gl;
+  app.ctx.fillRect(x0, y0, bw, gh);
+  app.ctx.restore();
+  app.ctx.strokeStyle = th.btnGhostStroke;
+  app.ctx.lineWidth = Math.max(1, app.rpx(1.5));
+  app.roundRect(x0, y0, bw, bh, rr);
+  app.ctx.stroke();
+  app.drawHomeDrawerTabIcon(cx0, cy0, th.btnGhostText);
+  if (app.homeDrawerTabPressed) {
+    app.ctx.save();
+    app.roundRect(x0, y0, bw, bh, rr);
+    app.ctx.clip();
+    app.ctx.fillStyle = 'rgba(0, 0, 0, 0.11)';
+    app.ctx.fillRect(x0, y0, bw, bh);
+    app.ctx.restore();
+  }
+  app.ctx.restore();
+};
+
+app.hitHomeDrawerTab = function(clientX, clientY) {
+  var L = app.getHomeDrawerTabLayout();
+  if (!L) {
+    return false;
+  }
+  var li = L.leftInset != null ? L.leftInset : 0;
+  return (
+    clientX >= li - app.rpx(6) &&
+    clientX <= li + L.w + app.rpx(6) &&
+    Math.abs(clientY - L.cy) <= L.h * 0.5 + app.rpx(8)
+  );
+};
+
 app.drawHomeContentBelowPieceSkinModal = function() {
   var th = app.getCurrentTheme();
   app.fillHomeBackground(th);
@@ -503,18 +626,6 @@ app.drawHomeContentBelowPieceSkinModal = function() {
   }
 
   app.drawHomeMascotAsset(hl.mascotCx, hl.mascotCy, mascotBox);
-
-  if (app.userIsAdmin) {
-    var tipY = hl.bottomNavTop - app.rpx(30);
-    render.drawText(
-      app.ctx,
-      '残局管理：左上角菜单或左缘右滑打开侧栏',
-      hl.cx,
-      tipY,
-      app.rpx(22),
-      th.muted != null ? th.muted : th.subtitle
-    );
-  }
 
   app.drawHomeReferencePill(
     hl.cx,
@@ -561,6 +672,7 @@ app.drawHomeContentBelowPieceSkinModal = function() {
   app.drawHomeCopyrightBar(hl, th);
   app.drawHomeDrawer(th);
   app.drawHomeNavBar(th);
+  app.drawHomeDrawerTab(th);
   app.drawThemeChrome(th);
   app.drawRatingCardOverlay(th);
   app.drawCheckinModalOverlay(th);

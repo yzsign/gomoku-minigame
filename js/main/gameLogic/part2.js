@@ -621,10 +621,21 @@ app.drawHomeHeaderAvatar = function(ctx, img, cx, cy, r, th) {
   ctx.restore();
 }
 
-/** 侧滑抽屉：自左侧滑出，右侧为蒙层 */
+/**
+ * 侧滑抽屉：宽度 = 原屏宽 1/3 再减 1/3（即屏宽 2/9）；高度 = 原屏高 1/3 再减 1/2（即屏高 1/6）；
+ * 面板在头像/顶栏下方，右侧与下方为蒙层。
+ */
 app.getHomeDrawerLayout = function() {
-  var panelW = Math.min(app.W * 0.78, app.rpx(560));
-  return { panelW: panelW };
+  var nav = app.getHomeNavBarLayout();
+  var panelW = (app.W / 3) * (2 / 3);
+  var panelTop = nav.navBottom;
+  var panelH = (app.H / 3) / 2;
+  return {
+    panelW: panelW,
+    panelTop: panelTop,
+    panelH: panelH,
+    navBottom: nav.navBottom
+  };
 }
 
 /** 将整图等比缩放入边长 box 的正方形，居中于 (cx, cy)；成功返回 true */
@@ -919,78 +930,174 @@ app.drawHomeNavBar = function(th) {
   app.ctx.restore();
 }
 
-/** 多于一种界面风格时显示侧栏「界面风格」；当前仅檀木则不显示 */
-app.homeDrawerShowsThemeRow = function() {
-  return themes.getThemeIdsForCycling().length > 1;
+/**
+ * 侧栏仅管理员可见，且只有「残局管理」（左缘侧滑或点头像下方图标打开）。
+ */
+app.getHomeDrawerRows = function() {
+  if (!app.userIsAdmin) {
+    return [];
+  }
+  return [{ label: '残局管理', kind: 'admin_puzzle' }];
 }
 
 /**
- * 侧栏菜单行：{ label, kind }。kind: admin_puzzle | theme | piece_skin | feedback | about
+ * 侧栏列表行几何（与绘制一致，供 hit 使用）
+ * @param {number} rowIndex
  */
-app.getHomeDrawerRows = function() {
-  var rows = [];
-  if (app.userIsAdmin) {
-    rows.push({ label: '残局管理', kind: 'admin_puzzle' });
-  }
-  if (app.homeDrawerShowsThemeRow()) {
-    rows.push({ label: '界面风格', kind: 'theme' });
-  }
-  rows.push({ label: '棋子皮肤', kind: 'piece_skin' });
-  rows.push({ label: '游戏反馈', kind: 'feedback' });
-  rows.push({ label: '关于团团五子棋', kind: 'about' });
-  return rows;
-}
+app.getHomeDrawerRowLayout = function(rowIndex) {
+  var D = app.getHomeDrawerLayout();
+  var rowPadTop = app.rpx(12);
+  var rowGap = app.rpx(6);
+  var rowH = app.rpx(52);
+  var padX = app.rpx(10);
+  var idx = rowIndex | 0;
+  var y0 = D.panelTop + rowPadTop + idx * (rowH + rowGap);
+  var pw = D.panelW;
+  var x0 = padX;
+  var w = pw - padX * 2;
+  return {
+    x0: x0,
+    y0: y0,
+    w: w,
+    h: rowH,
+    rr: app.rpx(12),
+    glyphCx: padX + app.rpx(20),
+    glyphCy: y0 + rowH * 0.5,
+    textX: padX + app.rpx(42),
+    textCy: y0 + rowH * 0.5,
+    chevronX: pw - padX - app.rpx(12)
+  };
+};
+
+/** 侧栏「残局」示意：圆角方框 + 十字分割线 */
+app.drawHomeDrawerPuzzleGlyph = function(cx, cy, color, size) {
+  var half = size * 0.38;
+  app.ctx.save();
+  app.ctx.strokeStyle = color;
+  app.ctx.lineWidth = Math.max(1.2, size * 0.09);
+  app.ctx.lineCap = 'round';
+  app.ctx.lineJoin = 'round';
+  app.roundRect(cx - half, cy - half, half * 2, half * 2, size * 0.14);
+  app.ctx.stroke();
+  app.ctx.beginPath();
+  app.ctx.moveTo(cx, cy - half);
+  app.ctx.lineTo(cx, cy + half);
+  app.ctx.moveTo(cx - half, cy);
+  app.ctx.lineTo(cx + half, cy);
+  app.ctx.stroke();
+  app.ctx.restore();
+};
+
+/** 侧栏列表行右侧 › */
+app.drawHomeDrawerRowChevron = function(cx, cy, color, size) {
+  var d = (size && size > 0 ? size : app.rpx(18)) * 0.42;
+  app.ctx.save();
+  app.ctx.strokeStyle = color;
+  app.ctx.lineWidth = Math.max(1.5, app.rpx(2.5));
+  app.ctx.lineCap = 'round';
+  app.ctx.lineJoin = 'round';
+  app.ctx.beginPath();
+  app.ctx.moveTo(cx - d * 0.45, cy - d);
+  app.ctx.lineTo(cx + d * 0.35, cy);
+  app.ctx.lineTo(cx - d * 0.45, cy + d);
+  app.ctx.stroke();
+  app.ctx.restore();
+};
 
 app.drawHomeDrawer = function(th) {
   if (!app.homeDrawerOpen) {
     return;
   }
+  var nav = app.getHomeNavBarLayout();
   var D = app.getHomeDrawerLayout();
-  var insetTop = Math.max(
-    app.sys.statusBarHeight || 24,
-    app.sys.safeArea && app.sys.safeArea.top != null ? app.sys.safeArea.top : 0
-  );
   var pw = D.panelW;
+  var pt = D.panelTop;
+  var ph = D.panelH;
+  var pr = app.rpx(14);
   app.ctx.save();
-  app.ctx.fillStyle = '#ffffff';
-  app.ctx.fillRect(0, 0, pw, app.H);
   app.ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
-  app.ctx.fillRect(pw, 0, app.W - pw, app.H);
-  app.ctx.strokeStyle = '#E5E5E5';
-  app.ctx.lineWidth = Math.max(1, app.rpx(1));
-  app.ctx.beginPath();
-  app.ctx.moveTo(app.snapPx(pw), 0);
-  app.ctx.lineTo(app.snapPx(pw), app.H);
+  app.ctx.fillRect(0, nav.navBottom, app.W, app.H - nav.navBottom);
+  /** 与首页「随机匹配」幽灵按钮同源：btnGhostFill 渐变 + 顶光 + 描边 */
+  var baseHex = th.btnGhostFill;
+  var rgb = app.homePillHexToRgb(baseHex);
+  var fillStyle;
+  if (rgb) {
+    var c0 = app.homePillMixRgb(rgb, 0.38, { r: 255, g: 255, b: 255 });
+    var c1 = app.homePillMixRgb(rgb, 0.06, { r: 0, g: 0, b: 0 });
+    var lg = app.ctx.createLinearGradient(0, pt, 0, pt + ph);
+    lg.addColorStop(0, app.homePillRgbCss(c0));
+    lg.addColorStop(1, app.homePillRgbCss(c1));
+    fillStyle = lg;
+  } else {
+    fillStyle = baseHex;
+  }
+  app.ctx.shadowColor = 'rgba(0, 0, 0, 0.07)';
+  app.ctx.shadowBlur = app.rpx(10);
+  app.ctx.shadowOffsetX = 0;
+  app.ctx.shadowOffsetY = app.rpx(4);
+  app.ctx.fillStyle = fillStyle;
+  app.roundRect(0, pt, pw, ph, pr);
+  app.ctx.fill();
+  app.ctx.shadowBlur = 0;
+  app.ctx.shadowOffsetY = 0;
+  app.ctx.save();
+  app.roundRect(0, pt, pw, ph, pr);
+  app.ctx.clip();
+  var gh = ph * 0.48;
+  var gl = app.ctx.createLinearGradient(0, pt, 0, pt + gh);
+  gl.addColorStop(0, 'rgba(255,255,255,0.5)');
+  gl.addColorStop(0.55, 'rgba(255,255,255,0.12)');
+  gl.addColorStop(1, 'rgba(255,255,255,0)');
+  app.ctx.fillStyle = gl;
+  app.ctx.fillRect(0, pt, pw, gh);
+  app.ctx.restore();
+  app.ctx.strokeStyle = th.btnGhostStroke;
+  app.ctx.lineWidth = Math.max(1, app.rpx(1.5));
+  app.roundRect(0, pt, pw, ph, pr);
   app.ctx.stroke();
 
-  app.ctx.textAlign = 'left';
-  app.ctx.textBaseline = 'middle';
-  app.ctx.font =
-    'bold ' +
-    app.rpx(34) +
-    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
-  app.ctx.fillStyle = th.title;
-  app.ctx.fillText('菜单', app.snapPx(app.rpx(28)), app.snapPx(insetTop + app.rpx(52)));
-
-  var rowY = insetTop + app.rpx(110);
-  var rowH = app.rpx(96);
   var rows = app.getHomeDrawerRows();
+  var glyphSize = app.rpx(30);
+  var chevColor = th.subtitle;
   var i;
-  app.ctx.font =
-    app.rpx(30) +
-    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
-  app.ctx.fillStyle = '#333333';
   for (i = 0; i < rows.length; i++) {
-    var ry = rowY + i * rowH;
-    app.ctx.fillText(rows[i].label, app.snapPx(app.rpx(28)), app.snapPx(ry));
-  }
-  app.ctx.strokeStyle = '#F0F0F0';
-  app.ctx.lineWidth = Math.max(1, app.rpx(1));
-  for (i = 0; i < rows.length - 1; i++) {
-    app.ctx.beginPath();
-    app.ctx.moveTo(app.rpx(20), rowY + rowH * (i + 0.55));
-    app.ctx.lineTo(pw - app.rpx(16), rowY + rowH * (i + 0.55));
+    var L = app.getHomeDrawerRowLayout(i);
+    var baseRgb = app.homePillHexToRgb(th.btnGhostFill);
+    app.ctx.save();
+    if (baseRgb) {
+      var cBg = app.homePillMixRgb(baseRgb, 0.22, { r: 255, g: 255, b: 255 });
+      app.ctx.fillStyle = app.homePillRgbCss(cBg);
+    } else {
+      app.ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+    }
+    app.roundRect(L.x0, L.y0, L.w, L.h, L.rr);
+    app.ctx.fill();
+    app.ctx.strokeStyle = th.btnGhostStroke;
+    app.ctx.globalAlpha = 0.42;
+    app.ctx.lineWidth = Math.max(1, app.rpx(1));
+    app.roundRect(L.x0, L.y0, L.w, L.h, L.rr);
     app.ctx.stroke();
+    app.ctx.globalAlpha = 1;
+    app.ctx.restore();
+    app.drawHomeDrawerPuzzleGlyph(
+      L.glyphCx,
+      L.glyphCy,
+      th.btnGhostText,
+      glyphSize
+    );
+    app.ctx.textAlign = 'left';
+    app.ctx.textBaseline = 'middle';
+    app.ctx.font =
+      '600 ' +
+      app.rpx(27) +
+      'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+    app.ctx.fillStyle = th.title;
+    app.ctx.fillText(
+      rows[i].label,
+      app.snapPx(L.textX),
+      app.snapPx(L.textCy)
+    );
+    app.drawHomeDrawerRowChevron(L.chevronX, L.textCy, chevColor, app.rpx(20));
   }
   app.ctx.restore();
 }
@@ -1014,7 +1121,15 @@ app.hitHomeDrawerBackdrop = function(clientX, clientY) {
     return false;
   }
   var D = app.getHomeDrawerLayout();
-  return clientX > D.panelW;
+  if (
+    clientX >= 0 &&
+    clientX <= D.panelW &&
+    clientY >= D.panelTop &&
+    clientY <= D.panelTop + D.panelH
+  ) {
+    return false;
+  }
+  return true;
 }
 
 app.hitHomeDrawerRow = function(clientX, clientY) {
@@ -1022,22 +1137,22 @@ app.hitHomeDrawerRow = function(clientX, clientY) {
     return null;
   }
   var D = app.getHomeDrawerLayout();
-  if (clientX < 10 || clientX > D.panelW - 10) {
+  if (clientY < D.panelTop + 6 || clientY > D.panelTop + D.panelH - 6) {
     return null;
   }
-  var insetTop = Math.max(
-    app.sys.statusBarHeight || 24,
-    app.sys.safeArea && app.sys.safeArea.top != null ? app.sys.safeArea.top : 0
-  );
-  var rowY = insetTop + app.rpx(110);
-  var rowH = app.rpx(96);
-  var n = app.getHomeDrawerRows().length;
+  var rows = app.getHomeDrawerRows();
+  var n = rows.length;
+  if (n === 0) {
+    return null;
+  }
   var i;
   for (i = 0; i < n; i++) {
-    var ry = rowY + i * rowH;
+    var L = app.getHomeDrawerRowLayout(i);
     if (
-      clientY >= ry - rowH * 0.48 &&
-      clientY <= ry + rowH * 0.48
+      clientX >= L.x0 &&
+      clientX <= L.x0 + L.w &&
+      clientY >= L.y0 &&
+      clientY <= L.y0 + L.h
     ) {
       return i;
     }

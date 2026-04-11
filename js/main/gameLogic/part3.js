@@ -1181,6 +1181,7 @@ app.restoreDailyPuzzleInitial = function() {
   if (!app.dailyPuzzleInitialBoard) {
     return;
   }
+  app.dailyPuzzleBotGen++;
   app.board = app.copyBoardFromServer(app.dailyPuzzleInitialBoard);
   app.dailyPuzzleMoves = [];
   app.current = app.dailyPuzzleSideToMoveStart;
@@ -1188,6 +1189,13 @@ app.restoreDailyPuzzleInitial = function() {
   app.winner = null;
   app.clearWinRevealTimer();
   app.winningLineCells = null;
+  app.lastOpponentMove = null;
+  if (typeof app.refreshDailyPuzzleLastOpponentMove === 'function') {
+    app.refreshDailyPuzzleLastOpponentMove();
+  }
+  if (typeof app.scheduleDailyPuzzleBotIfNeeded === 'function') {
+    app.scheduleDailyPuzzleBotIfNeeded();
+  }
 };
 
 app.startDailyPuzzleFromApiData = function(d) {
@@ -1213,12 +1221,19 @@ app.startDailyPuzzleFromApiData = function(d) {
   app.dailyPuzzleSideToMoveStart =
     d.sideToMove === app.WHITE ? app.WHITE : app.BLACK;
   app.current = app.dailyPuzzleSideToMoveStart;
+  /** 挑战者与残局「下一手」同色：sideToMove 为黑则用户执黑，为白则执白 */
+  app.dailyPuzzleUserColor = app.dailyPuzzleSideToMoveStart;
+  app.dailyPuzzleBotGen++;
+  app.lastOpponentMove = null;
   app.gameOver = false;
   app.winner = null;
   app.showResultOverlay = false;
   app.screen = 'game';
   app.lastMsg = '每日残局';
   app.draw();
+  if (typeof app.scheduleDailyPuzzleBotIfNeeded === 'function') {
+    app.scheduleDailyPuzzleBotIfNeeded();
+  }
 };
 
 app.requestStartDailyPuzzle = function() {
@@ -2219,6 +2234,12 @@ function resultOverlayTitlePack(app) {
       main = '今日已完成';
       sub = '明天再来';
       titleColor = rs.draw.title;
+      break;
+    case 'daily_puzzle_bot_win':
+      mood = 'lose';
+      main = '挑战失败';
+      sub = '守关者获胜';
+      titleColor = rs.lose.title;
       break;
     default:
       titleColor = app.getUiTheme().title;

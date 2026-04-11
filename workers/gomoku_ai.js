@@ -563,8 +563,27 @@ function minimax(board, depth, alpha, beta, maximizing, aiColor, maxCandidates) 
 function aiMove(board, aiColor, options) {
   var searchDepth = AI_SEARCH_DEPTH;
   var maxCandidates = AI_MAX_CANDIDATES;
-  searchDeadline =
-    AI_TIME_BUDGET_MS > 0 ? Date.now() + AI_TIME_BUDGET_MS : 0;
+  var timeBudget = AI_TIME_BUDGET_MS;
+  if (options && options.dailyDifficulty != null) {
+    var lv = Number(options.dailyDifficulty);
+    if (isNaN(lv)) {
+      lv = 3;
+    }
+    if (lv <= 1) {
+      searchDepth = 8;
+      maxCandidates = 28;
+      timeBudget = 900;
+    } else if (lv === 2) {
+      searchDepth = 10;
+      maxCandidates = 40;
+      timeBudget = 2200;
+    } else {
+      searchDepth = 14;
+      maxCandidates = 54;
+      timeBudget = 4800;
+    }
+  }
+  searchDeadline = timeBudget > 0 ? Date.now() + timeBudget : 0;
   try {
     var opp = aiColor === BLACK ? WHITE : BLACK;
     var pool = getCandidates(board);

@@ -115,8 +115,7 @@ app.getOpponentDisplayName = function() {
     return '对方';
   }
   if (app.isDailyPuzzle) {
-    var oc = app.getOpponentAssignedStoneColor();
-    return oc === app.BLACK ? '黑方' : '白方';
+    return '守关者';
   }
   if (app.isRandomMatch) {
     return app.randomOpponentName || '对手';
@@ -132,9 +131,32 @@ app.getMyAssignedStoneColor = function() {
     return app.pvpOnlineYourColor;
   }
   if (app.isDailyPuzzle) {
-    return app.current;
+    return app.dailyPuzzleUserColor;
   }
   return app.pveHumanColor;
+};
+
+/** 每日残局：AI 守关方执子色 */
+app.dailyPuzzleBotColor = function() {
+  return app.oppositeColor(app.dailyPuzzleUserColor);
+};
+
+app.refreshDailyPuzzleLastOpponentMove = function() {
+  app.lastOpponentMove = null;
+  if (!app.dailyPuzzleMoves || app.dailyPuzzleMoves.length === 0) {
+    return;
+  }
+  var bc = app.dailyPuzzleBotColor();
+  var j;
+  for (j = app.dailyPuzzleMoves.length - 1; j >= 0; j--) {
+    if (app.dailyPuzzleMoves[j].color === bc) {
+      app.lastOpponentMove = {
+        r: app.dailyPuzzleMoves[j].r,
+        c: app.dailyPuzzleMoves[j].c
+      };
+      return;
+    }
+  }
 };
 
 /** 对手执子色（与「我」相对） */
@@ -1204,6 +1226,8 @@ app.screen = 'home';
 
 /** openid 管理员：侧栏「残局管理」入口（由 /api/me/admin-status 设置） */
 app.userIsAdmin = false;
+/** 首页管理员悬浮按钮按下态 */
+app.homeDrawerTabPressed = false;
 /** 管理页草稿棋盘；与 app.board 同引用 */
 app.adminDraftBoard = null;
 app.adminPuzzleTitle = '新残局';
@@ -1252,12 +1276,16 @@ app.isPvpLocal = false;
 
 /** 联机好友对战（Spring Boot WebSocket） */
 app.isPvpOnline = false;
-/** 每日残局：同一设备黑白交替，提交手顺至 /api/me/daily-puzzle/submit */
+/** 每日残局：用户对「守关者」(AI)，提交完整手顺至 /api/me/daily-puzzle/submit */
 app.isDailyPuzzle = false;
 app.dailyPuzzleMeta = null;
 app.dailyPuzzleMoves = [];
 app.dailyPuzzleInitialBoard = null;
 app.dailyPuzzleSideToMoveStart = app.BLACK;
+/** 挑战者执子色：与残局「下一手」一致（下一手黑则执黑，下一手白则执白） */
+app.dailyPuzzleUserColor = app.BLACK;
+/** 守关 AI 思考代数，与悔棋/重开配合以丢弃过期 Worker 结果 */
+app.dailyPuzzleBotGen = 0;
 app.dailyPuzzleSubmitting = false;
 app.dailyPuzzleResultKind = '';
 app.onlineRoomId = '';
@@ -1949,6 +1977,12 @@ app.shouldShowOpponentLastMoveMarker = function() {
   if (app.isPvpLocal) {
     return stoneColor === app.oppositeColor(app.current);
   }
+  if (app.isDailyPuzzle) {
+    return (
+      app.current === app.dailyPuzzleUserColor &&
+      stoneColor === app.dailyPuzzleBotColor()
+    );
+  }
   return app.current === app.pveHumanColor && stoneColor === app.pveAiColor();
 }
 
@@ -2116,13 +2150,22 @@ app.refreshLocalLastOpponent = function() {
   app.lastOpponentMove = { r: last.r, c: last.c };
 }
 
+app.syncDailyPuzzleSideToMove = function() {
+  if (!app.dailyPuzzleMoves || app.dailyPuzzleMoves.length === 0) {
+    app.current = app.dailyPuzzleSideToMoveStart;
+    return;
+  }
+  var lm = app.dailyPuzzleMoves[app.dailyPuzzleMoves.length - 1];
+  app.current = app.oppositeColor(lm.color);
+};
+
 app.undoDailyPuzzleOneMove = function() {
   if (!app.dailyPuzzleMoves || app.dailyPuzzleMoves.length === 0) {
     return;
   }
   var m = app.dailyPuzzleMoves.pop();
   app.board[m.r][m.c] = gomoku.EMPTY;
-  app.current = m.color;
+  app.syncDailyPuzzleSideToMove();
   app.gameOver = false;
   app.winner = null;
   app.clearWinRevealTimer();
@@ -2137,7 +2180,26 @@ app.execDailyPuzzleUndo = function() {
     wx.showToast({ title: '没有可悔的棋', icon: 'none' });
     return;
   }
-  app.undoDailyPuzzleOneMove();
+  app.dailyPuzzleBotGen++;
+  /** 轮到守关者：仅撤回上一手（挑战者刚下完，AI 尚未回应或正在算） */
+  if (app.current === app.dailyPuzzleBotColor()) {
+    app.undoDailyPuzzleOneMove();
+    app.syncDailyPuzzleSideToMove();
+    app.refreshDailyPuzzleLastOpponentMove();
+    app.draw();
+    return;
+  }
+  /** 轮到挑战者：撤己方上一手 + 守关者上一手（若有） */
+  var pops = app.dailyPuzzleMoves.length >= 2 ? 2 : 1;
+  var i;
+  for (i = 0; i < pops; i++) {
+    if (!app.dailyPuzzleMoves || app.dailyPuzzleMoves.length === 0) {
+      break;
+    }
+    app.undoDailyPuzzleOneMove();
+  }
+  app.syncDailyPuzzleSideToMove();
+  app.refreshDailyPuzzleLastOpponentMove();
   app.draw();
 };
 
