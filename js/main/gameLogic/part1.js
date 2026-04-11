@@ -108,6 +108,13 @@ app.getMyDisplayName = function() {
 }
 
 app.getOpponentDisplayName = function() {
+  if (
+    app.isPvpOnline &&
+    typeof app.isMyOnlineOpponentBot === 'function' &&
+    app.isMyOnlineOpponentBot()
+  ) {
+    return '电脑';
+  }
   if (app.isPvpOnline && app.onlineOpponentIsBot) {
     return '电脑';
   }
@@ -177,6 +184,35 @@ app.getOpponentAssignedStoneColor = function() {
   return app.oppositeColor(mine);
 };
 
+/** 联机：当前用户「棋盘对面」是否为电脑（非旁观）；用于头像与拉取资料 */
+app.isMyOnlineOpponentBot = function() {
+  if (!app.isPvpOnline || app.onlineSpectatorMode) {
+    return false;
+  }
+  var mine = app.pvpOnlineYourColor;
+  if (mine === app.BLACK) {
+    return !!app.onlineWhiteIsBotFlag;
+  }
+  return !!app.onlineBlackIsBotFlag;
+};
+
+app.syncOnlineOpponentProfileForBotSeat = function() {
+  if (!app.isPvpOnline) {
+    return;
+  }
+  if (typeof app.isMyOnlineOpponentBot !== 'function' || !app.isMyOnlineOpponentBot()) {
+    return;
+  }
+  app.onlineOppAvatarImg = null;
+  app.onlineOppNickname = '';
+  app.onlineOppUserId = 0;
+  defaultAvatars.setOpponentGenderFromServer(null);
+  if (app.onlineRoomId) {
+    app.onlineOppProfileFetched = true;
+    app.onlineOppProfileRoomId = app.onlineRoomId;
+  }
+};
+
 /** 与 render.drawBoard 中棋盘外接矩形一致 */
 app.getBoardOuterRect = function(layout) {
   var cell = layout.cell;
@@ -235,6 +271,15 @@ app.computeBoardNameLabelLayout = function(layout) {
   var myImg = app.getMyAvatarImageForUi();
   var oppImg;
   if (app.isDailyPuzzle) {
+    oppImg = defaultAvatars.getGuardianBotAvatarImage();
+    if (!oppImg) {
+      oppImg = defaultAvatars.getOpponentAvatarImage();
+    }
+  } else if (
+    app.isPvpOnline &&
+    typeof app.isMyOnlineOpponentBot === 'function' &&
+    app.isMyOnlineOpponentBot()
+  ) {
     oppImg = defaultAvatars.getGuardianBotAvatarImage();
     if (!oppImg) {
       oppImg = defaultAvatars.getOpponentAvatarImage();
@@ -1355,6 +1400,9 @@ app.pveAiColor = function() {
 app.isRandomMatch = false;
 /** 联机白方为数据库人机（随机匹配超时接入） */
 app.onlineOpponentIsBot = false;
+/** STATE：各方是否为人机（用于「我」对面是否为电脑，避免误用对手接口头像） */
+app.onlineBlackIsBotFlag = false;
+app.onlineWhiteIsBotFlag = false;
 
 /** 同桌好友对战：双方在同一设备轮流落子（无需服务端） */
 app.isPvpLocal = false;
@@ -1462,7 +1510,7 @@ app.isDailyStyleGameActionBar = function() {
 };
 
 /**
- * 「邀请」仅房主可用；好友进入残局房后置灰不可点。
+ * 「邀请」仅房主可用；好友进入残局房后置灰不可点（含房主侧：有人类棋手入座后不可再邀）。
  */
 app.isPuzzleFriendInviteEnabled = function() {
   if (app.isDailyPuzzle && !app.isPvpOnline) {
@@ -1473,7 +1521,17 @@ app.isPuzzleFriendInviteEnabled = function() {
     typeof app.isDailyStyleGameActionBar === 'function' &&
     app.isDailyStyleGameActionBar()
   ) {
-    return !!app.onlinePuzzleFriendRoom;
+    if (!app.onlinePuzzleFriendRoom) {
+      return false;
+    }
+    var humanBlack =
+      app.onlineBlackConnected && app.onlineBlackIsBotFlag !== true;
+    var humanWhite =
+      app.onlineWhiteConnected && app.onlineWhiteIsBotFlag !== true;
+    if (humanBlack || humanWhite) {
+      return false;
+    }
+    return true;
   }
   return true;
 };
@@ -1825,6 +1883,8 @@ app.disconnectOnline = function() {
   app.onlineBlackConnected = false;
   app.onlineWhiteConnected = false;
   app.onlineOpponentIsBot = false;
+  app.onlineBlackIsBotFlag = false;
+  app.onlineWhiteIsBotFlag = false;
   app.onlineUndoPending = false;
   app.onlineUndoRequesterColor = null;
   app.onlineUndoCooldownUntilMs = 0;
@@ -1943,6 +2003,9 @@ app.applyOnlineOpponentProfilePayload = function(d) {
 /** 双方已入座后拉取对手公开资料，使棋盘头像与对端资料一致 */
 app.tryFetchOnlineOpponentProfile = function() {
   if (!app.isPvpOnline || !app.onlineRoomId || !authApi.getSessionToken()) {
+    return;
+  }
+  if (typeof app.isMyOnlineOpponentBot === 'function' && app.isMyOnlineOpponentBot()) {
     return;
   }
   if (app.onlineSpectatorMode) {
@@ -2938,6 +3001,15 @@ app.applyOnlineState = function(data) {
     app.onlineOpponentIsBot = !!data.blackIsBot;
   } else {
     app.onlineOpponentIsBot = false;
+  }
+  if (data.blackIsBot !== undefined && data.blackIsBot !== null) {
+    app.onlineBlackIsBotFlag = !!data.blackIsBot;
+  }
+  if (data.whiteIsBot !== undefined && data.whiteIsBot !== null) {
+    app.onlineWhiteIsBotFlag = !!data.whiteIsBot;
+  }
+  if (typeof app.syncOnlineOpponentProfileForBotSeat === 'function') {
+    app.syncOnlineOpponentProfileForBotSeat();
   }
   if (
     app.isPvpOnline &&
