@@ -244,9 +244,20 @@ app.isMyOnlineOpponentBot = function() {
   }
   var mine = app.pvpOnlineYourColor;
   if (mine === app.BLACK) {
-    return !!app.onlineWhiteIsBotFlag;
+    if (app.onlineWhiteIsBotFlag) {
+      return true;
+    }
+  } else if (app.onlineBlackIsBotFlag) {
+    return true;
   }
-  return !!app.onlineBlackIsBotFlag;
+  /**
+   * 随机匹配超时接入机器人：客户端已标记，STATE.whiteIsBot 首包可能尚未到达，
+   * 避免头像在「联机默认人」与守关机器人之间闪一下。
+   */
+  if (app.isRandomMatch && app.onlineOpponentIsBot) {
+    return true;
+  }
+  return false;
 };
 
 app.syncOnlineOpponentProfileForBotSeat = function() {
@@ -254,6 +265,13 @@ app.syncOnlineOpponentProfileForBotSeat = function() {
     return;
   }
   if (typeof app.isMyOnlineOpponentBot !== 'function' || !app.isMyOnlineOpponentBot()) {
+    return;
+  }
+  /**
+   * 随机匹配超时接入的人机：昵称与头像由 /match/random/fallback-bot 或 STATE 前预置，
+   * 不清空，避免仍显示「电脑」与占位头像。
+   */
+  if (app.isRandomMatch) {
     return;
   }
   app.onlineOppAvatarImg = null;
@@ -328,27 +346,53 @@ app.computeBoardNameLabelLayout = function(layout) {
     }
   } else if (
     app.isPvpOnline &&
+    typeof app.isMyOnlineOpponentBot === 'function' &&
+    app.isMyOnlineOpponentBot()
+  ) {
+    /** 须先于网络头像分支：机器人账号也可能有 avatarUrl，避免与守关图来回切 */
+    if (app.isRandomMatch) {
+      if (
+        app.onlineOppAvatarImg &&
+        app.onlineOppAvatarImg.width &&
+        app.onlineOppAvatarImg.height
+      ) {
+        oppImg = app.onlineOppAvatarImg;
+      } else {
+        /** 随机匹配人机：数据库头像未解码前用性别默认 */
+        oppImg = defaultAvatars.getOpponentAvatarImage();
+      }
+    } else {
+      oppImg = defaultAvatars.getGuardianBotAvatarImage();
+      if (!oppImg) {
+        oppImg = defaultAvatars.getOpponentAvatarImage();
+      }
+    }
+  } else if (
+    app.isPvpOnline &&
     app.onlineOppAvatarImg &&
     app.onlineOppAvatarImg.width &&
     app.onlineOppAvatarImg.height
   ) {
     oppImg = app.onlineOppAvatarImg;
-  } else if (
-    app.isPvpOnline &&
-    typeof app.isMyOnlineOpponentBot === 'function' &&
-    app.isMyOnlineOpponentBot()
-  ) {
-    oppImg = defaultAvatars.getGuardianBotAvatarImage();
-    if (!oppImg) {
-      oppImg = defaultAvatars.getOpponentAvatarImage();
-    }
   } else if (app.isPvpLocal) {
     oppImg = defaultAvatars.getOpponentAvatarImage();
   } else if (!app.isPvpOnline) {
-    /** 人机对战（非同桌）：与每日残局电脑同一套头像 */
-    oppImg = defaultAvatars.getGuardianBotAvatarImage();
-    if (!oppImg) {
-      oppImg = defaultAvatars.getOpponentAvatarImage();
+    /** 人机对战（非同桌）；随机匹配接入本地人机时不使用守关头像 */
+    if (app.isRandomMatch) {
+      if (
+        app.onlineOppAvatarImg &&
+        app.onlineOppAvatarImg.width &&
+        app.onlineOppAvatarImg.height
+      ) {
+        oppImg = app.onlineOppAvatarImg;
+      } else {
+        oppImg = defaultAvatars.getOpponentAvatarImage();
+      }
+    } else {
+      oppImg = defaultAvatars.getGuardianBotAvatarImage();
+      if (!oppImg) {
+        oppImg = defaultAvatars.getOpponentAvatarImage();
+      }
     }
   } else {
     oppImg = defaultAvatars.getOnlineOpponentDefaultAvatarImage();
@@ -480,29 +524,18 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
     if (
       L.oppImg === defaultAvatars.getGuardianBotAvatarImage() &&
       L.oppImg &&
-      L.oppImg.width > 0 &&
-      L.oppImg.height > 0
+      typeof defaultAvatars.drawGuardianBotCircleAvatar === 'function'
     ) {
-      if (typeof defaultAvatars.drawGuardianBotCircleAvatar === 'function') {
-        defaultAvatars.drawGuardianBotCircleAvatar(
-          ctx,
-          L.oppImg,
-          L.oppCx,
-          L.oppCy,
-          L.avR,
-          th,
-          0.88
-        );
-      } else {
-        defaultAvatars.drawCircleAvatar(
-          ctx,
-          L.oppImg,
-          L.oppCx,
-          L.oppCy,
-          L.avR,
-          th
-        );
-      }
+      /** 未解码时 drawGuardianBotCircleAvatar 内为中性占位，不展示男/女默认图 */
+      defaultAvatars.drawGuardianBotCircleAvatar(
+        ctx,
+        L.oppImg,
+        L.oppCx,
+        L.oppCy,
+        L.avR,
+        th,
+        0.88
+      );
     } else {
       defaultAvatars.drawCircleAvatar(
         ctx,
@@ -572,7 +605,227 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
   ctx.shadowBlur = 0;
   ctx.shadowOffsetY = 0;
   ctx.restore();
-}
+};
+
+app.clearOnlineChatAvatarBubbleState = function() {
+  if (app._onlineChatAvatarBubbleMyTmr) {
+    try {
+      clearTimeout(app._onlineChatAvatarBubbleMyTmr);
+    } catch (eM) {}
+    app._onlineChatAvatarBubbleMyTmr = null;
+  }
+  if (app._onlineChatAvatarBubbleOppTmr) {
+    try {
+      clearTimeout(app._onlineChatAvatarBubbleOppTmr);
+    } catch (eO) {}
+    app._onlineChatAvatarBubbleOppTmr = null;
+  }
+  app.onlineChatAvatarBubble = null;
+};
+
+/**
+ * 收到 WS CHAT 后在发送方 / 接收方头像旁展示短时气泡（非旁观模式）
+ */
+app.applyOnlineChatAvatarBubble = function(data) {
+  if (!app.isPvpOnline || app.onlineSpectatorMode) {
+    return;
+  }
+  if (!data || data.senderColor == null) {
+    return;
+  }
+  var k = (data.kind || 'TEXT').toUpperCase();
+  var text = data.text != null ? String(data.text) : '';
+  if (!text.trim()) {
+    return;
+  }
+  var mine = data.senderColor === app.pvpOnlineYourColor;
+  var dur = 5200;
+  app.onlineChatAvatarBubble = app.onlineChatAvatarBubble || {};
+  var row = { text: text, until: Date.now() + dur, kind: k };
+  if (mine) {
+    app.onlineChatAvatarBubble.my = row;
+    if (app._onlineChatAvatarBubbleMyTmr) {
+      try {
+        clearTimeout(app._onlineChatAvatarBubbleMyTmr);
+      } catch (e1) {}
+    }
+    app._onlineChatAvatarBubbleMyTmr = setTimeout(function() {
+      app._onlineChatAvatarBubbleMyTmr = null;
+      if (app.onlineChatAvatarBubble && app.onlineChatAvatarBubble.my) {
+        app.onlineChatAvatarBubble.my = null;
+      }
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
+    }, dur);
+  } else {
+    app.onlineChatAvatarBubble.opp = row;
+    if (app._onlineChatAvatarBubbleOppTmr) {
+      try {
+        clearTimeout(app._onlineChatAvatarBubbleOppTmr);
+      } catch (e2) {}
+    }
+    app._onlineChatAvatarBubbleOppTmr = setTimeout(function() {
+      app._onlineChatAvatarBubbleOppTmr = null;
+      if (app.onlineChatAvatarBubble && app.onlineChatAvatarBubble.opp) {
+        app.onlineChatAvatarBubble.opp = null;
+      }
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
+    }, dur);
+  }
+};
+
+/**
+ * 在棋盘两侧头像旁绘制联机聊天气泡（在 drawBoardNameLabels 之后调用）
+ */
+app.drawOnlineAvatarChatBubbles = function(ctx, layout, th) {
+  if (!app.isPvpOnline || app.onlineSpectatorMode || !app.onlineChatAvatarBubble) {
+    return;
+  }
+  var b = app.onlineChatAvatarBubble;
+  var L = app.computeBoardNameLabelLayout(layout);
+  if (!L) {
+    return;
+  }
+  var now = Date.now();
+  ctx.save();
+  th = th || {};
+
+  function truncToWidth(text, maxW, fontStr) {
+    ctx.font = fontStr;
+    if (ctx.measureText(text).width <= maxW) {
+      return text;
+    }
+    var t = text;
+    while (t.length > 1 && ctx.measureText(t + '…').width > maxW) {
+      t = t.slice(0, -1);
+    }
+    return t + '…';
+  }
+
+  function roundRectPath(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+  }
+
+  function drawOne(cx, cy, avR, slotKey, bubbleOnLeft) {
+    var slot = b[slotKey];
+    if (!slot || slot.until <= now || !slot.text) {
+      return;
+    }
+    var kind = (slot.kind || 'TEXT').toUpperCase();
+    var fs =
+      kind === 'EMOJI'
+        ? Math.max(22, Math.round(app.rpx(28)))
+        : Math.max(15, Math.round(app.rpx(17)));
+    var fontStr =
+      fs +
+      'px "PingFang SC","Apple Color Emoji","Segoe UI Emoji","Microsoft YaHei",sans-serif';
+    var padX = app.rpx(12);
+    var padY = app.rpx(9);
+    var maxTw = app.rpx(200);
+    var disp = truncToWidth(slot.text, maxTw, fontStr);
+    ctx.font = fontStr;
+    var tw = ctx.measureText(disp).width;
+    var bw = Math.min(app.W - app.rpx(24), tw + padX * 2);
+    var bh = Math.max(fs + padY * 2, app.rpx(40));
+    var by = cy - bh * 0.5;
+    var tailDepth = app.rpx(8);
+    var gap = app.rpx(5);
+    var tipGap = app.rpx(2);
+    var br = app.rpx(14);
+    var margin = app.rpx(6);
+    var t0 = by + bh * 0.34;
+    var t1 = by + bh * 0.66;
+
+    var bodyLeft;
+    var bodyRight;
+    var tipX;
+    var bx;
+    if (bubbleOnLeft) {
+      bodyRight = cx - avR - gap - tailDepth;
+      bx = bodyRight - bw;
+      if (bx < margin) {
+        bx = margin;
+        bodyRight = bx + bw;
+      }
+      tipX = cx - avR - tipGap;
+    } else {
+      bodyLeft = cx + avR + gap + tailDepth;
+      bx = bodyLeft;
+      if (bx + bw > app.W - margin) {
+        bx = app.W - margin - bw;
+        bodyLeft = bx;
+      }
+      tipX = cx + avR + tipGap;
+    }
+
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.07)';
+    ctx.shadowBlur = app.rpx(5);
+    ctx.shadowOffsetY = app.rpx(1.5);
+    ctx.fillStyle = '#ffffff';
+
+    if (bubbleOnLeft) {
+      ctx.beginPath();
+      ctx.moveTo(tipX, cy);
+      ctx.lineTo(bodyRight, t0);
+      ctx.lineTo(bodyRight, t1);
+      ctx.closePath();
+      ctx.fill();
+      roundRectPath(ctx, bx, by, bw, bh, br);
+      ctx.fill();
+    } else {
+      bodyLeft = bx;
+      ctx.beginPath();
+      ctx.moveTo(tipX, cy);
+      ctx.lineTo(bodyLeft, t0);
+      ctx.lineTo(bodyLeft, t1);
+      ctx.closePath();
+      ctx.fill();
+      roundRectPath(ctx, bx, by, bw, bh, br);
+      ctx.fill();
+    }
+
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.09)';
+    ctx.lineWidth = app.rpx(1.5);
+    if (bubbleOnLeft) {
+      ctx.beginPath();
+      ctx.moveTo(tipX, cy);
+      ctx.lineTo(bodyRight, t0);
+      ctx.lineTo(bodyRight, t1);
+      ctx.closePath();
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(tipX, cy);
+      ctx.lineTo(bodyLeft, t0);
+      ctx.lineTo(bodyLeft, t1);
+      ctx.closePath();
+      ctx.stroke();
+    }
+    roundRectPath(ctx, bx, by, bw, bh, br);
+    ctx.stroke();
+
+    ctx.fillStyle = '#1a1a1a';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(disp, bx + bw * 0.5, by + bh * 0.5);
+  }
+
+  drawOne(L.myCx, L.myCy, L.avR, 'my', false);
+  drawOne(L.oppCx, L.oppCy, L.avR, 'opp', true);
+  ctx.restore();
+};
 
 app.hitCircleAvatar = function(clientX, clientY, cx, cy, r) {
   var dx = clientX - cx;
@@ -1479,7 +1732,7 @@ app.onlineSettleSent = false;
 app.onlineSettleRetryTimer = null;
 /** 与 WS STATE.matchRound 一致：首局 1，再来一局后递增，用于结算上报 */
 app.onlineMatchRound = 1;
-/** 联机终局原因：TIME_DRAW | MOVE_TIMEOUT 等，与 STATE.gameEndReason 一致 */
+/** 联机终局原因：TIME_DRAW | MOVE_TIMEOUT | RESIGN 等，与 STATE.gameEndReason 一致 */
 app.onlineGameEndReason = null;
 /** 联机读秒：与 STATE.clock* 一致；null 表示未下发（旧服务端） */
 app.onlineClockMoveDeadlineWallMs = null;
@@ -1492,6 +1745,61 @@ app.onlineClockTickTimer = null;
  */
 app.onlineBlackPieceSkinId = null;
 app.onlineWhitePieceSkinId = null;
+
+/** 联机聊天（标准对战底栏第 5 键；WS type CHAT / CHAT_SEND） */
+app.onlineChatMessages = [];
+app.onlineChatOpen = false;
+app.onlineChatUnread = 0;
+app.onlineChatEmojiOpen = false;
+app.onlineChatBanner = null;
+app.onlineChatBubbleHits = [];
+app.onlineChatPanelLayout = null;
+/** 打开面板时 0.2s 上滑；0～1 */
+app.onlineChatPanelOpenAnim = 1;
+app._onlineChatAnimStartMs = 0;
+app._chatPanelAnimIv = null;
+/** 自定义绘制用草稿；与 wx.showKeyboard 同步 */
+app.onlineChatInputDraft = '';
+app._onlineChatKeyboardCleanup = null;
+/** 头像旁会话气泡：{ my: {text,until,kind}, opp: ... } kind 为 TEXT|QUICK|EMOJI */
+app.onlineChatAvatarBubble = null;
+app._onlineChatAvatarBubbleMyTmr = null;
+app._onlineChatAvatarBubbleOppTmr = null;
+app.ONLINE_CHAT_QUICK = [
+  '哈喽～',
+  '这步绝了',
+  '大意了',
+  '稳住别慌',
+  '容我想想',
+  '平局不？',
+  '太强了吧',
+  '输了输了'
+];
+app.ONLINE_CHAT_EMOJIS = [
+  '👍',
+  '👌',
+  '😊',
+  '😅',
+  '🤝',
+  '🎯',
+  '🎉',
+  '😔',
+  '🤔',
+  '✋',
+  '👋',
+  '🫡'
+];
+/** 表情快捷区：与 UI 稿一致展示 5 个（其余可从「⋯」选） */
+app.ONLINE_CHAT_EMOJI_QUICK_ROW = ['👍', '👌', '😊', '😅', '🤝'];
+
+app.shouldShowOnlineChatButton = function() {
+  return (
+    app.isPvpOnline &&
+    !app.onlineSpectatorMode &&
+    typeof app.isDailyStyleGameActionBar === 'function' &&
+    !app.isDailyStyleGameActionBar()
+  );
+};
 
 /**
  * 好友联机（非随机匹配）：双方未都在座时视为对局未开始。
@@ -1918,6 +2226,28 @@ app.disconnectOnline = function() {
   app.randomMatchHostCancelToken = '';
   app.onlineBlackPieceSkinId = null;
   app.onlineWhitePieceSkinId = null;
+  app.onlineChatMessages = [];
+  app.onlineChatOpen = false;
+  app.onlineChatUnread = 0;
+  app.onlineChatEmojiOpen = false;
+  app.onlineChatBanner = null;
+  app.onlineChatBubbleHits = [];
+  app.onlineChatPanelLayout = null;
+  app.onlineChatPanelOpenAnim = 1;
+  app._onlineChatAnimStartMs = 0;
+  if (typeof app.dismissOnlineChatKeyboard === 'function') {
+    app.dismissOnlineChatKeyboard();
+  }
+  app.onlineChatInputDraft = '';
+  if (typeof app.clearOnlineChatAvatarBubbleState === 'function') {
+    app.clearOnlineChatAvatarBubbleState();
+  }
+  if (app._chatPanelAnimIv) {
+    try {
+      clearInterval(app._chatPanelAnimIv);
+    } catch (eIv) {}
+    app._chatPanelAnimIv = null;
+  }
   app.clearOnlineOpponentProfile();
   if (app.historyReplayOverlayVisible) {
     app.historyReplayOverlayVisible = false;
@@ -2016,6 +2346,9 @@ app.applyOnlineOpponentProfilePayload = function(d) {
 /** 双方已入座后拉取对手公开资料，使棋盘头像与对端资料一致 */
 app.tryFetchOnlineOpponentProfile = function() {
   if (!app.isPvpOnline || !app.onlineRoomId || !authApi.getSessionToken()) {
+    return;
+  }
+  if (typeof app.isMyOnlineOpponentBot === 'function' && app.isMyOnlineOpponentBot()) {
     return;
   }
   if (app.onlineSpectatorMode) {

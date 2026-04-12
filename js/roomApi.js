@@ -2,7 +2,7 @@
  * 联机 HTTP / WebSocket 基址与请求选项
  * （需与微信后台「request 合法域名」一致；生产请用 https + wss）
  */
-// var GOMOKU_API_BASE = 'http://127.0.0.1:8080';
+ //var GOMOKU_API_BASE = 'http://127.0.0.1:8080';
 var GOMOKU_API_BASE ='https://springboot-emh7-241395-4-1418403127.sh.run.tcloudbase.com';
 
 function withAuthHeaders(baseHeader) {
@@ -93,6 +93,15 @@ function roomApiRandomMatchFallbackOptions(roomId, blackToken) {
       encodeURIComponent(roomId) +
       '&blackToken=' +
       encodeURIComponent(blackToken)
+  };
+}
+
+/** 随机一名人机的公开资料：GET /api/match/random/bot-profile（本地随机兜底 UI） */
+function roomApiRandomBotProfileOptions() {
+  return {
+    url: GOMOKU_API_BASE + '/api/match/random/bot-profile',
+    method: 'GET',
+    header: withAuthHeaders({})
   };
 }
 
@@ -343,6 +352,37 @@ function gameReplayByIdOptions(gameId) {
   };
 }
 
+/** GET /api/rooms/chat/messages?roomId=&limit= 联机对局聊天记录 */
+function roomChatMessagesOptions(roomId, limit) {
+  var lim =
+    limit !== undefined && limit !== null ? Number(limit) : 80;
+  if (isNaN(lim) || lim < 1) {
+    lim = 80;
+  }
+  return {
+    url:
+      GOMOKU_API_BASE +
+      '/api/rooms/chat/messages?roomId=' +
+      encodeURIComponent(roomId) +
+      '&limit=' +
+      encodeURIComponent(String(lim)),
+    method: 'GET',
+    header: withAuthHeaders({})
+  };
+}
+
+/** POST /api/rooms/chat/reports body: { roomId, messageId, reason? } */
+function roomChatReportOptions(bodyObj) {
+  return {
+    url: GOMOKU_API_BASE + '/api/rooms/chat/reports',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify(bodyObj || {})
+  };
+}
+
 module.exports = {
   GOMOKU_API_BASE: GOMOKU_API_BASE,
   roomApiCreateOptions: roomApiCreateOptions,
@@ -351,6 +391,7 @@ module.exports = {
   roomApiRandomMatchPairedOptions: roomApiRandomMatchPairedOptions,
   roomApiRandomMatchCancelOptions: roomApiRandomMatchCancelOptions,
   roomApiRandomMatchFallbackOptions: roomApiRandomMatchFallbackOptions,
+  roomApiRandomBotProfileOptions: roomApiRandomBotProfileOptions,
   meRatingOptions: meRatingOptions,
   mePveGameOptions: mePveGameOptions,
   meAdminStatusOptions: meAdminStatusOptions,
@@ -369,5 +410,7 @@ module.exports = {
   gameSettleOptions: gameSettleOptions,
   gameReplayByRoomOptions: gameReplayByRoomOptions,
   gameReplayByIdOptions: gameReplayByIdOptions,
+  roomChatMessagesOptions: roomChatMessagesOptions,
+  roomChatReportOptions: roomChatReportOptions,
   wsUrlFromApiBase: wsUrlFromApiBase
 };

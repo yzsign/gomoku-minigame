@@ -89,6 +89,12 @@ app.startOnlineSocket = function() {
       }
       return;
     }
+    if (data.type === 'CHAT') {
+      if (typeof app.applyOnlineChatIncoming === 'function') {
+        app.applyOnlineChatIncoming(data);
+      }
+      return;
+    }
     if (data.type === 'STATE') {
       app.applyOnlineState(data);
     }
@@ -2312,5 +2318,60 @@ app.getCheckinModalLayout = function() {
     }
   };
 }
+
+app.fetchOnlineChatHistory = function() {};
+
+app.applyOnlineChatIncoming = function(data) {
+  if (!data || data.id == null) {
+    return;
+  }
+  var id = Number(data.id);
+  var i;
+  for (i = 0; i < app.onlineChatMessages.length; i++) {
+    if (Number(app.onlineChatMessages[i].id) === id) {
+      return;
+    }
+  }
+  app.onlineChatMessages.push({
+    id: id,
+    senderUserId: data.senderUserId,
+    senderColor: data.senderColor,
+    kind: data.kind,
+    text: data.text,
+    createdAt: data.createdAt
+  });
+  if (typeof app.applyOnlineChatAvatarBubble === 'function') {
+    app.applyOnlineChatAvatarBubble(data);
+  }
+  if (app.onlineChatMessages.length > 400) {
+    app.onlineChatMessages.splice(0, app.onlineChatMessages.length - 400);
+  }
+  if (!app.onlineChatOpen) {
+    app.onlineChatUnread = (app.onlineChatUnread || 0) + 1;
+  }
+  if (typeof app.draw === 'function') {
+    app.draw();
+  }
+};
+
+app.sendOnlineChat = function(kind, text) {
+  if (
+    !app.socketTask ||
+    typeof app.socketTask.send !== 'function' ||
+    !app.onlineWsConnected ||
+    app.onlineSpectatorMode
+  ) {
+    return;
+  }
+  try {
+    app.socketTask.send({
+      data: JSON.stringify({
+        type: 'CHAT_SEND',
+        kind: kind,
+        text: text != null ? String(text) : ''
+      })
+    });
+  } catch (e1) {}
+};
 
 };

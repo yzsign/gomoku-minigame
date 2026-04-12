@@ -561,6 +561,9 @@ app.draw = function() {
   }
 
   app.drawBoardNameLabels(app.ctx, app.layout, th);
+  if (typeof app.drawOnlineAvatarChatBubbles === 'function') {
+    app.drawOnlineAvatarChatBubbles(app.ctx, app.layout, th);
+  }
 
   app.ctx.save();
   app.ctx.shadowColor = 'rgba(0, 0, 0, 0.06)';
@@ -645,7 +648,11 @@ app.draw = function() {
       if (app.current === app.pvpOnlineYourColor) {
         status = '轮到你（' + sideName + '）';
       } else {
-        status = '「电脑」思考中…';
+        if (app.isRandomMatch) {
+          status = '「' + app.getOpponentDisplayName() + '」思考中…';
+        } else {
+          status = '「电脑」思考中…';
+        }
       }
     } else if (app.current === app.pvpOnlineYourColor) {
       status = '轮到你（' + sideName + '）';
@@ -773,6 +780,21 @@ app.draw = function() {
   if (!dailyBarRedrawOnOverlay) {
     app.drawGameActionBar(undoLabel, undoActive, drawLabel);
   }
+  /**
+   * 消息面板必须在底栏之后绘制（Canvas 后绘在上层），否则会挡住输入框/发送键。
+   * 是否遮挡棋盘暂不限制，以可操作优先。
+   */
+  if (
+    app.isPvpOnline &&
+    app.onlineChatOpen &&
+    typeof app.shouldShowOnlineChatButton === 'function' &&
+    app.shouldShowOnlineChatButton() &&
+    typeof app.drawOnlineChatPanel === 'function'
+  ) {
+    app.drawOnlineChatPanel(th, btnY);
+  } else {
+    app.onlineChatPanelLayout = null;
+  }
 
   if (
     typeof app.shouldShowOnlineGameClockUi === 'function' &&
@@ -829,13 +851,21 @@ app.getGameActionBarLayout = function() {
       : app.rpx(128);
   var x0 = pad;
   var y0 = btnY - barH / 2;
-  /** 人机：2 列；每日残局 / 残局好友房旁观：4 列（重置 + 邀请）；其余联机：4 列（和棋 + 认输，见 isDailyStyleGameActionBar） */
-  var colCount =
-    app.isPvpOnline || app.isPvpLocal
-      ? 4
-      : app.isDailyPuzzle
-        ? 4
-        : 2;
+  /** 人机：2 列；每日残局 / 残局好友房旁观：4 列（重置 + 邀请）；标准联机：5 列（含聊天）；其余联机：4 列 */
+  var colCount;
+  if (
+    app.isPvpOnline &&
+    typeof app.shouldShowOnlineChatButton === 'function' &&
+    app.shouldShowOnlineChatButton()
+  ) {
+    colCount = 5;
+  } else if (app.isPvpOnline || app.isPvpLocal) {
+    colCount = 4;
+  } else if (app.isDailyPuzzle) {
+    colCount = 4;
+  } else {
+    colCount = 2;
+  }
   var colW = barW / colCount;
   var centers = [];
   var ci;
@@ -909,7 +939,7 @@ app.shouldDrawOnlineStepRingForSide = function(isMySide) {
 
 /**
  * 联机步时：仅在「当前行棋」头像上，于头像与执子徽章之间绘制细圆环进度（无头像下数字）。
- * 剩余 ≤10 秒时进度弧红色脉冲闪烁；对方头像不装饰；暂停为虚线全环 +「停」。
+ * 剩余 ≤10 秒时进度弧红色脉冲闪烁；对方头像不装饰；暂停为虚线全环（无文字）。
  */
 app.drawOnlineTurnClockRingBeforeBadge = function(ctx, cx, cy, avR, th, isMySide) {
   if (!app.shouldDrawOnlineStepRingForSide(isMySide)) {
@@ -960,18 +990,6 @@ app.drawOnlineTurnClockRingBeforeBadge = function(ctx, cx, cy, avR, th, isMySide
         : 'rgba(90, 86, 78, 0.45)';
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.font =
-      '600 ' +
-      Math.round(app.rpx(12)) +
-      'px "PingFang SC","Hiragino Sans GB",sans-serif';
-    ctx.fillStyle = ink
-      ? 'rgba(95, 88, 78, 0.88)'
-      : mint
-        ? 'rgba(48, 78, 88, 0.88)'
-        : 'rgba(88, 84, 76, 0.88)';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillText('停', app.snapPx(cx), app.snapPx(cy + ringR + app.rpx(5)));
     ctx.restore();
     return;
   }
@@ -1030,7 +1048,7 @@ app.formatGameTotalClockMmSs = function(totalSec) {
 };
 
 /**
- * 联机局时限文案：纯 MM:SS 或「读秒暂停」（无「局」字）；步时由头像环表示。
+ * 联机局时限文案：纯 MM:SS；暂停时不显示副文案；步时由头像环表示。
  */
 app.buildOnlineClockSubline = function() {
   if (
@@ -1056,7 +1074,7 @@ app.buildOnlineClockSubline = function() {
   }
   var now = Date.now();
   if (app.onlineClockPaused) {
-    return '读秒暂停';
+    return '';
   }
   if (
     app.onlineClockGameDeadlineWallMs != null &&
@@ -1387,6 +1405,13 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
         enabled: resignOk
       }
     );
+    if (L.colCount === 5) {
+      cols.push({
+        img: null,
+        kind: 'chat',
+        enabled: true
+      });
+    }
   }
   var undoCaption =
     undoLabel != null && String(undoLabel).trim() !== ''
@@ -1400,7 +1425,9 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
     ? ['离开', undoCaption, '重置', '邀请']
     : pveBarOnly
       ? ['离开', undoCaption]
-      : ['离开', undoCaption, drawCaption, '认输'];
+      : L.colCount === 5
+        ? ['离开', undoCaption, drawCaption, '认输', '聊天']
+        : ['离开', undoCaption, drawCaption, '认输'];
   var M = app.gameBarIconSizeMul || {};
   var labelFsPx = Math.max(12, Math.round(L.labelFs));
   /** 底栏各列说明字同一基线，避免因各列图标倍率不同导致上下错位 */
@@ -1518,6 +1545,24 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
       gameBarLabelColor,
       'normal'
     );
+    if (
+      col.kind === 'chat' &&
+      app.onlineChatUnread > 0
+    ) {
+      var rdx = cx + L.colW * 0.38;
+      var rdy = Math.min(minIconTop + app.rpx(6), iconTopCol) + app.rpx(4);
+      var rr = app.rpx(8);
+      ctx.fillStyle = '#e54545';
+      ctx.beginPath();
+      ctx.arc(app.snapPx(rdx), app.snapPx(rdy), rr, 0, Math.PI * 2);
+      ctx.fill();
+      var ub = app.onlineChatUnread >= 10 ? '9+' : String(app.onlineChatUnread);
+      ctx.font = '600 ' + app.rpx(18) + 'px sans-serif';
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(ub, app.snapPx(rdx), app.snapPx(rdy));
+    }
     ctx.restore();
   }
   ctx.restore();
@@ -1661,6 +1706,29 @@ app.drawGameActionIcon = function(ctx, iconKind, icx, icy, s, fg) {
     ctx.moveTo(icx + s * 0.38, icy - s * 0.42);
     ctx.lineTo(icx + s * 0.72, icy - s * 0.08);
     ctx.lineTo(icx + s * 0.52, icy + s * 0.02);
+    ctx.stroke();
+  } else if (iconKind === 'chat') {
+    /** 气泡勾边 */
+    var bx = icx - s * 0.65;
+    var by = icy - s * 0.45;
+    var bw = s * 1.3;
+    var bh = s * 0.95;
+    var br = s * 0.22;
+    ctx.beginPath();
+    ctx.moveTo(bx + br, by);
+    ctx.lineTo(bx + bw - br, by);
+    ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + br);
+    ctx.lineTo(bx + bw, by + bh - br);
+    ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - br, by + bh);
+    ctx.lineTo(bx + br, by + bh);
+    ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - br);
+    ctx.lineTo(bx, by + br);
+    ctx.quadraticCurveTo(bx, by, bx + br, by);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(icx - s * 0.15, icy + s * 0.5);
+    ctx.lineTo(icx - s * 0.35, icy + s * 0.82);
+    ctx.lineTo(icx + s * 0.25, icy + s * 0.52);
     ctx.stroke();
   } else {
     ctx.beginPath();
@@ -1961,10 +2029,660 @@ app.hitGameButton = function(clientX, clientY) {
       }
       return 'invite_friend';
     }
+    if (L.colCount === 5) {
+      return 'resign';
+    }
     return 'resign';
+  }
+  if (col === 4 && L.colCount === 5) {
+    return 'chat';
   }
   return 'resign';
 }
+
+/** 消息面板上滑时长（ms），需与 scheduleOnlineChatPanelAnimFrames 一致 */
+app.ONLINE_CHAT_PANEL_OPEN_MS = 380;
+
+app.getOnlineChatPanelAnim = function() {
+  if (!app.onlineChatOpen) {
+    return 1;
+  }
+  if (!app._onlineChatAnimStartMs) {
+    app._onlineChatAnimStartMs = Date.now();
+  }
+  var dur =
+    typeof app.ONLINE_CHAT_PANEL_OPEN_MS === 'number' &&
+    app.ONLINE_CHAT_PANEL_OPEN_MS > 0
+      ? app.ONLINE_CHAT_PANEL_OPEN_MS
+      : 380;
+  var t = (Date.now() - app._onlineChatAnimStartMs) / dur;
+  if (t >= 1) {
+    return 1;
+  }
+  var u = 1 - Math.pow(1 - t, 3);
+  return u;
+};
+
+app.scheduleOnlineChatPanelAnimFrames = function() {
+  if (app._chatPanelAnimIv) {
+    try {
+      clearInterval(app._chatPanelAnimIv);
+    } catch (e0) {}
+    app._chatPanelAnimIv = null;
+  }
+  var dur =
+    typeof app.ONLINE_CHAT_PANEL_OPEN_MS === 'number' &&
+    app.ONLINE_CHAT_PANEL_OPEN_MS > 0
+      ? app.ONLINE_CHAT_PANEL_OPEN_MS
+      : 380;
+  app._chatPanelAnimIv = setInterval(function() {
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+    var done =
+      typeof app.getOnlineChatPanelAnim === 'function' &&
+      app.getOnlineChatPanelAnim() >= 1;
+    if (done) {
+      try {
+        clearInterval(app._chatPanelAnimIv);
+      } catch (e1) {}
+      app._chatPanelAnimIv = null;
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
+    }
+  }, 16);
+};
+
+app.dismissOnlineChatKeyboard = function() {
+  if (typeof app._onlineChatKeyboardCleanup === 'function') {
+    try {
+      app._onlineChatKeyboardCleanup();
+    } catch (e0) {}
+    app._onlineChatKeyboardCleanup = null;
+  }
+  try {
+    if (typeof wx !== 'undefined' && typeof wx.hideKeyboard === 'function') {
+      wx.hideKeyboard({});
+    }
+  } catch (e1) {}
+};
+
+/** 收起联机「消息」面板（发短语/表情/文字后调用） */
+app.closeOnlineChatPanel = function() {
+  if (typeof app.dismissOnlineChatKeyboard === 'function') {
+    app.dismissOnlineChatKeyboard();
+  }
+  app.onlineChatInputDraft = '';
+  app.onlineChatOpen = false;
+  app.onlineChatEmojiOpen = false;
+  app._onlineChatAnimStartMs = 0;
+  if (app._chatPanelAnimIv) {
+    try {
+      clearInterval(app._chatPanelAnimIv);
+    } catch (eCc) {}
+    app._chatPanelAnimIv = null;
+  }
+  if (typeof app.draw === 'function') {
+    app.draw();
+  }
+};
+
+app.trySendOnlineChatText = function(raw) {
+  var t = String(raw != null ? raw : '').trim();
+  if (!t) {
+    return false;
+  }
+  var n = 0;
+  var i = 0;
+  for (i = 0; i < t.length; ) {
+    var c = t.codePointAt(i);
+    n++;
+    i += c > 0xffff ? 2 : 1;
+  }
+  if (n > 30) {
+    if (typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
+      wx.showToast({ title: '最多30字', icon: 'none' });
+    }
+    return false;
+  }
+  if (typeof app.sendOnlineChat === 'function') {
+    app.sendOnlineChat('TEXT', t);
+  }
+  if (typeof app.closeOnlineChatPanel === 'function') {
+    app.closeOnlineChatPanel();
+  }
+  return true;
+};
+
+app._fallbackOnlineChatModal = function() {
+  if (typeof wx === 'undefined' || typeof wx.showModal !== 'function') {
+    return;
+  }
+  var canEdit = !wx.canIUse || wx.canIUse('showModal.object.editable');
+  if (!canEdit) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '当前版本不支持输入', icon: 'none' });
+    }
+    return;
+  }
+  wx.showModal({
+    title: '发送消息',
+    editable: true,
+    placeholderText: '输入发送:',
+    success: function(res) {
+      if (!res.confirm || res.content == null) {
+        return;
+      }
+      app.trySendOnlineChatText(res.content);
+    }
+  });
+};
+
+app.promptOnlineChatText = function() {
+  if (typeof wx === 'undefined') {
+    return;
+  }
+  if (typeof app.dismissOnlineChatKeyboard === 'function') {
+    app.dismissOnlineChatKeyboard();
+  }
+  if (typeof wx.showKeyboard !== 'function') {
+    app._fallbackOnlineChatModal();
+    return;
+  }
+  var draft0 =
+    app.onlineChatInputDraft != null ? String(app.onlineChatInputDraft) : '';
+  var kbCleaned = false;
+  var onInput = function(res) {
+    app.onlineChatInputDraft = res && res.value != null ? String(res.value) : '';
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+  };
+  var onConfirm = function(res) {
+    var v =
+      res && res.value != null
+        ? String(res.value)
+        : app.onlineChatInputDraft != null
+          ? String(app.onlineChatInputDraft)
+          : '';
+    cleanup();
+    try {
+      if (typeof wx.hideKeyboard === 'function') {
+        wx.hideKeyboard({});
+      }
+    } catch (eH) {}
+    app.onlineChatInputDraft = '';
+    if (app.trySendOnlineChatText(v)) {
+      return;
+    }
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+  };
+  var onComplete = function() {
+    cleanup();
+  };
+  function cleanup() {
+    if (kbCleaned) {
+      return;
+    }
+    kbCleaned = true;
+    try {
+      if (typeof wx.offKeyboardInput === 'function') {
+        wx.offKeyboardInput(onInput);
+      }
+    } catch (e1) {}
+    try {
+      if (typeof wx.offKeyboardConfirm === 'function') {
+        wx.offKeyboardConfirm(onConfirm);
+      }
+    } catch (e2) {}
+    try {
+      if (typeof wx.offKeyboardComplete === 'function') {
+        wx.offKeyboardComplete(onComplete);
+      }
+    } catch (e3) {}
+    app._onlineChatKeyboardCleanup = null;
+  }
+  app._onlineChatKeyboardCleanup = cleanup;
+  try {
+    if (typeof wx.onKeyboardInput === 'function') {
+      wx.onKeyboardInput(onInput);
+    }
+    if (typeof wx.onKeyboardConfirm === 'function') {
+      wx.onKeyboardConfirm(onConfirm);
+    }
+    if (typeof wx.onKeyboardComplete === 'function') {
+      wx.onKeyboardComplete(onComplete);
+    }
+  } catch (eL) {
+    cleanup();
+    app._fallbackOnlineChatModal();
+    return;
+  }
+  wx.showKeyboard({
+    defaultValue: draft0,
+    maxLength: 30,
+    multiple: false,
+    confirmHold: false,
+    confirmType: 'send',
+    fail: function() {
+      cleanup();
+      app._fallbackOnlineChatModal();
+    }
+  });
+};
+
+app.reportOnlineChatMessage = function(msg) {
+  if (!app.onlineRoomId || !msg || msg.id == null) {
+    return;
+  }
+  wx.request(
+    Object.assign(
+      roomApi.roomChatReportOptions({
+        roomId: app.onlineRoomId,
+        messageId: Number(msg.id)
+      }),
+      {
+        success: function(res) {
+          if (res.statusCode === 200) {
+            wx.showToast({ title: '已收到举报', icon: 'none' });
+          } else {
+            wx.showToast({ title: '提交失败', icon: 'none' });
+          }
+        },
+        fail: function() {
+          wx.showToast({ title: '网络异常', icon: 'none' });
+        }
+      }
+    )
+  );
+};
+
+/**
+ * 联机聊天浮层（半透明、表情行、ONLINE_CHAT_QUICK 短语网格、输入发送；不展示聊天记录）
+ * 高度随内容，下沿在底栏上方；打开时自下而上滑入（见 getOnlineChatPanelAnim）
+ */
+app.drawOnlineChatPanel = function(th, btnY) {
+  var L = app.getGameActionBarLayout();
+  var barTop = L.y0;
+  var oy = app.layout.originY;
+  var gapAboveBar = app.rpx(8);
+  var panelBottom = barTop - gapAboveBar;
+  var headerH = app.rpx(80);
+  var sectionGap = app.rpx(10);
+  var emojiRowH = app.rpx(76);
+  var phraseCellH = app.rpx(52);
+  var phraseRows = 2;
+  var phraseGapY = app.rpx(8);
+  var phraseBlockH =
+    phraseCellH * phraseRows + phraseGapY * (phraseRows - 1);
+  var inpRowH = app.rpx(88);
+  var bannerH =
+    app.onlineChatBanner && app.onlineChatBanner.until > Date.now()
+      ? app.rpx(28)
+      : 0;
+  var bottomFixed =
+    sectionGap +
+    app.rpx(4) +
+    emojiRowH +
+    sectionGap +
+    phraseBlockH +
+    sectionGap +
+    inpRowH +
+    app.rpx(6);
+  var contentH =
+    headerH + app.rpx(6) + bannerH + bottomFixed + app.rpx(10);
+  var minH = app.rpx(200);
+  var ph = Math.max(minH, contentH);
+  var panelTop0 = panelBottom - ph;
+  if (panelTop0 < oy) {
+    panelTop0 = oy;
+    ph = panelBottom - panelTop0;
+  }
+  var anim =
+    typeof app.getOnlineChatPanelAnim === 'function'
+      ? app.getOnlineChatPanelAnim()
+      : 1;
+  if (anim >= 1) {
+    anim = 1;
+  }
+  var slideY = anim >= 1 ? 0 : (1 - anim) * ph;
+  var panelTop = panelTop0 + slideY;
+  panelTop = Math.round(panelTop);
+
+  var ctx = app.ctx;
+  var w = app.W;
+  var pad = app.rpx(28);
+
+  app.onlineChatBubbleHits = [];
+  ctx.save();
+
+  ctx.shadowColor = 'rgba(60, 48, 36, 0.1)';
+  ctx.shadowBlur = app.rpx(10);
+  ctx.shadowOffsetY = app.rpx(3);
+  ctx.fillStyle = 'rgba(255, 251, 240, 0.82)';
+  var crTop = app.rpx(16);
+  app.roundRect(0, panelTop, w, ph, crTop);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  var titleFont =
+    '600 ' +
+    app.rpx(34) +
+    'px "Songti SC","STSong","SimSun","PingFang SC","Microsoft YaHei",serif';
+  ctx.font = titleFont;
+  ctx.fillStyle = '#3a3830';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('消息', w * 0.5, panelTop + headerH * 0.5);
+
+  var closeR = app.rpx(36);
+  var closeCx = w - pad - closeR * 0.5;
+  var closeCy = panelTop + headerH * 0.5;
+  ctx.font = '300 ' + app.rpx(40) + 'px sans-serif';
+  ctx.fillStyle = '#8a8580';
+  ctx.textAlign = 'center';
+  ctx.fillText('×', closeCx, closeCy + app.rpx(2));
+
+  ctx.strokeStyle = 'rgba(92, 82, 72, 0.18)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad, panelTop + headerH);
+  ctx.lineTo(w - pad, panelTop + headerH);
+  ctx.stroke();
+
+  var yMsg = panelTop + headerH + app.rpx(6);
+  if (bannerH > 0) {
+    ctx.font = app.rpx(22) + 'px sans-serif';
+    ctx.fillStyle = '#c03030';
+    ctx.textAlign = 'center';
+    ctx.fillText(
+      app.onlineChatBanner.text,
+      w * 0.5,
+      yMsg + app.rpx(14)
+    );
+    yMsg += bannerH;
+  }
+
+  var emojiSecTop = yMsg + sectionGap;
+  var qy = emojiSecTop + app.rpx(4);
+  var gapCell = app.rpx(10);
+  var cellW = (w - pad * 2 - gapCell * 4) / 5;
+  var qiRow = app.ONLINE_CHAT_EMOJI_QUICK_ROW || [];
+  var emojiRects = [];
+  var qix;
+  for (qix = 0; qix < qiRow.length; qix++) {
+    var cx = pad + qix * (cellW + gapCell);
+    ctx.fillStyle = 'rgba(245, 240, 230, 0.88)';
+    app.roundRect(cx, qy, cellW, emojiRowH - app.rpx(8), app.rpx(12));
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(92, 82, 72, 0.15)';
+    ctx.lineWidth = 1;
+    app.roundRect(cx, qy, cellW, emojiRowH - app.rpx(8), app.rpx(12));
+    ctx.stroke();
+    ctx.font = app.rpx(36) + 'px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(
+      qiRow[qix],
+      cx + cellW * 0.5,
+      qy + (emojiRowH - app.rpx(8)) * 0.52
+    );
+    emojiRects.push({
+      x: cx,
+      y: qy,
+      w: cellW,
+      h: emojiRowH - app.rpx(8),
+      emoji: qiRow[qix]
+    });
+  }
+
+  var phraseList = app.ONLINE_CHAT_QUICK || [];
+  var phraseCols = 4;
+  var phraseGapX = app.rpx(8);
+  var phraseW =
+    (w - pad * 2 - phraseGapX * (phraseCols - 1)) / phraseCols;
+  var py0 = qy + emojiRowH + sectionGap;
+  var phraseFs = app.rpx(22);
+  var phraseRects = [];
+  var pi;
+  for (pi = 0; pi < phraseList.length; pi++) {
+    var pr = Math.floor(pi / phraseCols);
+    var pc = pi % phraseCols;
+    var px = pad + pc * (phraseW + phraseGapX);
+    var py = py0 + pr * (phraseCellH + phraseGapY);
+    var ptxt = String(phraseList[pi]);
+    ctx.fillStyle = 'rgba(245, 240, 230, 0.88)';
+    app.roundRect(px, py, phraseW, phraseCellH, app.rpx(10));
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(92, 82, 72, 0.15)';
+    ctx.lineWidth = 1;
+    app.roundRect(px, py, phraseW, phraseCellH, app.rpx(10));
+    ctx.stroke();
+    ctx.font =
+      phraseFs +
+      'px "PingFang SC","Songti SC","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = '#5c5348';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    var showTxt = ptxt;
+    while (
+      showTxt.length > 1 &&
+      ctx.measureText(showTxt).width > phraseW - app.rpx(12)
+    ) {
+      showTxt = showTxt.slice(0, -1);
+    }
+    if (showTxt.length < ptxt.length) {
+      showTxt = showTxt.slice(0, -1) + '…';
+    }
+    ctx.fillText(showTxt, px + phraseW * 0.5, py + phraseCellH * 0.52);
+    phraseRects.push({
+      x: px,
+      y: py,
+      w: phraseW,
+      h: phraseCellH,
+      phrase: ptxt
+    });
+  }
+
+  var iy = py0 + phraseBlockH + sectionGap;
+  var iH = inpRowH - app.rpx(12);
+  var iW = w * 0.68;
+  ctx.strokeStyle = 'rgba(224, 216, 204, 0.85)';
+  ctx.lineWidth = 1;
+  ctx.fillStyle = 'rgba(255, 252, 247, 0.9)';
+  app.roundRect(pad, iy, iW, iH, app.rpx(12));
+  ctx.fill();
+  ctx.stroke();
+  ctx.font = app.rpx(24) + 'px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  var draftStr =
+    app.onlineChatInputDraft != null
+      ? String(app.onlineChatInputDraft)
+      : '';
+  var inpTextX = pad + app.rpx(18);
+  var inpMaxTextW = iW - app.rpx(28);
+  if (draftStr) {
+    ctx.fillStyle = '#5c5348';
+    var dispDraft = draftStr;
+    while (
+      dispDraft.length > 0 &&
+      ctx.measureText(dispDraft).width > inpMaxTextW
+    ) {
+      dispDraft = dispDraft.slice(1);
+    }
+    if (dispDraft.length < draftStr.length && dispDraft.length > 0) {
+      dispDraft = '…' + dispDraft.slice(1);
+    }
+    ctx.fillText(dispDraft, inpTextX, iy + iH * 0.5);
+  } else {
+    ctx.fillStyle = '#9a938a';
+    ctx.fillText('输入发送:', inpTextX, iy + iH * 0.5);
+  }
+
+  var sbw = w - pad * 2 - iW - app.rpx(12);
+  var sbL = pad + iW + app.rpx(12);
+  ctx.fillStyle = 'rgba(212, 184, 148, 0.92)';
+  app.roundRect(sbL, iy, sbw, iH, app.rpx(12));
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.font = app.rpx(26) + 'px "PingFang SC",sans-serif';
+  ctx.fillText('发送', sbL + sbw * 0.5, iy + iH * 0.52);
+
+  var emojiPanelRect = null;
+  if (app.onlineChatEmojiOpen) {
+    var epW = Math.min(app.rpx(560), w - pad * 2);
+    var epH = app.rpx(220);
+    var ex = pad;
+    var ey = qy - epH - app.rpx(8);
+    if (ey < panelTop + headerH + app.rpx(8)) {
+      ey = qy + emojiRowH + app.rpx(8);
+    }
+    emojiPanelRect = { x: ex, y: ey, w: epW, h: epH };
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+    app.roundRect(ex, ey, epW, epH, app.rpx(10));
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(92, 82, 72, 0.12)';
+    ctx.lineWidth = 1;
+    app.roundRect(ex, ey, epW, epH, app.rpx(10));
+    ctx.stroke();
+    var ei;
+    var ecx = ex + app.rpx(22);
+    var ecy = ey + app.rpx(28);
+    for (ei = 0; ei < app.ONLINE_CHAT_EMOJIS.length; ei++) {
+      ctx.font = app.rpx(32) + 'px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(app.ONLINE_CHAT_EMOJIS[ei], ecx, ecy);
+      ecx += app.rpx(72);
+      if (ei === 5) {
+        ecx = ex + app.rpx(22);
+        ecy += app.rpx(56);
+      }
+    }
+  }
+
+  ctx.restore();
+
+  app.onlineChatPanelLayout = {
+    panelTop: panelTop0,
+    panelTopDrawn: panelTop,
+    panelH: ph,
+    barTop: barTop,
+    slideY: slideY,
+    closeRect: {
+      x: closeCx - closeR,
+      y: panelTop + headerH * 0.5 - closeR,
+      w: closeR * 2,
+      h: closeR * 2
+    },
+    emojiMoreLabel: null,
+    inpY: iy,
+    inpH: iH,
+    inpW: iW,
+    phraseArrow: null,
+    phraseQuickRects: phraseRects,
+    sendL: sbL,
+    sendW: sbw,
+    emojiQuickRects: emojiRects,
+    emojiPanel: emojiPanelRect
+  };
+};
+
+app.hitOnlineChatPanel = function(clientX, clientY) {
+  var pl = app.onlineChatPanelLayout;
+  if (!pl) {
+    return null;
+  }
+  var topDraw =
+    pl.panelTopDrawn != null ? pl.panelTopDrawn : pl.panelTop;
+  if (
+    clientY < topDraw ||
+    clientY >= pl.barTop ||
+    clientX < 0 ||
+    clientX > app.W
+  ) {
+    return null;
+  }
+  var pad = app.rpx(28);
+  var cr = pl.closeRect;
+  if (
+    cr &&
+    clientX >= cr.x &&
+    clientX <= cr.x + cr.w &&
+    clientY >= cr.y &&
+    clientY <= cr.y + cr.h
+  ) {
+    return { kind: 'close' };
+  }
+  if (
+    clientX >= pl.sendL &&
+    clientX <= pl.sendL + pl.sendW &&
+    clientY >= pl.inpY &&
+    clientY <= pl.inpY + pl.inpH
+  ) {
+    return { kind: 'send' };
+  }
+  if (pl.phraseQuickRects && pl.phraseQuickRects.length) {
+    var pqi;
+    for (pqi = 0; pqi < pl.phraseQuickRects.length; pqi++) {
+      var pr = pl.phraseQuickRects[pqi];
+      if (
+        clientX >= pr.x &&
+        clientX <= pr.x + pr.w &&
+        clientY >= pr.y &&
+        clientY <= pr.y + pr.h
+      ) {
+        return { kind: 'phrase_pick', phrase: pr.phrase };
+      }
+    }
+  }
+  if (
+    clientX >= pad &&
+    clientX <= pad + pl.inpW &&
+    clientY >= pl.inpY &&
+    clientY <= pl.inpY + pl.inpH
+  ) {
+    return { kind: 'input' };
+  }
+  if (pl.emojiQuickRects && pl.emojiQuickRects.length) {
+    var eri;
+    for (eri = 0; eri < pl.emojiQuickRects.length; eri++) {
+      var er = pl.emojiQuickRects[eri];
+      if (
+        clientX >= er.x &&
+        clientX <= er.x + er.w &&
+        clientY >= er.y &&
+        clientY <= er.y + er.h
+      ) {
+        if (er.emoji) {
+          return { kind: 'emoji_pick', emoji: er.emoji };
+        }
+      }
+    }
+  }
+  if (pl.emojiPanel) {
+    var ep = pl.emojiPanel;
+    if (
+      clientX >= ep.x &&
+      clientX <= ep.x + ep.w &&
+      clientY >= ep.y &&
+      clientY <= ep.y + ep.h
+    ) {
+      var col = Math.floor((clientX - ep.x - app.rpx(16)) / app.rpx(72));
+      var row = Math.floor((clientY - ep.y - app.rpx(10)) / app.rpx(56));
+      var ei = row * 6 + col;
+      if (ei >= 0 && ei < app.ONLINE_CHAT_EMOJIS.length) {
+        return { kind: 'emoji_pick', emoji: app.ONLINE_CHAT_EMOJIS[ei] };
+      }
+    }
+  }
+  return { kind: 'inside' };
+};
 
 app.hitUndoRespondRow = function(clientX, clientY) {
   if (!app.showUndoRespondRow()) {
@@ -2833,6 +3551,75 @@ wx.onTouchStart(function (e) {
     }
   }
 
+  if (
+    app.screen === 'game' &&
+    app.isPvpOnline &&
+    typeof app.shouldShowOnlineChatButton === 'function' &&
+    app.shouldShowOnlineChatButton() &&
+    app.onlineChatOpen &&
+    typeof app.hitOnlineChatPanel === 'function'
+  ) {
+    var chHit = app.hitOnlineChatPanel(x, y);
+    if (chHit) {
+      if (chHit.kind === 'close') {
+        if (typeof app.dismissOnlineChatKeyboard === 'function') {
+          app.dismissOnlineChatKeyboard();
+        }
+        app.onlineChatInputDraft = '';
+        app.onlineChatOpen = false;
+        app.onlineChatEmojiOpen = false;
+        app._onlineChatAnimStartMs = 0;
+        if (app._chatPanelAnimIv) {
+          try {
+            clearInterval(app._chatPanelAnimIv);
+          } catch (eCl) {}
+          app._chatPanelAnimIv = null;
+        }
+        app.draw();
+        return;
+      }
+      if (chHit.kind === 'phrase_pick' && chHit.phrase) {
+        if (typeof app.sendOnlineChat === 'function') {
+          app.sendOnlineChat('QUICK', chHit.phrase);
+        }
+        if (typeof app.closeOnlineChatPanel === 'function') {
+          app.closeOnlineChatPanel();
+        }
+        return;
+      }
+      if (chHit.kind === 'emoji_pick' && chHit.emoji) {
+        app.onlineChatEmojiOpen = false;
+        if (typeof app.sendOnlineChat === 'function') {
+          app.sendOnlineChat('EMOJI', chHit.emoji);
+        }
+        if (typeof app.closeOnlineChatPanel === 'function') {
+          app.closeOnlineChatPanel();
+        }
+        return;
+      }
+      if (chHit.kind === 'send') {
+        var sd = String(app.onlineChatInputDraft || '').trim();
+        if (sd) {
+          if (typeof app.trySendOnlineChatText === 'function') {
+            app.trySendOnlineChatText(sd);
+          }
+        } else if (typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
+          wx.showToast({ title: '请先输入内容', icon: 'none' });
+        }
+        return;
+      }
+      if (chHit.kind === 'input') {
+        if (typeof app.promptOnlineChatText === 'function') {
+          app.promptOnlineChatText();
+        }
+        return;
+      }
+      if (chHit.kind === 'inside') {
+        return;
+      }
+    }
+  }
+
   var boardAv =
     app.screen === 'replay' ||
     (app.screen === 'history' && app.historyReplayOverlayVisible)
@@ -2978,7 +3765,55 @@ wx.onTouchStart(function (e) {
     return;
   }
 
+  if (
+    app.screen === 'game' &&
+    app.isPvpOnline &&
+    app.onlineChatOpen &&
+    app.onBoard(x, y)
+  ) {
+    if (typeof app.dismissOnlineChatKeyboard === 'function') {
+      app.dismissOnlineChatKeyboard();
+    }
+    app.onlineChatInputDraft = '';
+    app.onlineChatOpen = false;
+    app.onlineChatEmojiOpen = false;
+    app._onlineChatAnimStartMs = 0;
+    if (app._chatPanelAnimIv) {
+      try {
+        clearInterval(app._chatPanelAnimIv);
+      } catch (eBd) {}
+      app._chatPanelAnimIv = null;
+    }
+    app.draw();
+    return;
+  }
+
   var gbtn = app.hitGameButton(x, y);
+  if (gbtn === 'chat') {
+    app.onlineChatOpen = !app.onlineChatOpen;
+    if (app.onlineChatOpen) {
+      app.onlineChatUnread = 0;
+      app._onlineChatAnimStartMs = Date.now();
+      if (typeof app.scheduleOnlineChatPanelAnimFrames === 'function') {
+        app.scheduleOnlineChatPanelAnimFrames();
+      }
+    } else {
+      if (typeof app.dismissOnlineChatKeyboard === 'function') {
+        app.dismissOnlineChatKeyboard();
+      }
+      app.onlineChatInputDraft = '';
+      app.onlineChatEmojiOpen = false;
+      app._onlineChatAnimStartMs = 0;
+      if (app._chatPanelAnimIv) {
+        try {
+          clearInterval(app._chatPanelAnimIv);
+        } catch (eG) {}
+        app._chatPanelAnimIv = null;
+      }
+    }
+    app.draw();
+    return;
+  }
   if (gbtn === 'back') {
     if (typeof app.shouldSkipOnlineLeaveConfirm === 'function' && app.shouldSkipOnlineLeaveConfirm()) {
       app.backToHome();

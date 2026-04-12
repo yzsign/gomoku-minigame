@@ -1676,14 +1676,58 @@ app.finishRandomMatch = function() {
   app.randomMatchHostWaiting = false;
   app.disconnectOnline();
   app.isPvpLocal = false;
-  app.randomOpponentName =
-    app.FAKE_OPPONENT_NAMES[
-      Math.floor(Math.random() * app.FAKE_OPPONENT_NAMES.length)
-    ];
   app.pveHumanColor = Math.random() < 0.5 ? app.BLACK : app.WHITE;
   app.isRandomMatch = true;
-  app.screen = 'game';
-  app.resetGame();
+  var applyFakeNameAndReset = function() {
+    app.randomOpponentName =
+      app.FAKE_OPPONENT_NAMES[
+        Math.floor(Math.random() * app.FAKE_OPPONENT_NAMES.length)
+      ];
+    app.screen = 'game';
+    app.resetGame();
+  };
+  if (typeof authApi === 'undefined' || !authApi.ensureSession) {
+    applyFakeNameAndReset();
+    return;
+  }
+  authApi.ensureSession(function(sessionOk) {
+    if (!sessionOk || typeof wx === 'undefined' || !wx.request) {
+      applyFakeNameAndReset();
+      return;
+    }
+    wx.request(
+      Object.assign(roomApi.roomApiRandomBotProfileOptions(), {
+        success: function(res) {
+          var payload = res.data;
+          if (payload && typeof payload === 'string') {
+            try {
+              payload = JSON.parse(payload);
+            } catch (ePr) {
+              payload = null;
+            }
+          }
+          if (
+            res.statusCode === 200 &&
+            payload &&
+            typeof payload.nickname === 'string' &&
+            payload.nickname.trim()
+          ) {
+            if (typeof app.applyOnlineOpponentProfilePayload === 'function') {
+              app.applyOnlineOpponentProfilePayload(payload);
+            }
+            app.randomOpponentName = payload.nickname.trim();
+            app.screen = 'game';
+            app.resetGame();
+            return;
+          }
+          applyFakeNameAndReset();
+        },
+        fail: function() {
+          applyFakeNameAndReset();
+        }
+      })
+    );
+  });
 }
 
 app.onRandomMatchHostTimeout = function() {
@@ -1708,12 +1752,26 @@ app.onRandomMatchHostTimeout = function() {
             app.cancelMatchingTimers();
             app.isRandomMatch = true;
             app.onlineOpponentIsBot = true;
+            /** 执子色与人机在哪一侧由首帧 STATE 同步（服务端可能对换座位，房主也可能执白） */
             app.onlineOppProfileFetched = false;
             app.onlineOppProfileRoomId = '';
+            var fbPayload = res.data;
+            if (fbPayload && typeof fbPayload === 'string') {
+              try {
+                fbPayload = JSON.parse(fbPayload);
+              } catch (eFb) {
+                fbPayload = null;
+              }
+            }
+            if (
+              fbPayload &&
+              typeof app.applyOnlineOpponentProfilePayload === 'function'
+            ) {
+              app.applyOnlineOpponentProfilePayload(fbPayload);
+            }
             app.screen = 'game';
             app.onlineToken = app.randomMatchHostCancelToken;
             app.randomMatchHostCancelToken = '';
-            app.pvpOnlineYourColor = app.BLACK;
             app.closeSocketOnly();
             app.startOnlineSocket();
             app.draw();
@@ -2251,9 +2309,10 @@ app.getResultVsAvatarImage = function(forBlack) {
     if (!app.isPvpOnline && !app.isPvpLocal) {
       var hum0 = app.pveHumanColor;
       var mine0 = defaultAvatars.getMyAvatarImage();
-      var g0 =
-        defaultAvatars.getGuardianBotAvatarImage() ||
-        defaultAvatars.getOpponentAvatarImage();
+      var g0 = app.isRandomMatch
+        ? defaultAvatars.getOpponentAvatarImage()
+        : defaultAvatars.getGuardianBotAvatarImage() ||
+          defaultAvatars.getOpponentAvatarImage();
       if (forBlack) {
         return hum0 === gomoku.BLACK ? mine0 : g0;
       }
@@ -2576,11 +2635,15 @@ function resultOverlayTitlePack(app) {
         sub = winColorSub;
         if (app.onlineGameEndReason === 'MOVE_TIMEOUT') {
           sub = '对方思考超时';
+        } else if (app.onlineGameEndReason === 'RESIGN') {
+          sub = '对方认输';
         }
       } else {
         main = winColorSub;
         if (app.onlineGameEndReason === 'MOVE_TIMEOUT') {
           sub = '对方思考超时';
+        } else if (app.onlineGameEndReason === 'RESIGN') {
+          sub = '对方认输';
         }
       }
       titleColor = rs.win.title;
@@ -2590,6 +2653,8 @@ function resultOverlayTitlePack(app) {
       main = '失败';
       if (app.onlineGameEndReason === 'MOVE_TIMEOUT') {
         sub = '思考超时判负';
+      } else if (app.onlineGameEndReason === 'RESIGN') {
+        sub = '已认输';
       }
       titleColor = rs.lose.title;
       break;

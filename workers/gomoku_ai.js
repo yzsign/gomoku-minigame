@@ -92,31 +92,84 @@ var DIRS = [
   [1, -1]
 ];
 
+var DEFAULT_AI_TUNE = {
+  oppThreatWeight: 1.3,
+  doubleThreatMult: 4,
+  candidateRing: 2,
+  forcedTiersMax: 6
+};
+var currentAiTune = null;
+
+function tune() {
+  return currentAiTune || DEFAULT_AI_TUNE;
+}
+
+function clampNum(n, lo, hi) {
+  if (n !== n || n == null) return lo;
+  return n < lo ? lo : n > hi ? hi : n;
+}
+
+function applyTuneFields(t, src) {
+  if (!src || typeof src !== 'object') return;
+  if (src.oppThreatWeight != null) {
+    t.oppThreatWeight = clampNum(Number(src.oppThreatWeight), 0.5, 2.5);
+  }
+  if (src.doubleThreatMult != null) {
+    t.doubleThreatMult = clampNum(Number(src.doubleThreatMult), 1, 8);
+  }
+  if (src.candidateRing != null) {
+    t.candidateRing = clampNum(Math.floor(Number(src.candidateRing)), 1, 4);
+  }
+  if (src.forcedTiersMax != null) {
+    t.forcedTiersMax = clampNum(Math.floor(Number(src.forcedTiersMax)), 3, 6);
+  }
+}
+
+function resolveAiTune(options) {
+  var t = {
+    oppThreatWeight: DEFAULT_AI_TUNE.oppThreatWeight,
+    doubleThreatMult: DEFAULT_AI_TUNE.doubleThreatMult,
+    candidateRing: DEFAULT_AI_TUNE.candidateRing,
+    forcedTiersMax: DEFAULT_AI_TUNE.forcedTiersMax
+  };
+  if (!options || typeof options !== 'object') {
+    return t;
+  }
+  if (options.aiTune && typeof options.aiTune === 'object') {
+    applyTuneFields(t, options.aiTune);
+  }
+  applyTuneFields(t, options);
+  return t;
+}
+
 /* ---------- 启发式、局面评估、候选与搜索 ---------- */
 
-/** 与后端 GomokuAiEngine.patternMagnitude 一致 */
+/**
+ * 与后端 GomokuAiEngine.patternMagnitude 一致。
+ * 分值贴近文档第四节，供局面评估与线型扫描使用。
+ */
 function patternMagnitude(len, leftOpen, rightOpen) {
   var openEnds = (leftOpen ? 1 : 0) + (rightOpen ? 1 : 0);
-  if (len >= 5) return 10000000;
+  if (len >= 5) return 100000;
   if (len === 4) {
-    if (openEnds === 2) return 500000;
-    if (openEnds === 1) return 120000;
-    return 8000;
+    if (openEnds === 2) return 10000;
+    if (openEnds === 1) return 1000;
+    return 50;
   }
   if (len === 3) {
-    if (openEnds === 2) return 45000;
-    if (openEnds === 1) return 6000;
-    return 400;
+    if (openEnds === 2) return 100;
+    if (openEnds === 1) return 25;
+    return 2;
   }
   if (len === 2) {
-    if (openEnds === 2) return 2200;
-    if (openEnds === 1) return 350;
-    return 40;
+    if (openEnds === 2) return 5;
+    if (openEnds === 1) return 1;
+    return 0;
   }
   if (len === 1) {
-    if (openEnds === 2) return 120;
-    if (openEnds === 1) return 25;
-    return 3;
+    if (openEnds === 2) return 1;
+    if (openEnds === 1) return 0;
+    return 0;
   }
   return 0;
 }
@@ -163,8 +216,277 @@ function heuristicMoveScore(board, r, c, color) {
   return s;
 }
 
-/** 对手线型威胁加权，与后端 OPP_LINE_PATTERN_MULT 一致 */
-var OPP_LINE_PATTERN_MULT = 1.18;
+function getLineRunInfo(board, r, c, dr, dc, color) {
+  var len = 1;
+  var nr = r - dr;
+  var nc = c - dc;
+  while (inBounds(nr, nc) && board[nr][nc] === color) {
+    len++;
+    nr -= dr;
+    nc -= dc;
+  }
+  var leftEnd = inBounds(nr, nc) ? board[nr][nc] : -1;
+  nr = r + dr;
+  nc = c + dc;
+  while (inBounds(nr, nc) && board[nr][nc] === color) {
+    len++;
+    nr += dr;
+    nc += dc;
+  }
+  var rightEnd = inBounds(nr, nc) ? board[nr][nc] : -1;
+  return {
+    len: len,
+    leftOpen: leftEnd === EMPTY,
+    rightOpen: rightEnd === EMPTY
+  };
+}
+
+function classifySegment(len, leftOpen, rightOpen) {
+  if (len >= 5) return 'W';
+  if (len === 4) {
+    if (leftOpen && rightOpen) return 'L4';
+    if (leftOpen || rightOpen) return 'R4';
+    return 'X';
+  }
+  if (len === 3) {
+    if (leftOpen && rightOpen) return 'L3';
+    if (leftOpen || rightOpen) return 'S3';
+    return 'X';
+  }
+  if (len === 2) {
+    if (leftOpen && rightOpen) return 'L2';
+    return 'X';
+  }
+  return 'N';
+}
+
+function rushFourWinningCell(board, r, c, dr, dc, color) {
+  var lr = r;
+  var lc = c;
+  while (
+    inBounds(lr - dr, lc - dc) &&
+    board[lr - dr][lc - dc] === color
+  ) {
+    lr -= dr;
+    lc -= dc;
+  }
+  var rr = r;
+  var rc = c;
+  while (
+    inBounds(rr + dr, rc + dc) &&
+    board[rr + dr][rc + dc] === color
+  ) {
+    rr += dr;
+    rc += dc;
+  }
+  var leftE = inBounds(lr - dr, lc - dc) ? board[lr - dr][lc - dc] : -1;
+  var rightE = inBounds(rr + dr, rc + dc) ? board[rr + dr][rc + dc] : -1;
+  if (leftE === EMPTY && rightE !== EMPTY) {
+    return { r: lr - dr, c: lc - dc };
+  }
+  if (rightE === EMPTY && leftE !== EMPTY) {
+    return { r: rr + dr, c: rc + dc };
+  }
+  return null;
+}
+
+function areIndependentRushFours(board, r, c, color) {
+  var seen = {};
+  var n = 0;
+  var d;
+  for (d = 0; d < DIRS.length; d++) {
+    var dr = DIRS[d][0];
+    var dc = DIRS[d][1];
+    var info = getLineRunInfo(board, r, c, dr, dc, color);
+    if (classifySegment(info.len, info.leftOpen, info.rightOpen) !== 'R4') {
+      continue;
+    }
+    var w = rushFourWinningCell(board, r, c, dr, dc, color);
+    if (!w) continue;
+    var k = w.r + ',' + w.c;
+    if (!seen[k]) {
+      seen[k] = 1;
+      n++;
+    }
+  }
+  return n >= 2;
+}
+
+function analyzeMovePattern(board, r, c, color) {
+  if (!inBounds(r, c) || board[r][c] !== EMPTY) {
+    return null;
+  }
+  board[r][c] = color;
+  var hasWin = checkWin(board, r, c, color);
+  var nL4 = 0;
+  var nR4 = 0;
+  var nL3 = 0;
+  var nS3 = 0;
+  var nL2 = 0;
+  var d;
+  for (d = 0; d < DIRS.length; d++) {
+    var info = getLineRunInfo(
+      board,
+      r,
+      c,
+      DIRS[d][0],
+      DIRS[d][1],
+      color
+    );
+    var seg = classifySegment(info.len, info.leftOpen, info.rightOpen);
+    if (seg === 'L4') nL4++;
+    else if (seg === 'R4') nR4++;
+    else if (seg === 'L3') nL3++;
+    else if (seg === 'S3') nS3++;
+    else if (seg === 'L2') nL2++;
+  }
+  var independentDR4 = nR4 >= 2 && areIndependentRushFours(board, r, c, color);
+  board[r][c] = EMPTY;
+  return {
+    hasWin: hasWin,
+    nL4: nL4,
+    nR4: nR4,
+    nL3: nL3,
+    nS3: nS3,
+    nL2: nL2,
+    doubleRushFour: nR4 >= 2,
+    independentDoubleRushFour: independentDR4,
+    doubleLiveThree: nL3 >= 2,
+    liveThreeAndRushFour: nL3 >= 1 && nR4 >= 1
+  };
+}
+
+function shapeThreatScore(a) {
+  if (!a) return 0;
+  if (a.hasWin) return 100000;
+  if (a.independentDoubleRushFour) return 12000;
+  if (a.nL4 >= 1) return 10000;
+  var v = a.nR4 * 1000 + a.nL3 * 100 + a.nS3 * 25 + a.nL2 * 5;
+  var doubleThreat =
+    (a.doubleLiveThree || a.liveThreeAndRushFour) && a.nL4 < 1;
+  if (doubleThreat) {
+    var bump = a.liveThreeAndRushFour ? 1500 : 500;
+    if (a.doubleLiveThree && a.liveThreeAndRushFour) {
+      bump = 1500;
+    }
+    v = Math.max(v, bump);
+    v *= tune().doubleThreatMult;
+  }
+  return v;
+}
+
+function moveOrderingScore(board, r, c, forColor) {
+  var opp = forColor === BLACK ? WHITE : BLACK;
+  var my = analyzeMovePattern(board, r, c, forColor);
+  var op = analyzeMovePattern(board, r, c, opp);
+  if (!my || !op) return -1e9;
+  return shapeThreatScore(my) + shapeThreatScore(op) * tune().oppThreatWeight;
+}
+
+function centerTieBreakScore(r, c) {
+  var mid = (SIZE - 1) / 2;
+  var man = Math.abs(r - mid) + Math.abs(c - mid);
+  var cheb = Math.max(Math.abs(r - mid), Math.abs(c - mid));
+  return -(man + 0.5 * cheb);
+}
+
+function pickBestByCenter(moves) {
+  if (!moves || moves.length === 0) return null;
+  var best = moves[0];
+  var i;
+  for (i = 1; i < moves.length; i++) {
+    if (centerTieBreakScore(moves[i].r, moves[i].c) > centerTieBreakScore(best.r, best.c)) {
+      best = moves[i];
+    }
+  }
+  return best;
+}
+
+function allEmptyCells(board) {
+  var out = [];
+  var r;
+  var c;
+  for (r = 0; r < SIZE; r++) {
+    for (c = 0; c < SIZE; c++) {
+      if (board[r][c] === EMPTY) {
+        out.push({ r: r, c: c });
+      }
+    }
+  }
+  return out;
+}
+
+function forcedPriorityMove(board, aiColor) {
+  var maxTier = tune().forcedTiersMax;
+  if (maxTier < 3) {
+    return null;
+  }
+  var empties = allEmptyCells(board);
+  var opp = aiColor === BLACK ? WHITE : BLACK;
+  var tier3 = [];
+  var i;
+  for (i = 0; i < empties.length; i++) {
+    var m = empties[i];
+    var a = analyzeMovePattern(board, m.r, m.c, aiColor);
+    if (!a || a.hasWin) continue;
+    if (a.nL4 >= 1 || a.independentDoubleRushFour) {
+      tier3.push(m);
+    }
+  }
+  if (tier3.length) {
+    return pickBestByCenter(tier3);
+  }
+
+  if (maxTier < 4) {
+    return null;
+  }
+  var tier4 = [];
+  for (i = 0; i < empties.length; i++) {
+    var m4 = empties[i];
+    var b = analyzeMovePattern(board, m4.r, m4.c, opp);
+    if (b && (b.nL4 >= 1 || b.independentDoubleRushFour)) {
+      tier4.push(m4);
+    }
+  }
+  if (tier4.length) {
+    return pickBestByCenter(tier4);
+  }
+
+  if (maxTier < 5) {
+    return null;
+  }
+  var tier5 = [];
+  for (i = 0; i < empties.length; i++) {
+    var m5 = empties[i];
+    var s = analyzeMovePattern(board, m5.r, m5.c, aiColor);
+    if (!s || s.hasWin) continue;
+    if (s.nL4 >= 1 || s.independentDoubleRushFour) continue;
+    if (s.doubleLiveThree || s.liveThreeAndRushFour) {
+      tier5.push(m5);
+    }
+  }
+  if (tier5.length) {
+    return pickBestByCenter(tier5);
+  }
+
+  if (maxTier < 6) {
+    return null;
+  }
+  var tier6 = [];
+  for (i = 0; i < empties.length; i++) {
+    var m6 = empties[i];
+    var t = analyzeMovePattern(board, m6.r, m6.c, opp);
+    if (!t || t.nL4 >= 1 || t.independentDoubleRushFour) continue;
+    if (t.doubleLiveThree || t.liveThreeAndRushFour) {
+      tier6.push(m6);
+    }
+  }
+  if (tier6.length) {
+    return pickBestByCenter(tier6);
+  }
+
+  return null;
+}
 
 /**
  * 沿每条线扫描连续棋块（活二/活三/活四等），比五格窗口更能反映防守压力
@@ -198,7 +520,7 @@ function evaluateBoard(board, aiColor) {
       if (stone === aiColor) {
         score += mag;
       } else if (stone === opp) {
-        score -= mag * OPP_LINE_PATTERN_MULT;
+        score -= mag * tune().oppThreatWeight;
       }
       i = j;
     }
@@ -296,17 +618,14 @@ function nearOccupied(board, r, c, dist) {
   return false;
 }
 
-/**
- * 候选落子点：仅在已有子邻域内展开。
- * 开局（≤2 子）用邻距 2，避免旧逻辑「强行塞天元 3×3」导致白方首步远离黑棋。
- */
+/** 候选：已有棋子周围 2 格内；空盘天元（与主线程 gomoku.js 一致） */
 function getCandidates(board) {
   var stones = countStones(board);
   if (stones === 0) {
     return [{ r: 7, c: 7 }];
   }
 
-  var ring = stones <= 2 ? 2 : 4;
+  var ring = tune().candidateRing;
   var list = [];
   var seen = {};
   var r;
@@ -330,6 +649,9 @@ function getCandidates(board) {
         if (board[r][c] === EMPTY) list.push({ r: r, c: c });
       }
     }
+    list.sort(function (a, b) {
+      return centerTieBreakScore(b.r, b.c) - centerTieBreakScore(a.r, a.c);
+    });
   }
   return list;
 }
@@ -337,26 +659,23 @@ function getCandidates(board) {
 function sortMovesByHeuristic(board, moves, color, desc, maxCandidates) {
   var scored = [];
   var i;
+  var stones = countStones(board);
   for (i = 0; i < moves.length; i++) {
     var m = moves[i];
-    var h = heuristicMoveScore(board, m.r, m.c, color);
-    var h2 = heuristicMoveScore(
-      board,
-      m.r,
-      m.c,
-      color === BLACK ? WHITE : BLACK
-    );
-    var s = h + h2 * 1.55;
-    if (countStones(board) <= 2) {
+    var s = moveOrderingScore(board, m.r, m.c, color);
+    if (stones <= 2) {
       var d0 = minChebyshevDistToNearestStone(board, m.r, m.c);
       if (d0 < 99) {
-        s += (6 - d0) * 350;
+        s += (6 - d0) * 2;
       }
     }
-    scored.push({ m: m, s: s });
+    scored.push({ m: m, s: s, tie: centerTieBreakScore(m.r, m.c) });
   }
   scored.sort(function (a, b) {
-    return desc ? b.s - a.s : a.s - b.s;
+    var ds = desc ? b.s - a.s : a.s - b.s;
+    if (Math.abs(ds) > 1e-7) return ds;
+    var dt = b.tie - a.tie;
+    return desc ? dt : -dt;
   });
   var out = [];
   for (i = 0; i < scored.length && i < maxCandidates; i++) {
@@ -410,89 +729,6 @@ function hasImmediateWin(board, color, pool) {
     tryWinningMoveInPool(board, color, pool) ||
     tryWinningMoveAnywhere(board, color)
   );
-}
-
-/** 与 linePatternScore 一致：活三双头、眠三一端 */
-var THREAT_LIVE_THREE = 45000;
-var THREAT_SLEEP_THREE = 6000;
-var THREAT_LIVE_TWO = 2000;
-
-/**
- * 在 (r,c) 落子后，四方向上单线棋型分的最大值（判断「对方下一手最狠点」）
- */
-function maxLineThreatAtMove(board, r, c, color) {
-  if (board[r][c] !== EMPTY) {
-    return -1;
-  }
-  board[r][c] = color;
-  var localMax = 0;
-  var d;
-  for (d = 0; d < DIRS.length; d++) {
-    var v = linePatternScore(
-      board,
-      r,
-      c,
-      DIRS[d][0],
-      DIRS[d][1],
-      color
-    );
-    if (v > localMax) {
-      localMax = v;
-    }
-  }
-  board[r][c] = EMPTY;
-  return localMax;
-}
-
-function findBestThreatCell(board, color) {
-  var bestR = -1;
-  var bestC = -1;
-  var bestM = -1;
-  var r;
-  var c;
-  for (r = 0; r < SIZE; r++) {
-    for (c = 0; c < SIZE; c++) {
-      if (board[r][c] !== EMPTY) {
-        continue;
-      }
-      var t = maxLineThreatAtMove(board, r, c, color);
-      if (t > bestM) {
-        bestM = t;
-        bestR = r;
-        bestC = c;
-      }
-    }
-  }
-  return { r: bestR, c: bestC, max: bestM };
-}
-
-/**
- * 在必赢/必堵五连之后：抢先占对方最强点；活三几乎必挡，仅我方优势极大时让先抢攻。
- */
-function urgentDefenseAgainstShape(board, aiColor) {
-  var opp = aiColor === BLACK ? WHITE : BLACK;
-  var o = findBestThreatCell(board, opp);
-  var m = findBestThreatCell(board, aiColor);
-  if (o.r < 0 || o.max < THREAT_SLEEP_THREE) {
-    return null;
-  }
-  if (o.max >= THREAT_LIVE_THREE) {
-    if (m.max > o.max + 4000) {
-      return null;
-    }
-    return { r: o.r, c: o.c };
-  }
-  if (o.max >= THREAT_SLEEP_THREE && o.max >= m.max + 200) {
-    return { r: o.r, c: o.c };
-  }
-  if (
-    countStones(board) > 8 &&
-    o.max >= THREAT_LIVE_TWO &&
-    o.max > m.max + 120
-  ) {
-    return { r: o.r, c: o.c };
-  }
-  return null;
 }
 
 /**
@@ -587,13 +823,13 @@ function minimax(board, depth, alpha, beta, maximizing, aiColor, maxCandidates) 
 /* ---------- AI 落子 ---------- */
 
 /**
- * AI：必胜/必堵 + 候选裁剪 + minimax + 棋型启发
- * @param {{rif?: boolean}|undefined} options 开局库选项，见 opening_book.js
+ * AI：必胜/必堵 + 候选裁剪 + minimax + 棋型启发（参数与主线程 gomoku.js 一致）
  */
 function aiMove(board, aiColor, options) {
   var searchDepth = AI_SEARCH_DEPTH;
   var maxCandidates = AI_MAX_CANDIDATES;
   var timeBudget = AI_TIME_BUDGET_MS;
+  var tuneMerged = resolveAiTune(options);
   if (options && options.dailyDifficulty != null) {
     var lv = Number(options.dailyDifficulty);
     if (isNaN(lv)) {
@@ -603,16 +839,21 @@ function aiMove(board, aiColor, options) {
       searchDepth = 8;
       maxCandidates = 28;
       timeBudget = 900;
+      tuneMerged.oppThreatWeight = Math.min(tuneMerged.oppThreatWeight, 1.15);
+      tuneMerged.doubleThreatMult = Math.min(tuneMerged.doubleThreatMult, 3);
+      tuneMerged.forcedTiersMax = Math.min(tuneMerged.forcedTiersMax, 4);
     } else if (lv === 2) {
       searchDepth = 10;
       maxCandidates = 40;
       timeBudget = 2200;
+      tuneMerged.forcedTiersMax = Math.min(tuneMerged.forcedTiersMax, 5);
     } else {
       searchDepth = 14;
       maxCandidates = 54;
       timeBudget = 4800;
     }
   }
+  currentAiTune = tuneMerged;
   searchDeadline = timeBudget > 0 ? Date.now() + timeBudget : 0;
   try {
     var opp = aiColor === BLACK ? WHITE : BLACK;
@@ -629,9 +870,9 @@ function aiMove(board, aiColor, options) {
       return block;
     }
 
-    var shapeBlock = urgentDefenseAgainstShape(board, aiColor);
-    if (shapeBlock) {
-      return shapeBlock;
+    var forced = forcedPriorityMove(board, aiColor);
+    if (forced) {
+      return forced;
     }
 
     var joseki = openingBook.getJosekiMove(board, aiColor, options);
@@ -698,6 +939,7 @@ function aiMove(board, aiColor, options) {
     return bestMove || pool[0];
   } finally {
     searchDeadline = 0;
+    currentAiTune = null;
   }
 }
 
@@ -710,5 +952,6 @@ module.exports = {
   isBoardFull: isBoardFull,
   checkWin: checkWin,
   aiMove: aiMove,
-  inBounds: inBounds
+  inBounds: inBounds,
+  DEFAULT_AI_TUNE: DEFAULT_AI_TUNE
 };
