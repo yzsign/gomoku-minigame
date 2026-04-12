@@ -618,10 +618,24 @@ app.joinOnlineAsGuest = function(roomId) {
           msg = '房间不存在';
         } else if (res.statusCode === 409) {
           var er = res.data;
-          if (er && er.code === 'SAME_USER') {
-            msg = '不能用同一账号加入';
+          if (typeof er === 'string') {
+            try {
+              er = JSON.parse(er);
+            } catch (eJoinParse) {
+              er = null;
+            }
+          }
+          var code = er && er.code;
+          if (code === 'SAME_USER') {
+            msg =
+              (er && er.message && String(er.message).trim()) ||
+              '不能使用与房主相同的账号加入';
+          } else if (code === 'ROOM_FULL') {
+            msg =
+              (er && er.message && String(er.message).trim()) || '房间已满';
           } else {
-            msg = '房间已满';
+            msg =
+              (er && er.message && String(er.message).trim()) || '无法加入';
           }
         } else if (res.statusCode === 503) {
           msg = '暂无人机账号，请稍后重试';

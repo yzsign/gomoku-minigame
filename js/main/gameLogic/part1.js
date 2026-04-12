@@ -1793,6 +1793,9 @@ app._puzzleFriendInviteOnShowTimer = null;
 app._puzzleFriendInviteOnShowFallbackGen = 0;
 /** WS STATE.puzzleRoom：残局房不展示读秒、不依赖本机猜房型 */
 app.onlinePuzzleRoomFromWs = false;
+/** 残局好友房房主旁观、好友未进房：本地练习用，连成五后恢复至此（与最近一次同步后的残局模板一致） */
+app.puzzleFriendPracticeStartBoard = null;
+app.puzzleFriendPracticeStartCurrent = null;
 /** 本局是否已请求 POST /api/games/settle（防重复；新局由 applyOnlineState 置 false） */
 app.onlineSettleSent = false;
 /** 结算分未返回时延迟补拉一次 settle（仅一局内有效；离开房间时清除） */
@@ -1868,11 +1871,39 @@ app.shouldShowOnlineChatButton = function() {
 };
 
 /**
+ * 残局好友房房主旁观：仅在人机占位、尚无人类好友入座时可本地练习（与 STATE 白/黑是否 bot 一致）。
+ * 注意：服务端 whiteConnected 会包含「白方人机已就位」，不能单用 onlineWhiteConnected。
+ */
+app.puzzleFriendSpectatorPracticeAllowed = function() {
+  if (
+    !app.isPvpOnline ||
+    !app.onlinePuzzleFriendRoom ||
+    !app.onlineSpectatorMode
+  ) {
+    return false;
+  }
+  var humanWhite =
+    app.onlineWhiteConnected && app.onlineWhiteIsBotFlag !== true;
+  var humanBlack =
+    app.onlineBlackConnected && app.onlineBlackIsBotFlag !== true;
+  return !humanWhite && !humanBlack;
+};
+
+/**
  * 好友联机（非随机匹配）：双方未都在座时视为对局未开始。
  * 用于邀请后对面未进房、白方未加入、关闭转发面板后仍在等待等场景。
+ * 残局好友房房主旁观时：本地练习中不挡点击（与 part5 触摸 guard 配合）。
  */
 app.isOnlineFriendMatchNotStarted = function() {
   if (!app.isPvpOnline || app.isRandomMatch) {
+    return false;
+  }
+  if (
+    app.onlinePuzzleFriendRoom &&
+    app.onlineSpectatorMode &&
+    typeof app.puzzleFriendSpectatorPracticeAllowed === 'function' &&
+    app.puzzleFriendSpectatorPracticeAllowed()
+  ) {
     return false;
   }
   if (app.onlineSpectatorMode) {
@@ -2335,6 +2366,8 @@ app.disconnectOnline = function() {
   app.onlineBlackIsBotFlag = false;
   app.onlineWhiteIsBotFlag = false;
   app.onlinePuzzleClientBotGen = 0;
+  app.puzzleFriendPracticeStartBoard = null;
+  app.puzzleFriendPracticeStartCurrent = null;
   app.onlineUndoPending = false;
   app.onlineUndoRequesterColor = null;
   app.onlineUndoCooldownUntilMs = 0;
@@ -3367,6 +3400,54 @@ app.applyOnlineState = function(data) {
   var prevWinner = app.winner;
   var prevBoard = app.copyBoardFromServer(app.board);
   var prevStoneCount = app.countStonesOnBoard(prevBoard);
+  var prevCurrentStone = app.current;
+  var nextBoard = app.copyBoardFromServer(data.board);
+  var incW =
+    data.whiteConnected === true ||
+    data.whiteConnected === 1 ||
+    data.whiteConnected === '1' ||
+    String(data.whiteConnected) === 'true';
+  var incB =
+    data.blackConnected === true ||
+    data.blackConnected === 1 ||
+    data.blackConnected === '1' ||
+    String(data.blackConnected) === 'true';
+  var wIsBotData =
+    data.whiteIsBot === true ||
+    data.whiteIsBot === 1 ||
+    data.whiteIsBot === 'true';
+  var bIsBotData =
+    data.blackIsBot === true ||
+    data.blackIsBot === 1 ||
+    data.blackIsBot === 'true';
+  /** 本帧 STATE：人类已占白或黑（与「仅人机占位」区分，见 broadcastState white/blackConnected） */
+  var humanWhiteNow = incW && !wIsBotData;
+  var humanBlackNow = incB && !bIsBotData;
+  var noHumanOpponentYet = !humanWhiteNow && !humanBlackNow;
+  var skipBoardFromServer =
+    app.isPvpOnline &&
+    app.onlinePuzzleFriendRoom &&
+    app.onlineSpectatorMode &&
+    noHumanOpponentYet &&
+    app.countStonesOnBoard(prevBoard) > app.countStonesOnBoard(nextBoard);
+  if (!skipBoardFromServer) {
+    app.board = nextBoard;
+    app.current = app.normalizeOnlineStoneInt(data.current, app.BLACK);
+  }
+  var newStoneCount = app.countStonesOnBoard(app.board);
+  if (app.countStonesOnBoard(app.board) === app.countStonesOnBoard(prevBoard) + 1) {
+    app.playPlaceStoneSound();
+  }
+  app.syncOnlineMoveHistory(prevBoard, app.board);
+  if (
+    !skipBoardFromServer &&
+    app.onlinePuzzleFriendRoom &&
+    app.onlineSpectatorMode &&
+    noHumanOpponentYet
+  ) {
+    app.puzzleFriendPracticeStartBoard = app.copyBoardFromServer(app.board);
+    app.puzzleFriendPracticeStartCurrent = app.current;
+  }
   var prevWasMyUndoRequest =
     app.isPvpOnline &&
     app.screen === 'game' &&
@@ -3382,14 +3463,6 @@ app.applyOnlineState = function(data) {
     app.onlineDrawRequesterColor != null &&
     app.onlineDrawRequesterColor === app.pvpOnlineYourColor;
   var prevRematchRequesterColor = app.onlineRematchRequesterColor;
-  app.board = app.copyBoardFromServer(data.board);
-  var newStoneCount = app.countStonesOnBoard(app.board);
-  if (app.countStonesOnBoard(app.board) === app.countStonesOnBoard(prevBoard) + 1) {
-    app.playPlaceStoneSound();
-  }
-  app.syncOnlineMoveHistory(prevBoard, app.board);
-  var prevCurrentStone = app.current;
-  app.current = app.normalizeOnlineStoneInt(data.current, app.BLACK);
   app.gameOver = !!data.gameOver;
   if (!app.gameOver) {
     app.onlineSettleSent = false;
@@ -3524,8 +3597,7 @@ app.applyOnlineState = function(data) {
   if (
     app.isPvpOnline &&
     app.onlinePuzzleFriendRoom &&
-    !prevWhite &&
-    data.whiteConnected
+    ((!prevWhite && humanWhiteNow) || (!prevBlack && humanBlackNow))
   ) {
     app.onlineMoveHistory = [];
     app.winningLineCells = null;
@@ -3536,6 +3608,8 @@ app.applyOnlineState = function(data) {
     if (app.onlineSpectatorMode) {
       app.lastMsg = '旁观中 · 好友已加入';
     }
+    app.puzzleFriendPracticeStartBoard = null;
+    app.puzzleFriendPracticeStartCurrent = null;
   }
   if (app.isPvpOnline && !app.isRandomMatch && !app.onlineOpponentIsBot) {
     if (app.onlineSpectatorMode) {

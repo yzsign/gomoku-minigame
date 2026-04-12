@@ -7,7 +7,7 @@
   "setting": {
     "urlCheck": false,
     "es6": true,
-    "enhance": true,
+    "enhance": false,
     "postcss": true,
     "minified": false,
     "compileWorklet": false,
@@ -18,7 +18,7 @@
     "minifyWXSS": true,
     "minifyWXML": true,
     "localPlugins": false,
-    "disableUseStrict": false,
+    "disableUseStrict": true,
     "useCompilerPlugins": false,
     "condition": false,
     "swc": false,
@@ -30,7 +30,7 @@
     }
   },
   "compileType": "game",
-  "libVersion": "3.12.1",
+  "libVersion": "3.11.2",
   "appid": "wxd1334f8511c3aece",
   "projectname": "tuantuan-wuziqi",
   "condition": {},

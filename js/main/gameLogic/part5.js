@@ -3178,8 +3178,53 @@ app.runAiMove = function() {
 }
 
 app.tryPlace = function(r, c) {
+  function restorePuzzleFriendPracticeStart() {
+    if (!app.puzzleFriendPracticeStartBoard) {
+      return;
+    }
+    var pb = app.copyBoardFromServer(app.puzzleFriendPracticeStartBoard);
+    var br;
+    var bc;
+    for (br = 0; br < app.SIZE; br++) {
+      for (bc = 0; bc < app.SIZE; bc++) {
+        app.board[br][bc] = pb[br][bc];
+      }
+    }
+    app.current =
+      app.puzzleFriendPracticeStartCurrent != null
+        ? app.puzzleFriendPracticeStartCurrent
+        : app.BLACK;
+  }
   if (app.gameOver) return;
   if (app.isPvpOnline && app.onlineSpectatorMode) {
+    if (
+      app.onlinePuzzleFriendRoom &&
+      typeof app.puzzleFriendSpectatorPracticeAllowed === 'function' &&
+      app.puzzleFriendSpectatorPracticeAllowed()
+    ) {
+      if (app.board[r][c] !== gomoku.EMPTY) {
+        return;
+      }
+      var placedColor = app.current;
+      app.board[r][c] = placedColor;
+      app.playPlaceStoneSound();
+      if (gomoku.checkWin(app.board, r, c, placedColor)) {
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '练习：连成五子', icon: 'none' });
+        }
+        restorePuzzleFriendPracticeStart();
+      } else if (gomoku.isBoardFull(app.board)) {
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '练习：棋盘已满', icon: 'none' });
+        }
+        restorePuzzleFriendPracticeStart();
+      } else {
+        app.current = placedColor === app.BLACK ? app.WHITE : app.BLACK;
+      }
+      app.lastMsg = '';
+      app.draw();
+      return;
+    }
     return;
   }
   if (app.localUndoRequest) {
