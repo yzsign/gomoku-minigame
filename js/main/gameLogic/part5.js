@@ -1545,24 +1545,6 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
       gameBarLabelColor,
       'normal'
     );
-    if (
-      col.kind === 'chat' &&
-      app.onlineChatUnread > 0
-    ) {
-      var rdx = cx + L.colW * 0.38;
-      var rdy = Math.min(minIconTop + app.rpx(6), iconTopCol) + app.rpx(4);
-      var rr = app.rpx(8);
-      ctx.fillStyle = '#e54545';
-      ctx.beginPath();
-      ctx.arc(app.snapPx(rdx), app.snapPx(rdy), rr, 0, Math.PI * 2);
-      ctx.fill();
-      var ub = app.onlineChatUnread >= 10 ? '9+' : String(app.onlineChatUnread);
-      ctx.font = '600 ' + app.rpx(18) + 'px sans-serif';
-      ctx.fillStyle = '#ffffff';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(ub, app.snapPx(rdx), app.snapPx(rdy));
-    }
     ctx.restore();
   }
   ctx.restore();
@@ -2855,10 +2837,39 @@ app.ensureAiWorker = function() {
       if (res.seq !== app.aiWorkerSeq) {
         return;
       }
-      if (app.gameOver || app.isPvpLocal || app.isPvpOnline) {
+      if (app.gameOver || app.isPvpLocal) {
+        return;
+      }
+      var puzzleOnlineBot =
+        app.isPvpOnline &&
+        !app.onlineSpectatorMode &&
+        (app.onlinePuzzleFriendRoom || app.onlinePuzzleRoomFromWs) &&
+        typeof app.onlinePuzzleFriendBotStoneColor === 'function' &&
+        app.onlinePuzzleFriendBotStoneColor() != null &&
+        app.current === app.onlinePuzzleFriendBotStoneColor();
+      if (app.isPvpOnline && !puzzleOnlineBot) {
         return;
       }
       if (app.screen !== 'game') {
+        return;
+      }
+      if (puzzleOnlineBot) {
+        if (res.gen !== app.onlinePuzzleClientBotGen) {
+          return;
+        }
+        if (app.current !== app.onlinePuzzleFriendBotStoneColor()) {
+          return;
+        }
+        var mvP = res.move;
+        if (res.err) {
+          console.error('worker online puzzle bot', res.err);
+        }
+        if (!mvP) {
+          mvP = app.firstEmptyCellForBoard();
+        }
+        if (mvP && typeof app.postOnlinePuzzleClientBotMove === 'function') {
+          app.postOnlinePuzzleClientBotMove(mvP);
+        }
         return;
       }
       var isDaily = app.isDailyPuzzle;
@@ -2932,7 +2943,11 @@ app.openingOptionsForAi = function() {
   return { rif: true };
 }
 
-/** 每日残局守关 AI：difficulty 1–3 映射至 workers/gomoku_ai.js 搜索强度 */
+/**
+ * 每日残局守关方：走子仅使用小程序内人机（Worker workers/index.js → gomoku_ai.js，
+ * 无 Worker 时主线程 gomoku.aiMove 兜底）。残局好友房人机与每日同源（见 openingOptionsForOnlinePuzzleBot）。
+ * difficulty 1–3 映射至 gomoku_ai 搜索强度。
+ */
 app.openingOptionsForDailyBot = function() {
   var lv = 3;
   if (app.dailyPuzzleMeta && app.dailyPuzzleMeta.difficulty != null) {
@@ -3022,6 +3037,104 @@ app.runDailyPuzzleBotMove = function() {
     }
   }
   app.applyDailyBotMoveResult(mv);
+};
+
+/** 与每日残局人机同源；残局房元数据未下发明细难度时默认 3 */
+app.openingOptionsForOnlinePuzzleBot = function() {
+  return { rif: true, dailyDifficulty: 3 };
+};
+
+app.postOnlinePuzzleClientBotMove = function(mv) {
+  if (!mv || app.gameOver || !app.isPvpOnline) {
+    return;
+  }
+  if (!app.onlineSocketCanSend || !app.onlineSocketCanSend()) {
+    return;
+  }
+  if (!app.onlinePuzzleFriendRoom && !app.onlinePuzzleRoomFromWs) {
+    return;
+  }
+  var bot =
+    typeof app.onlinePuzzleFriendBotStoneColor === 'function'
+      ? app.onlinePuzzleFriendBotStoneColor()
+      : null;
+  if (bot == null || app.current !== bot) {
+    return;
+  }
+  app.socketTask.send({
+    data: JSON.stringify({ type: 'CLIENT_BOT_MOVE', r: mv.r, c: mv.c })
+  });
+};
+
+app.scheduleOnlinePuzzleClientBotIfNeeded = function() {
+  if (
+    !app.isPvpOnline ||
+    app.onlineSpectatorMode ||
+    app.gameOver ||
+    (!app.onlinePuzzleFriendRoom && !app.onlinePuzzleRoomFromWs)
+  ) {
+    return;
+  }
+  var bot =
+    typeof app.onlinePuzzleFriendBotStoneColor === 'function'
+      ? app.onlinePuzzleFriendBotStoneColor()
+      : null;
+  if (bot == null || app.current !== bot) {
+    return;
+  }
+  if (!app.onlineSocketCanSend || !app.onlineSocketCanSend()) {
+    return;
+  }
+  setTimeout(function() {
+    app.runOnlinePuzzleFriendBotMove();
+  }, 350);
+};
+
+app.runOnlinePuzzleFriendBotMove = function() {
+  if (app.gameOver || !app.isPvpOnline || app.onlineSpectatorMode) {
+    return;
+  }
+  if (!app.onlinePuzzleFriendRoom && !app.onlinePuzzleRoomFromWs) {
+    return;
+  }
+  var bot = app.onlinePuzzleFriendBotStoneColor();
+  if (bot == null || app.current !== bot) {
+    return;
+  }
+  if (!app.onlineSocketCanSend || !app.onlineSocketCanSend()) {
+    return;
+  }
+  var gen = app.onlinePuzzleClientBotGen || 0;
+  if (app.ensureAiWorker()) {
+    app.aiWorkerSeq++;
+    app.aiWorkerInstance.postMessage({
+      type: 'AI_MOVE',
+      seq: app.aiWorkerSeq,
+      gen: gen,
+      board: app.copyBoardForAiWorker(app.board),
+      aiColor: bot,
+      openingOptions: app.openingOptionsForOnlinePuzzleBot()
+    });
+    return;
+  }
+  var mv;
+  try {
+    mv = gomoku.aiMove(
+      app.board,
+      bot,
+      app.openingOptionsForOnlinePuzzleBot()
+    );
+  } catch (err) {
+    console.error('online puzzle bot aiMove', err);
+    mv = null;
+  }
+  if (!mv) {
+    mv = app.firstEmptyCellForBoard();
+    if (!mv) {
+      return;
+    }
+  }
+  app.postOnlinePuzzleClientBotMove(mv);
 };
 
 app.runAiMove = function() {
@@ -3792,7 +3905,6 @@ wx.onTouchStart(function (e) {
   if (gbtn === 'chat') {
     app.onlineChatOpen = !app.onlineChatOpen;
     if (app.onlineChatOpen) {
-      app.onlineChatUnread = 0;
       app._onlineChatAnimStartMs = Date.now();
       if (typeof app.scheduleOnlineChatPanelAnimFrames === 'function') {
         app.scheduleOnlineChatPanelAnimFrames();
@@ -4354,6 +4466,9 @@ if (typeof wx.onShow === 'function') {
         if (typeof app.tryLaunchOnlineInvite === 'function') {
           app.tryLaunchOnlineInvite(res.query);
         }
+      }
+      if (typeof app.schedulePuzzleFriendInviteOnShowFallback === 'function') {
+        app.schedulePuzzleFriendInviteOnShowFallback();
       }
       if (app.shouldAutoReconnectOnline() && !app.onlineWsConnected) {
         app.clearOnlineReconnectTimer();

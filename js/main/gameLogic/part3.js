@@ -851,6 +851,15 @@ app.showOpponentRatingModal = function() {
   if (!app.isPvpOnline || !app.onlineRoomId) {
     return;
   }
+  if (
+    typeof app.shouldToastNoOpponentLadderForOnlineOppAvatar === 'function' &&
+    app.shouldToastNoOpponentLadderForOnlineOppAvatar()
+  ) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '人机对战无对手天梯', icon: 'none' });
+    }
+    return;
+  }
   if (!authApi.getSessionToken()) {
     if (typeof wx.showToast === 'function') {
       wx.showToast({ title: '请先完成登录', icon: 'none' });
@@ -2539,6 +2548,36 @@ function drawResultOverlayTuanPointsAnim(app, ctx, th, ly) {
 /**
  * resultKind 未写入时（如历史路径只拉了 showResultOverlay），按终局状态推断，避免标题落在默认「对局结束」。
  */
+/**
+ * 残局好友房：受邀执棋一方是否取胜（旁观/好友共用，依赖 STATE 人机标记）。
+ * @returns {boolean|null} true 好友胜，false 好友负，null 非残局房或无法判断
+ */
+function onlinePuzzleFriendWon(app) {
+  if (
+    !app.isPvpOnline ||
+    (!app.onlinePuzzleFriendRoom && !app.onlinePuzzleRoomFromWs)
+  ) {
+    return null;
+  }
+  if (app.winner == null) {
+    return null;
+  }
+  var bBot = !!app.onlineBlackIsBotFlag;
+  var wBot = !!app.onlineWhiteIsBotFlag;
+  if (bBot === wBot) {
+    return null;
+  }
+  var friendIsBlack = !bBot;
+  var w = Number(app.winner);
+  if (isNaN(w)) {
+    return null;
+  }
+  if (friendIsBlack) {
+    return w === gomoku.BLACK;
+  }
+  return w === gomoku.WHITE;
+}
+
 function inferOverlayResultKindWhenEmpty(app) {
   if (!app.gameOver) {
     return '';
@@ -2650,11 +2689,22 @@ function resultOverlayTitlePack(app) {
       break;
     case 'online_lose':
       mood = 'lose';
-      main = '失败';
-      if (app.onlineGameEndReason === 'MOVE_TIMEOUT') {
-        sub = '思考超时判负';
-      } else if (app.onlineGameEndReason === 'RESIGN') {
-        sub = '已认输';
+      if (onlinePuzzle) {
+        main = '挑战失败';
+        if (app.onlineGameEndReason === 'MOVE_TIMEOUT') {
+          sub = '思考超时判负';
+        } else if (app.onlineGameEndReason === 'RESIGN') {
+          sub = '已认输';
+        } else {
+          sub = '人机获胜';
+        }
+      } else {
+        main = '失败';
+        if (app.onlineGameEndReason === 'MOVE_TIMEOUT') {
+          sub = '思考超时判负';
+        } else if (app.onlineGameEndReason === 'RESIGN') {
+          sub = '已认输';
+        }
       }
       titleColor = rs.lose.title;
       break;
@@ -2678,10 +2728,24 @@ function resultOverlayTitlePack(app) {
       break;
     case 'online_spectate':
       if (onlinePuzzle && app.winner != null) {
-        mood = 'win';
-        main = '挑战成功';
-        sub = winColorSub + ' · 旁观对局';
-        titleColor = rs.win.title;
+        var pfw = onlinePuzzleFriendWon(app);
+        if (pfw === true) {
+          mood = 'win';
+          main = '挑战成功';
+          sub = winColorSub + ' · 旁观对局';
+          titleColor = rs.win.title;
+        } else if (pfw === false) {
+          mood = 'lose';
+          main = '挑战失败';
+          sub = winColorSub + ' · 旁观对局';
+          titleColor = rs.lose.title;
+        } else {
+          mood = 'draw';
+          main =
+            app.winner === gomoku.WHITE ? '白棋获胜' : '黑棋获胜';
+          sub = '旁观对局';
+          titleColor = rs.draw.title;
+        }
       } else {
         mood = 'draw';
         main =

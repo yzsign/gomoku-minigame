@@ -136,7 +136,19 @@ app.persistLocalNickname = function(userInfo) {
 
 app.getMyDisplayName = function() {
   if (app.isPvpOnline && app.onlineSpectatorMode) {
-    return '旁观';
+    /**
+     * 残局好友房等好友进房：与每日残局一致，左侧仍展示「我」与本人头像；
+     * 勿显示「旁观」，否则用户会感觉头像/身份被联机页替换。
+     */
+    if (
+      app.onlinePuzzleFriendRoom &&
+      typeof app.hasPuzzleFriendHumanGuest === 'function' &&
+      !app.hasPuzzleFriendHumanGuest()
+    ) {
+      /* fall through to下方昵称与「我」 */
+    } else {
+      return '旁观';
+    }
   }
   if (app.myDisplayNameCache !== null) {
     return app.myDisplayNameCache;
@@ -155,6 +167,15 @@ app.getMyDisplayName = function() {
 }
 
 app.getOpponentDisplayName = function() {
+  if (
+    app.isPvpOnline &&
+    app.onlineSpectatorMode &&
+    app.onlinePuzzleFriendRoom &&
+    typeof app.hasPuzzleFriendHumanGuest === 'function' &&
+    !app.hasPuzzleFriendHumanGuest()
+  ) {
+    return '电脑';
+  }
   if (
     app.isPvpOnline &&
     typeof app.isMyOnlineOpponentBot === 'function' &&
@@ -339,7 +360,22 @@ app.computeBoardNameLabelLayout = function(layout) {
   );
   var myImg = app.getMyAvatarImageForUi();
   var oppImg;
-  if (app.isDailyPuzzle) {
+  /**
+   * 残局好友房房主旁观、好友尚未入座：与每日残局一致，右上为守关形象，
+   * 勿走联机「对手」默认图或 opponent 接口（易把人机账号当成真人对手）。
+   */
+  if (
+    app.isPvpOnline &&
+    app.onlineSpectatorMode &&
+    app.onlinePuzzleFriendRoom &&
+    typeof app.hasPuzzleFriendHumanGuest === 'function' &&
+    !app.hasPuzzleFriendHumanGuest()
+  ) {
+    oppImg = defaultAvatars.getGuardianBotAvatarImage();
+    if (!oppImg) {
+      oppImg = defaultAvatars.getOpponentAvatarImage();
+    }
+  } else if (app.isDailyPuzzle) {
     oppImg = defaultAvatars.getGuardianBotAvatarImage();
     if (!oppImg) {
       oppImg = defaultAvatars.getOpponentAvatarImage();
@@ -853,6 +889,7 @@ app.hitWhichGameBoardNameAvatar = function(clientX, clientY) {
 
 /**
  * 首次进入：系统弹窗「完善资料」，在 showModal 的 success 里调用 wx.getUserProfile（按产品要求保留该写法）。
+ * 若本地已有授权缓存的微信昵称（readCachedWeChatUserInfo），则不再询问。
  * 若已通过分享链接进入对局，则不再弹出以免盖住棋盘。
  */
 app.maybeFirstVisitProfileModal = function() {
@@ -864,6 +901,17 @@ app.maybeFirstVisitProfileModal = function() {
       return;
     }
   } catch (e0) {}
+  /** 本地已有此前授权保存的微信资料时不再弹窗询问 */
+  var cachedWx =
+    typeof app.readCachedWeChatUserInfo === 'function'
+      ? app.readCachedWeChatUserInfo()
+      : null;
+  if (cachedWx && cachedWx.nickName) {
+    try {
+      wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
+    } catch (eCached) {}
+    return;
+  }
   if (typeof wx.showModal !== 'function') {
     return;
   }
@@ -873,6 +921,16 @@ app.maybeFirstVisitProfileModal = function() {
         return;
       }
     } catch (ePre) {}
+    var cachedWx2 =
+      typeof app.readCachedWeChatUserInfo === 'function'
+        ? app.readCachedWeChatUserInfo()
+        : null;
+    if (cachedWx2 && cachedWx2.nickName) {
+      try {
+        wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
+      } catch (eCached2) {}
+      return;
+    }
     if (app.isPvpOnline && app.screen === 'game') {
       return;
     }
@@ -1690,6 +1748,8 @@ app.dailyPuzzleSideToMoveStart = app.BLACK;
 app.dailyPuzzleUserColor = app.BLACK;
 /** 守关 AI 思考代数，与悔棋/重开配合以丢弃过期 Worker 结果 */
 app.dailyPuzzleBotGen = 0;
+/** 残局好友房：客户端人机 Worker 代数，与 STATE 不同步时丢弃过期结果 */
+app.onlinePuzzleClientBotGen = 0;
 app.dailyPuzzleSubmitting = false;
 app.dailyPuzzleResultKind = '';
 /** 当日第一次通关每日残局时 submit 返回的团团积分增量，在 openResult 时触发飘字 */
@@ -1724,6 +1784,13 @@ app.onlineWsEverOpened = false;
 app.onlineInviteConsumed = false;
 /** 残局好友房：用于分享文案与「好友进房重置棋盘」提示 */
 app.onlinePuzzleFriendRoom = false;
+/** 邀请好友进残局前快照，分享取消时 restoreAfterCancelledPuzzleFriendInvite 恢复 */
+app._puzzleFriendInviteSnapshot = null;
+/** 已调起分享面板，等待 onShow 兜底（部分机型 fail 不回调） */
+app._puzzleFriendInviteShareAwaitOnShow = false;
+app._puzzleFriendInviteOnShowTimer = null;
+/** 每次打开分享递增，避免多次定时器互相误伤 */
+app._puzzleFriendInviteOnShowFallbackGen = 0;
 /** WS STATE.puzzleRoom：残局房不展示读秒、不依赖本机猜房型 */
 app.onlinePuzzleRoomFromWs = false;
 /** 本局是否已请求 POST /api/games/settle（防重复；新局由 applyOnlineState 置 false） */
@@ -1749,7 +1816,6 @@ app.onlineWhitePieceSkinId = null;
 /** 联机聊天（标准对战底栏第 5 键；WS type CHAT / CHAT_SEND） */
 app.onlineChatMessages = [];
 app.onlineChatOpen = false;
-app.onlineChatUnread = 0;
 app.onlineChatEmojiOpen = false;
 app.onlineChatBanner = null;
 app.onlineChatBubbleHits = [];
@@ -1831,6 +1897,27 @@ app.isDailyStyleGameActionBar = function() {
 };
 
 /**
+ * 残局好友房：若仅一方为人机，返回该方执子色；否则 null（与 STATE blackIsBot/whiteIsBot 一致）。
+ */
+app.onlinePuzzleFriendBotStoneColor = function() {
+  if (!app.isPvpOnline || app.onlineSpectatorMode) {
+    return null;
+  }
+  if (!app.onlinePuzzleFriendRoom && !app.onlinePuzzleRoomFromWs) {
+    return null;
+  }
+  var bb = !!app.onlineBlackIsBotFlag;
+  var wb = !!app.onlineWhiteIsBotFlag;
+  if (bb && !wb) {
+    return app.BLACK;
+  }
+  if (wb && !bb) {
+    return app.WHITE;
+  }
+  return null;
+};
+
+/**
  * 「邀请」仅房主可用；好友进入残局房后置灰不可点（含房主侧：有人类棋手入座后不可再邀）。
  */
 app.isPuzzleFriendInviteEnabled = function() {
@@ -1855,6 +1942,47 @@ app.isPuzzleFriendInviteEnabled = function() {
     return true;
   }
   return true;
+};
+
+/**
+ * 残局好友房是否已有真人好友入座（与 isPuzzleFriendInviteEnabled 中 human 判定一致）。
+ */
+app.hasPuzzleFriendHumanGuest = function() {
+  if (!app.isPvpOnline || !app.onlinePuzzleFriendRoom) {
+    return false;
+  }
+  var humanBlack =
+    app.onlineBlackConnected && app.onlineBlackIsBotFlag !== true;
+  var humanWhite =
+    app.onlineWhiteConnected && app.onlineWhiteIsBotFlag !== true;
+  return humanBlack || humanWhite;
+};
+
+/**
+ * 点击棋盘旁「对手」头像时：人机对局或残局好友房旁观侧对人机，应提示无对手天梯，勿拉 opponent-rating。
+ * - 玩家：对面为人机（isMyOnlineOpponentBot）
+ * - 房主旁观：尚无真人入座，或已有好友但未拉到其头像（仍显示守关/占位）时
+ */
+app.shouldToastNoOpponentLadderForOnlineOppAvatar = function() {
+  if (typeof app.isMyOnlineOpponentBot === 'function' && app.isMyOnlineOpponentBot()) {
+    return true;
+  }
+  if (
+    app.onlineSpectatorMode &&
+    app.onlinePuzzleFriendRoom
+  ) {
+    if (
+      typeof app.hasPuzzleFriendHumanGuest !== 'function' ||
+      !app.hasPuzzleFriendHumanGuest()
+    ) {
+      return true;
+    }
+    var oi = app.onlineOppAvatarImg;
+    if (!oi || !oi.width || !oi.height) {
+      return true;
+    }
+  }
+  return false;
 };
 
 /**
@@ -2206,6 +2334,7 @@ app.disconnectOnline = function() {
   app.onlineOpponentIsBot = false;
   app.onlineBlackIsBotFlag = false;
   app.onlineWhiteIsBotFlag = false;
+  app.onlinePuzzleClientBotGen = 0;
   app.onlineUndoPending = false;
   app.onlineUndoRequesterColor = null;
   app.onlineUndoCooldownUntilMs = 0;
@@ -2228,7 +2357,6 @@ app.disconnectOnline = function() {
   app.onlineWhitePieceSkinId = null;
   app.onlineChatMessages = [];
   app.onlineChatOpen = false;
-  app.onlineChatUnread = 0;
   app.onlineChatEmojiOpen = false;
   app.onlineChatBanner = null;
   app.onlineChatBubbleHits = [];
@@ -2241,6 +2369,14 @@ app.disconnectOnline = function() {
   app.onlineChatInputDraft = '';
   if (typeof app.clearOnlineChatAvatarBubbleState === 'function') {
     app.clearOnlineChatAvatarBubbleState();
+  }
+  app._puzzleFriendInviteSnapshot = null;
+  app._puzzleFriendInviteShareAwaitOnShow = false;
+  if (app._puzzleFriendInviteOnShowTimer != null) {
+    try {
+      clearTimeout(app._puzzleFriendInviteOnShowTimer);
+    } catch (ePf) {}
+    app._puzzleFriendInviteOnShowTimer = null;
   }
   if (app._chatPanelAnimIv) {
     try {
@@ -2352,7 +2488,18 @@ app.tryFetchOnlineOpponentProfile = function() {
     return;
   }
   if (app.onlineSpectatorMode) {
-    if (!app.onlineWhiteConnected) {
+    /**
+     * 残局好友房：仅白连上可能是人机；须等真人好友入座再拉对手资料，避免误把人机当「对手」。
+     * 非残局旁观仍沿用原「白方已连上」启发式。
+     */
+    if (app.onlinePuzzleFriendRoom) {
+      if (
+        typeof app.hasPuzzleFriendHumanGuest !== 'function' ||
+        !app.hasPuzzleFriendHumanGuest()
+      ) {
+        return;
+      }
+    } else if (!app.onlineWhiteConnected) {
       return;
     }
   } else if (!app.onlineBlackConnected || !app.onlineWhiteConnected) {
@@ -3241,6 +3388,7 @@ app.applyOnlineState = function(data) {
     app.playPlaceStoneSound();
   }
   app.syncOnlineMoveHistory(prevBoard, app.board);
+  var prevCurrentStone = app.current;
   app.current = app.normalizeOnlineStoneInt(data.current, app.BLACK);
   app.gameOver = !!data.gameOver;
   if (!app.gameOver) {
@@ -3358,6 +3506,17 @@ app.applyOnlineState = function(data) {
   }
   if (data.whiteIsBot !== undefined && data.whiteIsBot !== null) {
     app.onlineWhiteIsBotFlag = !!data.whiteIsBot;
+  }
+  if (
+    app.isPvpOnline &&
+    !app.onlineSpectatorMode &&
+    (app.onlinePuzzleFriendRoom || app.onlinePuzzleRoomFromWs)
+  ) {
+    var curOrBoardChanged =
+      prevCurrentStone !== app.current || prevStoneCount !== newStoneCount;
+    if (curOrBoardChanged) {
+      app.onlinePuzzleClientBotGen = (app.onlinePuzzleClientBotGen || 0) + 1;
+    }
   }
   if (typeof app.syncOnlineOpponentProfileForBotSeat === 'function') {
     app.syncOnlineOpponentProfileForBotSeat();
@@ -3618,6 +3777,9 @@ app.applyOnlineState = function(data) {
     app.winningLineCells = null;
   }
   app.tryFetchOnlineOpponentProfile();
+  if (typeof app.scheduleOnlinePuzzleClientBotIfNeeded === 'function') {
+    app.scheduleOnlinePuzzleClientBotIfNeeded();
+  }
   app.draw();
 }
 
