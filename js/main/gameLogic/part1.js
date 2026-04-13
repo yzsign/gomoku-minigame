@@ -3799,6 +3799,24 @@ app.applyOnlineState = function(data) {
   }
 
   if (app.gameOver && !wasOver) {
+    /**
+     * 须在弹出胜利动画或 openResult 之前发起结算：否则用户快速「再来一局」后新局 STATE 先到，
+     * gameOver 变 false，延迟的 openResult 会跳过结算；或 app.onlineMatchRound 已变为下一局导致局次不匹配。
+     */
+    var endedMatchRound = null;
+    if (data.matchRound !== undefined && data.matchRound !== null) {
+      var emr = Number(data.matchRound);
+      if (!isNaN(emr) && emr >= 1) {
+        endedMatchRound = emr;
+      }
+    }
+    if (app.isPvpOnline && !app.onlineSpectatorMode) {
+      if (endedMatchRound != null) {
+        app.maybeRequestOnlineGameSettle(endedMatchRound);
+      } else {
+        app.maybeRequestOnlineGameSettle();
+      }
+    }
     app.screen = 'game';
     if (app.winner != null) {
       var wm = app.findSingleNewStoneOfColor(prevBoard, app.board, app.winner);

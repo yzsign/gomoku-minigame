@@ -2010,8 +2010,11 @@ app.startPvpLocal = function() {
 /**
  * 联机终局后上报结算，服务端写入 game 记录并更新 elo（须已登录）。
  * 双方都会调用；重复请求时服务端返回已结算的同一份分数（与先成功者一致）。
+ *
+ * @param {number} [matchRoundOverride] 本局局次；随机匹配连点「再来一局」时须用终局 STATE 的 matchRound，
+ *   避免胜利动画延迟或下一局已开始后仍用 app.onlineMatchRound 导致局次错乱。
  */
-app.maybeRequestOnlineGameSettle = function() {
+app.maybeRequestOnlineGameSettle = function(matchRoundOverride) {
   if (
     !app.isPvpOnline ||
     !app.onlineRoomId ||
@@ -2026,6 +2029,13 @@ app.maybeRequestOnlineGameSettle = function() {
   var steps = app.countStonesOnBoard(app.board);
   if (steps < 0 || steps > 256) {
     return;
+  }
+  var mrUse = app.onlineMatchRound;
+  if (matchRoundOverride !== undefined && matchRoundOverride !== null) {
+    var por = Number(matchRoundOverride);
+    if (!isNaN(por) && por >= 1) {
+      mrUse = por;
+    }
   }
   var outcome;
   if (app.winner === null) {
@@ -2042,7 +2052,7 @@ app.maybeRequestOnlineGameSettle = function() {
   }
   var settleBody = {
     roomId: app.onlineRoomId,
-    matchRound: app.onlineMatchRound,
+    matchRound: mrUse,
     outcome: outcome,
     totalSteps: steps
   };
@@ -2892,7 +2902,7 @@ app.getResultOverlayLayout = function() {
 
 /**
  * 结算全屏层 VS 区方头像命中（与 getResultOverlayLayout 一致）。
- * 联机为左我右对手；其余模式为左黑右白，按 getMyAssignedStoneColor 映射到 my/opp。
+ * 与 drawResultOverlay 一致：左为我、右为对手（与执子色无关）。
  */
 app.hitResultOverlayAvatar = function(clientX, clientY) {
   if (app.screen !== 'game') {
@@ -2925,14 +2935,7 @@ app.hitResultOverlayAvatar = function(clientX, clientY) {
     hitLeft = dl <= dr;
     hitRight = !hitLeft;
   }
-  if (app.isPvpOnline) {
-    return hitLeft ? 'my' : 'opp';
-  }
-  var leftIsMe = app.getMyAssignedStoneColor() === gomoku.BLACK;
-  if (hitLeft) {
-    return leftIsMe ? 'my' : 'opp';
-  }
-  return leftIsMe ? 'opp' : 'my';
+  return hitLeft ? 'my' : 'opp';
 };
 
 app.drawResultOverlay = function() {
@@ -3011,16 +3014,23 @@ app.drawResultOverlay = function() {
   ctx.stroke();
   ctx.restore();
 
-  /** 联机：与棋盘一致为「左我右对手」，避免执白时与「左黑右白」错位导致双方对分数理解不一致 */
+  /** 结算 VS 区：一律「左我右对手」（与棋盘旁头像语义一致）；勿用左黑右白，否则执白时头像与分数会左右对调 */
+  var Lvs = app.computeBoardNameLabelLayout(app.layout);
   var imgLeft;
   var imgRight;
-  if (app.isPvpOnline) {
-    var Lvs = app.computeBoardNameLabelLayout(app.layout);
+  if (Lvs) {
     imgLeft = Lvs.myImg;
     imgRight = Lvs.oppImg;
   } else {
-    imgLeft = app.getResultVsAvatarImage(true);
-    imgRight = app.getResultVsAvatarImage(false);
+    var msAv = app.getMyAssignedStoneColor();
+    if (msAv === gomoku.BLACK || msAv === gomoku.WHITE) {
+      var meBlackAv = msAv === gomoku.BLACK;
+      imgLeft = app.getResultVsAvatarImage(meBlackAv);
+      imgRight = app.getResultVsAvatarImage(!meBlackAv);
+    } else {
+      imgLeft = app.getResultVsAvatarImage(true);
+      imgRight = app.getResultVsAvatarImage(false);
+    }
   }
   var gBotImg = defaultAvatars.getGuardianBotAvatarImage();
   function drawVsResultAvatar(img, vsCx, vsCy) {
@@ -3128,8 +3138,15 @@ app.drawResultOverlay = function() {
     lb = eloLine(meBlack);
     lw = eloLine(!meBlack);
   } else {
-    lb = eloLine(true);
-    lw = eloLine(false);
+    var msElo = app.getMyAssignedStoneColor();
+    if (msElo === gomoku.BLACK || msElo === gomoku.WHITE) {
+      var meBlackE = msElo === gomoku.BLACK;
+      lb = eloLine(meBlackE);
+      lw = eloLine(!meBlackE);
+    } else {
+      lb = eloLine(true);
+      lw = eloLine(false);
+    }
   }
   ctx.textAlign = 'center';
   ctx.font = 'bold 18px "PingFang SC","Hiragino Sans GB",sans-serif';
