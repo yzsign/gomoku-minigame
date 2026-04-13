@@ -712,8 +712,7 @@ app.fillRatingCardFromApiData = function(d, opts) {
     addFriendLabel: '添加好友',
     addFriendEnabled: false,
     opponentUserId: null,
-    addFriendRateLimited: false,
-    addFriendNotSupported: false
+    addFriendRateLimited: false
   };
   app.homeRatingEloCache = elo;
 }
@@ -950,7 +949,6 @@ app.applyFriendStatusToRatingCard = function(opponentUserId, fs) {
   app.ratingCardData.opponentUserId = opponentUserId;
   app.ratingCardData.showAddFriendBtn = true;
   app.ratingCardData.addFriendRateLimited = false;
-  app.ratingCardData.addFriendNotSupported = false;
   if (fs && fs.friends) {
     app.ratingCardData.addFriendLabel = '已添加';
     app.ratingCardData.addFriendEnabled = false;
@@ -974,13 +972,6 @@ app.onRatingCardAddFriendTap = function() {
       if (typeof wx.showToast === 'function') {
         wx.showToast({
           title: '申请已发送，请等待对方处理',
-          icon: 'none'
-        });
-      }
-    } else if (d.addFriendNotSupported) {
-      if (typeof wx.showToast === 'function') {
-        wx.showToast({
-          title: '暂无法向对方发送好友申请',
           icon: 'none'
         });
       }
@@ -1059,22 +1050,10 @@ app.onRatingCardAddFriendTap = function() {
         } else if (st === 'ALREADY_FRIENDS') {
           d.addFriendLabel = '已添加';
           d.addFriendEnabled = false;
-        } else if (st === 'NOT_SUPPORTED') {
-          d.addFriendLabel = '添加好友';
-          d.addFriendEnabled = false;
-          d.addFriendNotSupported = true;
-          d.addFriendRateLimited = false;
-          if (typeof wx.showToast === 'function') {
-            wx.showToast({
-              title: '暂无法向对方发送好友申请',
-              icon: 'none'
-            });
-          }
         } else if (st === 'RATE_LIMITED') {
           d.addFriendLabel = '添加好友';
           d.addFriendEnabled = false;
           d.addFriendRateLimited = true;
-          d.addFriendNotSupported = false;
           if (typeof wx.showToast === 'function') {
             wx.showToast({
               title: '申请过于频繁，请 24 小时后再试',
