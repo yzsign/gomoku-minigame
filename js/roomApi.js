@@ -405,7 +405,8 @@ function socialFriendRequestCreateOptions(targetUserId) {
     header: withAuthHeaders({
       'content-type': 'application/json'
     }),
-    data: JSON.stringify({ targetUserId: Number(targetUserId) })
+    // 传对象；微信在 content-type 为 application/json 时会 JSON 序列化（勿再手动 stringify，否则部分环境请求体异常）
+    data: { targetUserId: Number(targetUserId) }
   };
 }
 

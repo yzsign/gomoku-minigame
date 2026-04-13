@@ -2151,12 +2151,16 @@ app.getHomeLayout = function() {
 
 app.getRatingCardLayout = function() {
   var w = Math.min(app.W - 48, 300);
-  var extra =
-    app.ratingCardVisible &&
-    app.ratingCardData &&
-    app.ratingCardData.showSyncProfileBtn
-      ? app.rpx(52)
-      : 0;
+  var extra = 0;
+  if (app.ratingCardVisible && app.ratingCardData) {
+    var cd = app.ratingCardData;
+    if (cd.showSyncProfileBtn) {
+      extra += app.rpx(52);
+    }
+    if (cd.showAddFriendBtn) {
+      extra += app.rpx(58);
+    }
+  }
   var h = 212 + extra;
   var cx = app.W / 2;
   var cy = app.H * 0.42;
@@ -2184,6 +2188,42 @@ app.getRatingCardSyncProfileLayout = function() {
     cy: btnTop + btnH * 0.5
   };
 }
+
+/** 对手战绩卡底部「添加好友」按钮（宽约 80%、高 46css 与圆角，与 drawRatingCardOverlay 一致） */
+app.getRatingCardAddFriendLayout = function() {
+  if (!app.ratingCardData || !app.ratingCardData.showAddFriendBtn) {
+    return null;
+  }
+  var L = app.getRatingCardLayout();
+  var x = L.cx - L.w / 2;
+  var y = L.cy - L.h / 2;
+  var btnW = L.w * 0.8;
+  var btnH = app.rpx(46);
+  var pad = app.rpx(16);
+  var btnTop = y + L.h - pad - btnH;
+  var left = L.cx - btnW / 2;
+  return {
+    left: left,
+    top: btnTop,
+    w: btnW,
+    h: btnH,
+    cx: L.cx,
+    cy: btnTop + btnH * 0.5
+  };
+};
+
+app.hitRatingCardAddFriend = function(clientX, clientY) {
+  var B = app.getRatingCardAddFriendLayout();
+  if (!B) {
+    return false;
+  }
+  return (
+    clientX >= B.left &&
+    clientX <= B.left + B.w &&
+    clientY >= B.top &&
+    clientY <= B.top + B.h
+  );
+};
 
 app.hitRatingCardSyncProfile = function(clientX, clientY) {
   var B = app.getRatingCardSyncProfileLayout();

@@ -450,8 +450,9 @@ app.drawRatingCardOverlay = function(th) {
 
   var showActivityPoints = d.showActivityPoints !== false;
 
-  var syncBtnReserve =
-    d.showSyncProfileBtn ? app.rpx(52) : 0;
+  var bottomBtnReserve =
+    (d.showSyncProfileBtn ? app.rpx(52) : 0) +
+    (d.showAddFriendBtn ? app.rpx(58) : 0);
   var contentBottomPad = 18;
   var gapAboveContent = 14;
   var availH =
@@ -461,7 +462,7 @@ app.drawRatingCardOverlay = function(th) {
     gapAboveContent -
     y -
     titleBlock -
-    syncBtnReserve;
+    bottomBtnReserve;
   var row1H = 28;
   var sectGap = 9;
   var threeColInnerH = 48;
@@ -548,6 +549,82 @@ app.drawRatingCardOverlay = function(th) {
   app.ctx.textBaseline = 'middle';
   app.ctx.fillText('×', app.snapPx(closeCx), app.snapPx(closeCy));
 
+  if (d.showAddFriendBtn) {
+    var AF = app.getRatingCardAddFriendLayout();
+    if (AF) {
+      var afOn = d.addFriendEnabled !== false;
+      var afLabel =
+        typeof d.addFriendLabel === 'string' && d.addFriendLabel.trim()
+          ? d.addFriendLabel.trim()
+          : '添加好友';
+      var afR = app.rpx(10);
+      var ax = AF.left;
+      var ay = AF.top;
+      var aw = AF.w;
+      var ah = AF.h;
+      app.ctx.save();
+      if (afOn) {
+        app.ctx.shadowColor = 'rgba(22, 101, 72, 0.38)';
+        app.ctx.shadowBlur = app.rpx(12);
+        app.ctx.shadowOffsetY = app.rpx(4);
+        var g = app.ctx.createLinearGradient(ax, ay, ax, ay + ah);
+        g.addColorStop(0, '#4ade80');
+        g.addColorStop(0.45, '#22c55e');
+        g.addColorStop(1, '#15803d');
+        app.ctx.fillStyle = g;
+        app.roundRect(ax, ay, aw, ah, afR);
+        app.ctx.fill();
+        app.ctx.shadowBlur = 0;
+        app.ctx.shadowOffsetY = 0;
+        var gloss = app.ctx.createLinearGradient(ax, ay, ax, ay + ah * 0.55);
+        gloss.addColorStop(0, 'rgba(255,255,255,0.42)');
+        gloss.addColorStop(0.35, 'rgba(255,255,255,0.08)');
+        gloss.addColorStop(1, 'rgba(255,255,255,0)');
+        app.ctx.fillStyle = gloss;
+        app.roundRect(ax, ay, aw, ah * 0.5, afR);
+        app.ctx.fill();
+        app.ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        app.ctx.lineWidth = 1;
+        app.roundRect(ax + 0.5, ay + 0.5, aw - 1, ah - 1, afR - 0.5);
+        app.ctx.stroke();
+      } else {
+        app.ctx.fillStyle = '#f1f5f9';
+        app.roundRect(ax, ay, aw, ah, afR);
+        app.ctx.fill();
+        app.ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
+        app.ctx.lineWidth = 1;
+        app.roundRect(ax + 0.5, ay + 0.5, aw - 1, ah - 1, afR - 0.5);
+        app.ctx.stroke();
+      }
+      var fs = '600 ' + app.rpx(14) + 'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+      app.ctx.font = fs;
+      app.ctx.textBaseline = 'middle';
+      var gap = app.rpx(5);
+      var plusStr = '+';
+      var pw = app.ctx.measureText(plusStr).width;
+      var tw = app.ctx.measureText(afLabel).width;
+      var total = pw + gap + tw;
+      var startX = AF.cx - total * 0.5;
+      var textY = AF.cy;
+      if (afOn) {
+        app.ctx.fillStyle = '#ffffff';
+        app.ctx.shadowColor = 'rgba(0,0,0,0.18)';
+        app.ctx.shadowBlur = app.rpx(3);
+        app.ctx.shadowOffsetY = app.rpx(1);
+      } else {
+        app.ctx.fillStyle = '#94a3b8';
+        app.ctx.shadowBlur = 0;
+        app.ctx.shadowOffsetY = 0;
+      }
+      app.ctx.textAlign = 'left';
+      app.ctx.fillText(plusStr, app.snapPx(startX), app.snapPx(textY));
+      app.ctx.fillText(afLabel, app.snapPx(startX + pw + gap), app.snapPx(textY));
+      app.ctx.shadowBlur = 0;
+      app.ctx.shadowOffsetY = 0;
+      app.ctx.restore();
+    }
+  }
+
   if (d.showSyncProfileBtn) {
     var B = app.getRatingCardSyncProfileLayout();
     if (B) {
@@ -617,7 +694,12 @@ app.fillRatingCardFromApiData = function(d, opts) {
     noGames: noGames,
     activityPoints: ap,
     showActivityPoints: !opts.hideActivityPoints,
-    showSyncProfileBtn: opts.showSyncProfileBtn === true
+    showSyncProfileBtn: opts.showSyncProfileBtn === true,
+    showAddFriendBtn: opts.showAddFriendBtn === true,
+    addFriendLabel: '添加好友',
+    addFriendEnabled: false,
+    opponentUserId: null,
+    addFriendRateLimited: false
   };
   app.homeRatingEloCache = elo;
 }
@@ -846,6 +928,144 @@ app.syncMyProfileFromWeChat = function() {
   });
 };
 
+/** 将 GET /api/social/friend-status 结果合并到当前战绩卡（对手卡） */
+app.applyFriendStatusToRatingCard = function(opponentUserId, fs) {
+  if (!app.ratingCardData) {
+    return;
+  }
+  app.ratingCardData.opponentUserId = opponentUserId;
+  app.ratingCardData.showAddFriendBtn = true;
+  app.ratingCardData.addFriendRateLimited = false;
+  if (fs && fs.friends) {
+    app.ratingCardData.addFriendLabel = '已添加';
+    app.ratingCardData.addFriendEnabled = false;
+  } else if (fs && fs.outgoingPending) {
+    app.ratingCardData.addFriendLabel = '申请中';
+    app.ratingCardData.addFriendEnabled = false;
+  } else {
+    app.ratingCardData.addFriendLabel = '添加好友';
+    app.ratingCardData.addFriendEnabled = true;
+  }
+};
+
+/** 点击对手卡「添加好友」 */
+app.onRatingCardAddFriendTap = function() {
+  var d = app.ratingCardData;
+  if (!d || !d.showAddFriendBtn || d.opponentUserId == null) {
+    return;
+  }
+  if (d.addFriendEnabled === false) {
+    if (d.addFriendLabel === '申请中') {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({
+          title: '申请已发送，请等待对方处理',
+          icon: 'none'
+        });
+      }
+    }
+    return;
+  }
+  if (app.addFriendInFlight) {
+    return;
+  }
+  if (!authApi.getSessionToken()) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '请先完成登录', icon: 'none' });
+    }
+    return;
+  }
+  app.addFriendInFlight = true;
+  wx.request(
+    Object.assign(roomApi.socialFriendRequestCreateOptions(d.opponentUserId), {
+      success: function(res) {
+        app.addFriendInFlight = false;
+        var body = res.data;
+        if (body && typeof body === 'string') {
+          try {
+            body = JSON.parse(body);
+          } catch (pe) {
+            body = null;
+          }
+        }
+        if (res.statusCode === 401) {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '请先登录', icon: 'none' });
+          }
+          return;
+        }
+        if (res.statusCode !== 200) {
+          var errMsg =
+            body && typeof body.message === 'string' && body.message.trim()
+              ? body.message.trim()
+              : body && typeof body.code === 'string'
+                ? String(body.code)
+                : '';
+          if (!errMsg) {
+            errMsg =
+              res.statusCode === 404
+                ? '服务未找到该接口，请确认服务端已部署好友功能'
+                : '请求失败(' + res.statusCode + ')';
+          }
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: errMsg, icon: 'none', duration: 3200 });
+          }
+          return;
+        }
+        if (!body || typeof body !== 'object') {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '服务器返回异常', icon: 'none' });
+          }
+          return;
+        }
+        var st = body.status;
+        if (st === 'CREATED') {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '好友申请已发送', icon: 'none' });
+          }
+          d.addFriendLabel = '申请中';
+          d.addFriendEnabled = false;
+        } else if (st === 'PENDING') {
+          d.addFriendLabel = '申请中';
+          d.addFriendEnabled = false;
+        } else if (st === 'ALREADY_FRIENDS') {
+          d.addFriendLabel = '已添加';
+          d.addFriendEnabled = false;
+        } else if (st === 'RATE_LIMITED') {
+          d.addFriendLabel = '添加好友';
+          d.addFriendEnabled = false;
+          d.addFriendRateLimited = true;
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({
+              title: '申请过于频繁，请 24 小时后再试',
+              icon: 'none'
+            });
+          }
+        }
+        if (typeof app.draw === 'function') {
+          app.draw();
+        }
+      },
+      fail: function(err) {
+        app.addFriendInFlight = false;
+        var t = '网络异常，请稍后重试';
+        if (err && typeof err.errMsg === 'string') {
+          if (
+            err.errMsg.indexOf('url not in domain list') >= 0 ||
+            err.errMsg.indexOf('不在以下 request 合法域名') >= 0
+          ) {
+            t = '请在小程序后台配置该 API 域名为 request 合法域名';
+          } else if (err.errMsg.indexOf('fail') >= 0) {
+            t = '网络不可用，请检查网络或域名配置';
+          }
+        }
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: t, icon: 'none', duration: 3500 });
+        }
+      }
+    })
+  );
+};
+
 /** 联机对局中：拉取当前房间对手的公开天梯 */
 app.showOpponentRatingModal = function() {
   if (!app.isPvpOnline || !app.onlineRoomId) {
@@ -856,7 +1076,7 @@ app.showOpponentRatingModal = function() {
     app.shouldToastNoOpponentLadderForOnlineOppAvatar()
   ) {
     if (typeof wx.showToast === 'function') {
-      wx.showToast({ title: '人机对战无对手天梯', icon: 'none' });
+      wx.showToast({ title: '暂无法查看对手资料', icon: 'none' });
     }
     return;
   }
@@ -876,17 +1096,21 @@ app.showOpponentRatingModal = function() {
   wx.request(
     Object.assign(roomApi.roomOpponentRatingOptions(app.onlineRoomId), {
       success: function (res) {
-        if (typeof wx.hideLoading === 'function') {
-          wx.hideLoading();
-        }
-        app.ratingFetchInFlight = false;
         if (res.statusCode === 401) {
+          if (typeof wx.hideLoading === 'function') {
+            wx.hideLoading();
+          }
+          app.ratingFetchInFlight = false;
           if (typeof wx.showToast === 'function') {
             wx.showToast({ title: '请先登录', icon: 'none' });
           }
           return;
         }
         if (res.statusCode === 404 || res.statusCode === 403) {
+          if (typeof wx.hideLoading === 'function') {
+            wx.hideLoading();
+          }
+          app.ratingFetchInFlight = false;
           if (typeof wx.showToast === 'function') {
             wx.showToast({
               title: res.statusCode === 403 ? '无法查看' : '暂无对手数据',
@@ -896,6 +1120,10 @@ app.showOpponentRatingModal = function() {
           return;
         }
         if (res.statusCode !== 200 || !res.data) {
+          if (typeof wx.hideLoading === 'function') {
+            wx.hideLoading();
+          }
+          app.ratingFetchInFlight = false;
           if (typeof wx.showToast === 'function') {
             wx.showToast({ title: '获取失败', icon: 'none' });
           }
@@ -910,6 +1138,10 @@ app.showOpponentRatingModal = function() {
           }
         }
         if (!d) {
+          if (typeof wx.hideLoading === 'function') {
+            wx.hideLoading();
+          }
+          app.ratingFetchInFlight = false;
           return;
         }
         app.applyOnlineOpponentProfilePayload(d);
@@ -919,8 +1151,45 @@ app.showOpponentRatingModal = function() {
           hideActivityPoints: true,
           showSyncProfileBtn: false
         });
-        app.ratingCardVisible = true;
-        app.draw();
+        var oid = d.userId != null ? Number(d.userId) : NaN;
+        function finishOpponentCard() {
+          app.ratingFetchInFlight = false;
+          if (typeof wx.hideLoading === 'function') {
+            wx.hideLoading();
+          }
+          app.ratingCardVisible = true;
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+        }
+        if (!isNaN(oid)) {
+          wx.request(
+            Object.assign(roomApi.socialFriendStatusOptions(oid), {
+              success: function (res2) {
+                var fs = res2.data;
+                if (fs && typeof fs === 'string') {
+                  try {
+                    fs = JSON.parse(fs);
+                  } catch (pe3) {
+                    fs = null;
+                  }
+                }
+                if (res2.statusCode === 200 && fs) {
+                  app.applyFriendStatusToRatingCard(oid, fs);
+                } else {
+                  app.applyFriendStatusToRatingCard(oid, null);
+                }
+                finishOpponentCard();
+              },
+              fail: function () {
+                app.applyFriendStatusToRatingCard(oid, null);
+                finishOpponentCard();
+              }
+            })
+          );
+        } else {
+          finishOpponentCard();
+        }
       },
       fail: function () {
         if (typeof wx.hideLoading === 'function') {

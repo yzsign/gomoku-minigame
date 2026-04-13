@@ -1,4 +1,4 @@
-/**
+ /**
  * Auto-split from gameLogic.js (part 1)
  */
 module.exports = function register(app, deps) {
@@ -57,6 +57,8 @@ app.playPlaceStoneSound = function() {
 app.ratingCardVisible = false;
 app.ratingCardData = null;
 app.ratingFetchInFlight = false;
+/** 好友申请 POST 防重复点击（friend-request-social-spec §6.1） */
+app.addFriendInFlight = false;
 
 /** 每日签到：服务端 wxcloudrun-gomoku（POST /api/me/checkin）+ 画布弹窗 */
 app.CHECKIN_DAILY_POINTS = 10;
@@ -186,7 +188,11 @@ app.getOpponentDisplayName = function() {
     }
     return '电脑';
   }
-  if (app.isPvpOnline && app.onlineOpponentIsBot) {
+  if (
+    app.isPvpOnline &&
+    app.onlineOpponentIsBot &&
+    !app.isRandomMatch
+  ) {
     if (app.onlineOppNickname) {
       return app.onlineOppNickname;
     }
@@ -258,9 +264,15 @@ app.getOpponentAssignedStoneColor = function() {
   return app.oppositeColor(mine);
 };
 
-/** 联机：当前用户「棋盘对面」是否为电脑（非旁观）；用于头像与拉取资料 */
+/**
+ * 联机：当前用户「棋盘对面」是否为电脑（非旁观）；用于头像、资料、文案等。
+ * 随机匹配场景下固定为 false，界面与拉取资料与真人对局一致（底层仍可用 onlineOpponentIsBot / STATE 判断走子）。
+ */
 app.isMyOnlineOpponentBot = function() {
   if (!app.isPvpOnline || app.onlineSpectatorMode) {
+    return false;
+  }
+  if (app.isRandomMatch) {
     return false;
   }
   var mine = app.pvpOnlineYourColor;
@@ -269,13 +281,6 @@ app.isMyOnlineOpponentBot = function() {
       return true;
     }
   } else if (app.onlineBlackIsBotFlag) {
-    return true;
-  }
-  /**
-   * 随机匹配超时接入机器人：客户端已标记，STATE.whiteIsBot 首包可能尚未到达，
-   * 避免头像在「联机默认人」与守关机器人之间闪一下。
-   */
-  if (app.isRandomMatch && app.onlineOpponentIsBot) {
     return true;
   }
   return false;

@@ -644,15 +644,18 @@ app.draw = function() {
       } else {
         status = '对方申请悔棋（' + urOn + '方），请在弹窗中选择';
       }
+    } else if (app.isRandomMatch) {
+      /** 随机匹配：无论对手为真人或后台账号，状态栏与「对方思考」一致 */
+      if (app.current === app.pvpOnlineYourColor) {
+        status = '轮到你（' + sideName + '）';
+      } else {
+        status = '对方思考中…';
+      }
     } else if (app.onlineOpponentIsBot) {
       if (app.current === app.pvpOnlineYourColor) {
         status = '轮到你（' + sideName + '）';
       } else {
-        if (app.isRandomMatch) {
-          status = '「' + app.getOpponentDisplayName() + '」思考中…';
-        } else {
-          status = '「电脑」思考中…';
-        }
+        status = '「电脑」思考中…';
       }
     } else if (app.current === app.pvpOnlineYourColor) {
       status = '轮到你（' + sideName + '）';
@@ -3359,6 +3362,15 @@ wx.onTouchStart(function (e) {
         return;
       }
       if (
+        typeof app.hitRatingCardAddFriend === 'function' &&
+        app.hitRatingCardAddFriend(x, y)
+      ) {
+        if (typeof app.onRatingCardAddFriendTap === 'function') {
+          app.onRatingCardAddFriendTap();
+        }
+        return;
+      }
+      if (
         typeof app.hitRatingCardSyncProfile === 'function' &&
         app.hitRatingCardSyncProfile(x, y)
       ) {
@@ -3441,6 +3453,15 @@ wx.onTouchStart(function (e) {
       app.ratingCardVisible = false;
       app.ratingCardData = null;
       app.draw();
+      return;
+    }
+    if (
+      typeof app.hitRatingCardAddFriend === 'function' &&
+      app.hitRatingCardAddFriend(x, y)
+    ) {
+      if (typeof app.onRatingCardAddFriendTap === 'function') {
+        app.onRatingCardAddFriendTap();
+      }
       return;
     }
     if (
@@ -3800,7 +3821,7 @@ wx.onTouchStart(function (e) {
       }
     } else {
       if (typeof wx.showToast === 'function') {
-        wx.showToast({ title: '人机对战无对手天梯', icon: 'none' });
+        wx.showToast({ title: '暂无法查看对手资料', icon: 'none' });
       }
     }
     return;
