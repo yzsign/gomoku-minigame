@@ -714,6 +714,60 @@ function drawBoard(ctx, layout, theme) {
 }
 
 /**
+ * 棋盘边沿数字坐标：左上角交叉点为 (1,1)；顶边从左到右 1…n，左侧从上到下 1…n。
+ * 数字画在首条格线外侧的留白内，宜在 drawBoard 之后、drawPieces 之前调用。
+ */
+function drawBoardCoordinateLabels(ctx, layout, theme) {
+  if (!layout || typeof layout.cell !== 'number' || typeof layout.size !== 'number') {
+    return;
+  }
+  var cell = layout.cell;
+  var ox = snapLogical(layout.originX);
+  var oy = snapLogical(layout.originY);
+  var n = layout.size;
+  if (n < 2) {
+    return;
+  }
+  var fs = Math.max(9, Math.min(14, Math.round(cell * 0.28)));
+  var padTop = Math.max(5, cell * 0.22);
+  var padLeft = Math.max(6, cell * 0.26);
+  var label =
+    theme && theme.id === 'classic'
+      ? 'rgba(72, 54, 38, 0.75)'
+      : theme && theme.id === 'mint'
+        ? 'rgba(26, 52, 74, 0.68)'
+        : theme && theme.id === 'ink'
+          ? 'rgba(42, 38, 34, 0.72)'
+          : 'rgba(0, 0, 0, 0.55)';
+  ctx.save();
+  ctx.font =
+    '600 ' +
+    fs +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  ctx.fillStyle = label;
+  var i;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  for (i = 0; i < n; i++) {
+    ctx.fillText(
+      String(i + 1),
+      snapLogical(ox + i * cell),
+      snapLogical(oy - padTop)
+    );
+  }
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (i = 0; i < n; i++) {
+    ctx.fillText(
+      String(i + 1),
+      snapLogical(ox - padLeft),
+      snapLogical(oy + i * cell)
+    );
+  }
+  ctx.restore();
+}
+
+/**
  * 接触影：径向渐变 + 扁椭圆，边缘自然淡出（光源左上，影落右下）
  */
 function drawStoneDropShadow(ctx, cx, cy, radius, isBlack) {
@@ -1162,6 +1216,7 @@ module.exports = {
   preloadQinghuaPattern: preloadQinghuaPattern,
   preloadInkLotusPattern: preloadInkLotusPattern,
   drawBoard: drawBoard,
+  drawBoardCoordinateLabels: drawBoardCoordinateLabels,
   drawPieces: drawPieces,
   drawStonePiece: drawStonePiece,
   drawOpponentLastMoveMarker: drawOpponentLastMoveMarker,

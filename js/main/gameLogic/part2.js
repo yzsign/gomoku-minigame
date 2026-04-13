@@ -802,6 +802,9 @@ app.computeLayout = function() {
   var cell = Math.max(1, Math.floor(maxBoard / span));
   var originX = Math.round((app.W - span * cell) / 2);
   var originY = Math.round(topBar + (availH - span * cell) / 2);
+  if (app.screen === 'admin_puzzle') {
+    originY -= 30;
+  }
   var boardPx = span * cell;
   /* 底栏垂直中心：条底对齐 H - safeBottom（刘海/ home 条之上） */
   var bottomY = app.H - safeBottom - barH * 0.5;

@@ -5,6 +5,9 @@
 /** 棋盘大小 */
 var SIZE = 15;
 
+/** 局面评估用线段缓存，避免 minimax 叶节点反复分配数组 */
+var evalLineScratch = new Array(SIZE);
+
 /** 空 / 黑 / 白 */
 var EMPTY = 0;
 var BLACK = 1;
@@ -96,7 +99,7 @@ var DEFAULT_AI_TUNE = {
   oppThreatWeight: 1.3,
   doubleThreatMult: 4,
   candidateRing: 2,
-  forcedTiersMax: 6
+  forcedTiersMax: 7
 };
 var currentAiTune = null;
 
@@ -121,7 +124,7 @@ function applyTuneFields(t, src) {
     t.candidateRing = clampNum(Math.floor(Number(src.candidateRing)), 1, 4);
   }
   if (src.forcedTiersMax != null) {
-    t.forcedTiersMax = clampNum(Math.floor(Number(src.forcedTiersMax)), 3, 6);
+    t.forcedTiersMax = clampNum(Math.floor(Number(src.forcedTiersMax)), 3, 7);
   }
 }
 
@@ -352,7 +355,8 @@ function analyzeMovePattern(board, r, c, color) {
     doubleRushFour: nR4 >= 2,
     independentDoubleRushFour: independentDR4,
     doubleLiveThree: nL3 >= 2,
-    liveThreeAndRushFour: nL3 >= 1 && nR4 >= 1
+    liveThreeAndRushFour: nL3 >= 1 && nR4 >= 1,
+    doubleLiveTwo: nL2 >= 2
   };
 }
 
@@ -371,6 +375,9 @@ function shapeThreatScore(a) {
     }
     v = Math.max(v, bump);
     v *= tune().doubleThreatMult;
+  } else if (a.doubleLiveTwo && a.nL4 < 1) {
+    v = Math.max(v, 220);
+    v *= Math.min(2.2, 1 + (tune().doubleThreatMult - 1) * 0.35);
   }
   return v;
 }
@@ -485,6 +492,23 @@ function forcedPriorityMove(board, aiColor) {
     return pickBestByCenter(tier6);
   }
 
+  if (maxTier < 7) {
+    return null;
+  }
+  var tier7 = [];
+  for (i = 0; i < empties.length; i++) {
+    var m7 = empties[i];
+    var u = analyzeMovePattern(board, m7.r, m7.c, opp);
+    if (!u || u.nL4 >= 1 || u.independentDoubleRushFour) continue;
+    if (u.doubleLiveThree || u.liveThreeAndRushFour) continue;
+    if (u.doubleLiveTwo) {
+      tier7.push(m7);
+    }
+  }
+  if (tier7.length) {
+    return pickBestByCenter(tier7);
+  }
+
   return null;
 }
 
@@ -494,7 +518,7 @@ function forcedPriorityMove(board, aiColor) {
 function evaluateBoard(board, aiColor) {
   var opp = aiColor === BLACK ? WHITE : BLACK;
   var score = 0;
-  var line = [];
+  var line = evalLineScratch;
   var r;
   var c;
   var d;
@@ -731,6 +755,12 @@ function hasImmediateWin(board, color, pool) {
   );
 }
 
+/** 与 GomokuAiEngine.maxCandForDepth 一致：内层分支至少 12 路，上限随剩余深度收紧 */
+function effectiveBranchCap(depth, maxCandidates) {
+  var cap = Math.min(maxCandidates, 6 + depth * 6);
+  return cap < 12 ? 12 : cap;
+}
+
 /**
  * minimax：maximizing=true 表示当前行棋方为 aiColor
  */
@@ -752,8 +782,7 @@ function minimax(board, depth, alpha, beta, maximizing, aiColor, maxCandidates) 
     return evaluateBoard(board, aiColor);
   }
 
-  var poolCap = Math.min(maxCandidates, 6 + depth * 6);
-  if (poolCap < 12) poolCap = 12;
+  var poolCap = effectiveBranchCap(depth, maxCandidates);
   var pool = sortMovesByHeuristic(
     board,
     fullPool,

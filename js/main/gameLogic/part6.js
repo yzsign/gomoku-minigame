@@ -159,7 +159,8 @@ app.getAdminPuzzleMetaBarLayout = function() {
   var subCy = titleCy + titleFs * 0.5 + app.rpx(12) + subFs * 0.5;
   var subBottom = subCy + subFs * 0.5;
   /* 条带整体在棋盘顶 originY 之上，下缘对齐 originY - gap（不再用 Math.max 与副标题比较而把条带压进棋盘） */
-  var top = layout.originY - gapAboveBoard - stripH;
+  /* 相对原位置整体上移 50px（题目标题/排期横条） */
+  var top = layout.originY - gapAboveBoard - stripH - 50;
   var fullW = app.W - pad * 2;
   var half = (fullW - midGap) * 0.5;
   return {
@@ -803,6 +804,7 @@ app.drawAdminPuzzleScreen = function() {
     app.sys.statusBarHeight || 0
   );
   render.drawBoard(app.ctx, app.layout, boardTh);
+  render.drawBoardCoordinateLabels(app.ctx, app.layout, boardTh);
   render.drawPieces(
     app.ctx,
     app.adminDraftBoard,
