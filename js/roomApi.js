@@ -383,6 +383,64 @@ function roomChatReportOptions(bodyObj) {
   };
 }
 
+/** GET /api/social/friend-status?userId= — 与对手的按钮态（好友 / 申请中 等） */
+function socialFriendStatusOptions(peerUserId) {
+  var id =
+    peerUserId !== undefined && peerUserId !== null ? Number(peerUserId) : 0;
+  return {
+    url:
+      GOMOKU_API_BASE +
+      '/api/social/friend-status?userId=' +
+      encodeURIComponent(String(id)),
+    method: 'GET',
+    header: withAuthHeaders({})
+  };
+}
+
+/** POST /api/social/friend-requests body: { targetUserId } */
+function socialFriendRequestCreateOptions(targetUserId) {
+  return {
+    url: GOMOKU_API_BASE + '/api/social/friend-requests',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify({ targetUserId: Number(targetUserId) })
+  };
+}
+
+/** POST /api/social/friend-requests/{id}/accept */
+function socialFriendRequestAcceptOptions(requestId) {
+  return {
+    url:
+      GOMOKU_API_BASE +
+      '/api/social/friend-requests/' +
+      encodeURIComponent(String(requestId)) +
+      '/accept',
+    method: 'POST',
+    header: withAuthHeaders({})
+  };
+}
+
+/** POST /api/social/friend-requests/{id}/reject */
+function socialFriendRequestRejectOptions(requestId) {
+  return {
+    url:
+      GOMOKU_API_BASE +
+      '/api/social/friend-requests/' +
+      encodeURIComponent(String(requestId)) +
+      '/reject',
+    method: 'POST',
+    header: withAuthHeaders({})
+  };
+}
+
+/** 用户级 WS：/ws/user?sessionToken=（与 /ws/gomoku 并列） */
+function userWebSocketUrl(sessionToken) {
+  var token = sessionToken ? String(sessionToken) : '';
+  return wsUrlFromApiBase() + '/ws/user?sessionToken=' + encodeURIComponent(token);
+}
+
 module.exports = {
   GOMOKU_API_BASE: GOMOKU_API_BASE,
   roomApiCreateOptions: roomApiCreateOptions,
@@ -412,5 +470,10 @@ module.exports = {
   gameReplayByIdOptions: gameReplayByIdOptions,
   roomChatMessagesOptions: roomChatMessagesOptions,
   roomChatReportOptions: roomChatReportOptions,
+  socialFriendStatusOptions: socialFriendStatusOptions,
+  socialFriendRequestCreateOptions: socialFriendRequestCreateOptions,
+  socialFriendRequestAcceptOptions: socialFriendRequestAcceptOptions,
+  socialFriendRequestRejectOptions: socialFriendRequestRejectOptions,
+  userWebSocketUrl: userWebSocketUrl,
   wsUrlFromApiBase: wsUrlFromApiBase
 };
