@@ -323,6 +323,140 @@ function classifySegment(len, leftOpen, rightOpen) {
   return 'N';
 }
 
+var SEG_RANK = { W: 7, L4: 6, R4: 5, L3: 4, S3: 3, L2: 2, X: 0, N: 0 };
+
+function strongerSegment(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return SEG_RANK[a] >= SEG_RANK[b] ? a : b;
+}
+
+/**
+ * 沿 (dr,dc) 取以 (r,c) 为中心的线段（用于跳三/跳四滑动窗口）
+ */
+function lineWindow(board, r, c, dr, dc, half) {
+  var a = [];
+  var k;
+  for (k = -half; k <= half; k++) {
+    var rr = r + k * dr;
+    var cc = c + k * dc;
+    a.push(inBounds(rr, cc) ? board[rr][cc] : -1);
+  }
+  return { vals: a, center: half };
+}
+
+/**
+ * 窗口内 color 子数、是否含落子点 relCenter、外侧两端是否为空（-1 视为墙）
+ */
+function jumpWindowThreat(vals, start, len, centerInLine, color) {
+  var opp = color === BLACK ? WHITE : BLACK;
+  var i;
+  var nColor = 0;
+  var nEmpty = 0;
+  var usesCenter = false;
+  for (i = 0; i < len; i++) {
+    var idx = start + i;
+    var v = vals[idx];
+    if (v === opp || v === -1) {
+      return null;
+    }
+    if (idx === centerInLine) usesCenter = true;
+    if (v === color) nColor++;
+    else if (v === EMPTY) nEmpty++;
+  }
+  if (!usesCenter) return null;
+  var leftE = start > 0 ? vals[start - 1] : -1;
+  var rightE = start + len < vals.length ? vals[start + len] : -1;
+  var leftOpen = leftE === EMPTY;
+  var rightOpen = rightE === EMPTY;
+
+  if (len === 5 && nColor === 4 && nEmpty === 1) {
+    if (leftOpen && rightOpen) return 'L4';
+    if (leftOpen || rightOpen) return 'R4';
+    return 'X';
+  }
+  if (len === 6 && nColor === 4 && nEmpty === 2) {
+    var sub = vals.slice(start, start + 6);
+    var j;
+    var first = -1;
+    var last = -1;
+    for (j = 0; j < 6; j++) {
+      if (sub[j] === color) {
+        if (first < 0) first = j;
+        last = j;
+      }
+    }
+    if (first < 0 || last - first > 5) return null;
+    var innerEmpty = 0;
+    for (j = first; j <= last; j++) {
+      if (sub[j] === EMPTY) innerEmpty++;
+    }
+    if (innerEmpty !== 2) return null;
+    if (leftOpen && rightOpen) return 'L4';
+    if (leftOpen || rightOpen) return 'R4';
+    return 'X';
+  }
+  if (len === 5 && nColor === 3 && nEmpty === 2) {
+    if (leftOpen && rightOpen) return 'L3';
+    if (leftOpen || rightOpen) return 'S3';
+    return 'X';
+  }
+  if (len === 6 && nColor === 3 && nEmpty === 3) {
+    if (leftOpen && rightOpen) return 'L3';
+    if (leftOpen || rightOpen) return 'S3';
+    return 'X';
+  }
+  return null;
+}
+
+/**
+ * 跳三/跳四：在落子已写入 board 的前提下，沿该向滑动 5/6 格窗口取最强棋型（与连续块取较强者）
+ */
+function jumpAwareSegment(board, r, c, dr, dc, color) {
+  var pack = lineWindow(board, r, c, dr, dc, 7);
+  var vals = pack.vals;
+  var cidx = pack.center;
+  var best = null;
+  var wlen;
+  var s;
+  for (wlen = 5; wlen <= 6; wlen++) {
+    for (s = 0; s + wlen <= vals.length; s++) {
+      if (cidx < s || cidx >= s + wlen) continue;
+      var t = jumpWindowThreat(vals, s, wlen, cidx, color);
+      best = strongerSegment(best, t);
+    }
+  }
+  return best;
+}
+
+function directionSegmentMerged(board, r, c, dr, dc, color) {
+  var info = getLineRunInfo(board, r, c, dr, dc, color);
+  var base = classifySegment(info.len, info.leftOpen, info.rightOpen);
+  var jmp = jumpAwareSegment(board, r, c, dr, dc, color);
+  return strongerSegment(base, jmp);
+}
+
+/**
+ * 沿该线任一空位落子即五连的制胜点（含跳四；先走 rushFourWinningCell 再枚举）
+ */
+function rushWinningCellAlongLine(board, r, c, dr, dc, color) {
+  var w = rushFourWinningCell(board, r, c, dr, dc, color);
+  if (w) return w;
+  var k;
+  for (k = -7; k <= 7; k++) {
+    var rr = r + k * dr;
+    var cc = c + k * dc;
+    if (!inBounds(rr, cc) || board[rr][cc] !== EMPTY) continue;
+    board[rr][cc] = color;
+    var win = checkWin(board, rr, cc, color);
+    board[rr][cc] = EMPTY;
+    if (win) {
+      return { r: rr, c: cc };
+    }
+  }
+  return null;
+}
+
 /**
  * 冲四：沿 dr,dc 连成一线后，下一手成五的空位（仅 R4 有效；文档规则2「独立威胁」用）
  */
@@ -366,11 +500,10 @@ function areIndependentRushFours(board, r, c, color) {
   for (d = 0; d < DIRS.length; d++) {
     var dr = DIRS[d][0];
     var dc = DIRS[d][1];
-    var info = getLineRunInfo(board, r, c, dr, dc, color);
-    if (classifySegment(info.len, info.leftOpen, info.rightOpen) !== 'R4') {
+    if (directionSegmentMerged(board, r, c, dr, dc, color) !== 'R4') {
       continue;
     }
-    var w = rushFourWinningCell(board, r, c, dr, dc, color);
+    var w = rushWinningCellAlongLine(board, r, c, dr, dc, color);
     if (!w) continue;
     var k = w.r + ',' + w.c;
     if (!seen[k]) {
@@ -397,15 +530,9 @@ function analyzeMovePattern(board, r, c, color) {
   var nL2 = 0;
   var d;
   for (d = 0; d < DIRS.length; d++) {
-    var info = getLineRunInfo(
-      board,
-      r,
-      c,
-      DIRS[d][0],
-      DIRS[d][1],
-      color
-    );
-    var seg = classifySegment(info.len, info.leftOpen, info.rightOpen);
+    var dr = DIRS[d][0];
+    var dc = DIRS[d][1];
+    var seg = directionSegmentMerged(board, r, c, dr, dc, color);
     if (seg === 'L4') nL4++;
     else if (seg === 'R4') nR4++;
     else if (seg === 'L3') nL3++;
@@ -425,6 +552,8 @@ function analyzeMovePattern(board, r, c, color) {
     independentDoubleRushFour: independentDR4,
     doubleLiveThree: nL3 >= 2,
     liveThreeAndRushFour: nL3 >= 1 && nR4 >= 1,
+    /** 活三与活二并存（不同向），含跳二连成活三后与另一向活二形成的叉 */
+    mixedLiveThreeAndTwo: nL3 >= 1 && nL2 >= 1,
     doubleLiveTwo: nL2 >= 2
   };
 }
@@ -436,11 +565,21 @@ function shapeThreatScore(a) {
   if (a.nL4 >= 1) return 10000;
   var v = a.nR4 * 1000 + a.nL3 * 100 + a.nS3 * 25 + a.nL2 * 5;
   var doubleThreat =
-    (a.doubleLiveThree || a.liveThreeAndRushFour) && a.nL4 < 1;
+    (a.doubleLiveThree ||
+      a.liveThreeAndRushFour ||
+      a.mixedLiveThreeAndTwo) &&
+    a.nL4 < 1;
   if (doubleThreat) {
     var bump = a.liveThreeAndRushFour ? 1500 : 500;
     if (a.doubleLiveThree && a.liveThreeAndRushFour) {
       bump = 1500;
+    }
+    if (
+      a.mixedLiveThreeAndTwo &&
+      !a.liveThreeAndRushFour &&
+      !a.doubleLiveThree
+    ) {
+      bump = Math.max(bump, 720);
     }
     v = Math.max(v, bump);
     v *= tune().doubleThreatMult;
@@ -497,7 +636,7 @@ function allEmptyCells(board) {
 }
 
 /**
- * 文档第二节优先级 3–7：活四/双冲四、防对方活四/双冲四、双威胁攻防、防对方双活二（必应手在必胜/必堵之后）。
+ * 文档第二节优先级 3–7：活四/双冲四、防对方活四/双冲四、双威胁与活三+活二叉、防对方双活二（必应手在必胜/必堵之后）。
  * forcedTiersMax：仅执行层号 ≤ 该值的强制层（默认 7，含防对方双活二）；设为 4 可弱化双威胁必应手（更易被击败）。
  */
 function forcedPriorityMove(board, aiColor) {
@@ -545,7 +684,11 @@ function forcedPriorityMove(board, aiColor) {
     var s = analyzeMovePattern(board, m5.r, m5.c, aiColor);
     if (!s || s.hasWin) continue;
     if (s.nL4 >= 1 || s.independentDoubleRushFour) continue;
-    if (s.doubleLiveThree || s.liveThreeAndRushFour) {
+    if (
+      s.doubleLiveThree ||
+      s.liveThreeAndRushFour ||
+      s.mixedLiveThreeAndTwo
+    ) {
       tier5.push(m5);
     }
   }
@@ -561,7 +704,11 @@ function forcedPriorityMove(board, aiColor) {
     var m6 = empties[i];
     var t = analyzeMovePattern(board, m6.r, m6.c, opp);
     if (!t || t.nL4 >= 1 || t.independentDoubleRushFour) continue;
-    if (t.doubleLiveThree || t.liveThreeAndRushFour) {
+    if (
+      t.doubleLiveThree ||
+      t.liveThreeAndRushFour ||
+      t.mixedLiveThreeAndTwo
+    ) {
       tier6.push(m6);
     }
   }
@@ -577,7 +724,13 @@ function forcedPriorityMove(board, aiColor) {
     var m7 = empties[i];
     var u = analyzeMovePattern(board, m7.r, m7.c, opp);
     if (!u || u.nL4 >= 1 || u.independentDoubleRushFour) continue;
-    if (u.doubleLiveThree || u.liveThreeAndRushFour) continue;
+    if (
+      u.doubleLiveThree ||
+      u.liveThreeAndRushFour ||
+      u.mixedLiveThreeAndTwo
+    ) {
+      continue;
+    }
     if (u.doubleLiveTwo) {
       tier7.push(m7);
     }
