@@ -3356,6 +3356,9 @@ wx.onTouchStart(function (e) {
   if (app.screen === 'history') {
     if (app.ratingCardVisible) {
       if (app.hitRatingCardClose(x, y)) {
+        if (typeof app.clearRatingCardAddFriendTouch === 'function') {
+          app.clearRatingCardAddFriendTouch();
+        }
         app.ratingCardVisible = false;
         app.ratingCardData = null;
         app.draw();
@@ -3365,6 +3368,21 @@ wx.onTouchStart(function (e) {
         typeof app.hitRatingCardAddFriend === 'function' &&
         app.hitRatingCardAddFriend(x, y)
       ) {
+        var rdHist = app.ratingCardData;
+        if (
+          rdHist &&
+          rdHist.addFriendEnabled !== false &&
+          !app.addFriendInFlight
+        ) {
+          app.ratingCardAddFriendArmed = true;
+          app.ratingCardAddFriendPressed = true;
+          app.ratingCardAddFriendTouchStartX = x;
+          app.ratingCardAddFriendTouchStartY = y;
+          app.ratingCardAddFriendTouchId =
+            e.touches && e.touches[0] ? e.touches[0].identifier : null;
+          app.draw();
+          return;
+        }
         if (typeof app.onRatingCardAddFriendTap === 'function') {
           app.onRatingCardAddFriendTap();
         }
@@ -3380,6 +3398,9 @@ wx.onTouchStart(function (e) {
         return;
       }
       if (!app.hitRatingCardInside(x, y)) {
+        if (typeof app.clearRatingCardAddFriendTouch === 'function') {
+          app.clearRatingCardAddFriendTouch();
+        }
         app.ratingCardVisible = false;
         app.ratingCardData = null;
         app.draw();
@@ -3450,6 +3471,9 @@ wx.onTouchStart(function (e) {
     app.ratingCardVisible
   ) {
     if (app.hitRatingCardClose(x, y)) {
+      if (typeof app.clearRatingCardAddFriendTouch === 'function') {
+        app.clearRatingCardAddFriendTouch();
+      }
       app.ratingCardVisible = false;
       app.ratingCardData = null;
       app.draw();
@@ -3459,6 +3483,21 @@ wx.onTouchStart(function (e) {
       typeof app.hitRatingCardAddFriend === 'function' &&
       app.hitRatingCardAddFriend(x, y)
     ) {
+      var rdCard = app.ratingCardData;
+      if (
+        rdCard &&
+        rdCard.addFriendEnabled !== false &&
+        !app.addFriendInFlight
+      ) {
+        app.ratingCardAddFriendArmed = true;
+        app.ratingCardAddFriendPressed = true;
+        app.ratingCardAddFriendTouchStartX = x;
+        app.ratingCardAddFriendTouchStartY = y;
+        app.ratingCardAddFriendTouchId =
+          e.touches && e.touches[0] ? e.touches[0].identifier : null;
+        app.draw();
+        return;
+      }
       if (typeof app.onRatingCardAddFriendTap === 'function') {
         app.onRatingCardAddFriendTap();
       }
@@ -3474,6 +3513,9 @@ wx.onTouchStart(function (e) {
       return;
     }
     if (!app.hitRatingCardInside(x, y)) {
+      if (typeof app.clearRatingCardAddFriendTouch === 'function') {
+        app.clearRatingCardAddFriendTouch();
+      }
       app.ratingCardVisible = false;
       app.ratingCardData = null;
       app.draw();
@@ -4174,6 +4216,52 @@ if (typeof wx.onTouchEnd === 'function') {
       }
       return;
     }
+    if (app.ratingCardAddFriendArmed && e.changedTouches) {
+      var teAf = null;
+      var iaf;
+      if (app.ratingCardAddFriendTouchId != null) {
+        for (iaf = 0; iaf < e.changedTouches.length; iaf++) {
+          if (
+            e.changedTouches[iaf].identifier === app.ratingCardAddFriendTouchId
+          ) {
+            teAf = e.changedTouches[iaf];
+            break;
+          }
+        }
+      } else {
+        teAf = e.changedTouches[0];
+      }
+      if (teAf) {
+        app.ratingCardAddFriendPressed = false;
+        var rdAf = app.ratingCardData;
+        var ex = teAf.clientX;
+        var ey = teAf.clientY;
+        var tapSlopAf = app.rpx(56);
+        var adx = ex - app.ratingCardAddFriendTouchStartX;
+        var ady = ey - app.ratingCardAddFriendTouchStartY;
+        var slopOk = adx * adx + ady * ady <= tapSlopAf * tapSlopAf;
+        var endedOnBtn =
+          typeof app.hitRatingCardAddFriend === 'function' &&
+          app.hitRatingCardAddFriend(ex, ey);
+        var canActAf =
+          app.ratingCardVisible &&
+          rdAf &&
+          rdAf.addFriendEnabled !== false &&
+          !app.addFriendInFlight;
+        if (
+          endedOnBtn &&
+          canActAf &&
+          slopOk &&
+          typeof app.onRatingCardAddFriendTap === 'function'
+        ) {
+          app.onRatingCardAddFriendTap();
+        }
+        app.ratingCardAddFriendArmed = false;
+        app.ratingCardAddFriendTouchId = null;
+        app.draw();
+        return;
+      }
+    }
     if (
       e.changedTouches &&
       (app.screen === 'replay' ||
@@ -4471,6 +4559,12 @@ if (typeof wx.onTouchEnd === 'function') {
 
 if (typeof wx.onTouchCancel === 'function') {
   wx.onTouchCancel(function () {
+    if (app.ratingCardAddFriendArmed || app.ratingCardAddFriendPressed) {
+      if (typeof app.clearRatingCardAddFriendTouch === 'function') {
+        app.clearRatingCardAddFriendTouch();
+      }
+      app.draw();
+    }
     if (app.screen === 'admin_puzzle') {
       if (app.adminPuzzleSchedulePickerOpen) {
         app.adminPuzzleSchedulePickerOpen = false;

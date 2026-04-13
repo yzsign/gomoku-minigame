@@ -562,15 +562,27 @@ app.drawRatingCardOverlay = function(th) {
       var ay = AF.top;
       var aw = AF.w;
       var ah = AF.h;
+      var afPress = afOn && app.ratingCardAddFriendPressed;
+      var pressInset = afPress ? app.rpx(1.5) : 0;
+      ax += pressInset;
+      ay += pressInset;
+      aw -= pressInset * 2;
+      ah -= pressInset * 2;
       app.ctx.save();
       if (afOn) {
         app.ctx.shadowColor = 'rgba(22, 101, 72, 0.38)';
-        app.ctx.shadowBlur = app.rpx(12);
-        app.ctx.shadowOffsetY = app.rpx(4);
+        app.ctx.shadowBlur = afPress ? app.rpx(8) : app.rpx(12);
+        app.ctx.shadowOffsetY = afPress ? app.rpx(2) : app.rpx(4);
         var g = app.ctx.createLinearGradient(ax, ay, ax, ay + ah);
-        g.addColorStop(0, '#4ade80');
-        g.addColorStop(0.45, '#22c55e');
-        g.addColorStop(1, '#15803d');
+        if (afPress) {
+          g.addColorStop(0, '#34d399');
+          g.addColorStop(0.45, '#16a34a');
+          g.addColorStop(1, '#14532d');
+        } else {
+          g.addColorStop(0, '#4ade80');
+          g.addColorStop(0.45, '#22c55e');
+          g.addColorStop(1, '#15803d');
+        }
         app.ctx.fillStyle = g;
         app.roundRect(ax, ay, aw, ah, afR);
         app.ctx.fill();
@@ -604,8 +616,9 @@ app.drawRatingCardOverlay = function(th) {
       var pw = app.ctx.measureText(plusStr).width;
       var tw = app.ctx.measureText(afLabel).width;
       var total = pw + gap + tw;
-      var startX = AF.cx - total * 0.5;
-      var textY = AF.cy;
+      var textCx = ax + aw * 0.5;
+      var textY = ay + ah * 0.5;
+      var startX = textCx - total * 0.5;
       if (afOn) {
         app.ctx.fillStyle = '#ffffff';
         app.ctx.shadowColor = 'rgba(0,0,0,0.18)';

@@ -59,6 +59,17 @@ app.ratingCardData = null;
 app.ratingFetchInFlight = false;
 /** 好友申请 POST 防重复点击（friend-request-social-spec §6.1） */
 app.addFriendInFlight = false;
+/** 胜负页「添加好友」按压态 */
+app.ratingCardAddFriendPressed = false;
+app.ratingCardAddFriendArmed = false;
+app.ratingCardAddFriendTouchId = null;
+app.ratingCardAddFriendTouchStartX = 0;
+app.ratingCardAddFriendTouchStartY = 0;
+app.clearRatingCardAddFriendTouch = function () {
+  app.ratingCardAddFriendPressed = false;
+  app.ratingCardAddFriendArmed = false;
+  app.ratingCardAddFriendTouchId = null;
+};
 
 /** 每日签到：服务端 wxcloudrun-gomoku（POST /api/me/checkin）+ 画布弹窗 */
 app.CHECKIN_DAILY_POINTS = 10;
