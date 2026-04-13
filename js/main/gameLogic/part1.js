@@ -1990,12 +1990,16 @@ app.hasPuzzleFriendHumanGuest = function() {
 };
 
 /**
- * 点击棋盘旁「对手」头像时：人机对局或残局好友房旁观侧对人机，应提示无对手天梯，勿拉 opponent-rating。
- * - 玩家：对面为人机（isMyOnlineOpponentBot）
- * - 房主旁观：尚无真人入座，或已有好友但未拉到其头像（仍显示守关/占位）时
+ * 点击棋盘旁「对手」头像时：是否拦截 opponent-rating。
+ * - 联机房间（有 onlineRoomId）内对面为人机：服务端有人机账号，允许 GET /api/rooms/opponent-rating（含随机匹配超时接入的机器人）。
+ * - 无联机房间时对面仍判为人机：勿拉接口（本地人机等）。
+ * - 残局好友房旁观侧对人机：尚无真人入座或占位未就绪时提示，勿拉 opponent-rating。
  */
 app.shouldToastNoOpponentLadderForOnlineOppAvatar = function() {
   if (typeof app.isMyOnlineOpponentBot === 'function' && app.isMyOnlineOpponentBot()) {
+    if (app.onlineRoomId) {
+      return false;
+    }
     return true;
   }
   if (
