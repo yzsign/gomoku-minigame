@@ -624,16 +624,6 @@ module.exports = function registerFriendListHome(app, deps) {
     );
   }
 
-  function hitEmptyAdd(L, panelX, x, y) {
-    var cx = panelX + L.w * 0.5;
-    var cy = L.listTop + L.listH * 0.55;
-    var bw = app.rpx(200);
-    var bh = app.rpx(44);
-    return (
-      Math.abs(x - cx) <= bw * 0.5 && Math.abs(y - cy) <= bh * 0.5
-    );
-  }
-
   app.onHomeFriendListTouchStart = function (x, y, e) {
     app.ensureHomeFriendListPersistedStateOnce();
     if (app._flAnimMode === 'out') {
@@ -684,10 +674,6 @@ module.exports = function registerFriendListHome(app, deps) {
         }
         return true;
       }
-    }
-
-    if (rows.length === 0 && hitEmptyAdd(L, panelX, x, y)) {
-      return true;
     }
 
     if (insidePanel && y >= L.listTop && y <= L.listTop + L.listH) {
@@ -937,14 +923,11 @@ module.exports = function registerFriendListHome(app, deps) {
           break;
         }
       }
-      var onEmptyAddKb =
-        rowsKb.length === 0 && hitEmptyAdd(L, panelX, x, y);
       if (
         !onSearchKb &&
         !onAllKb &&
         !onOnlKb &&
-        !onRowKb &&
-        !onEmptyAddKb
+        !onRowKb
       ) {
         app.dismissFriendListSearchKeyboard();
         if (typeof app.draw === 'function') {
@@ -984,15 +967,6 @@ module.exports = function registerFriendListHome(app, deps) {
     }
 
     var rows = getFilteredFriends();
-    if (rows.length === 0 && hitEmptyAdd(L, panelX, x, y)) {
-      if (typeof wx.showToast === 'function') {
-        wx.showToast({
-          title: '请在对局中打开对手战绩添加好友',
-          icon: 'none'
-        });
-      }
-      return true;
-    }
 
     if (!moved && app._friendListRowTapIdx >= 0) {
       var idx = app._friendListRowTapIdx;
@@ -1125,6 +1099,7 @@ module.exports = function registerFriendListHome(app, deps) {
 
     var searchY = L.y0 + L.headerH + app.rpx(8);
     var searchBoxH = L.searchH - app.rpx(12);
+    var searchTextCy = searchY + searchBoxH * 0.5;
     var s0 = FL && FL.searchBg0 ? FL.searchBg0 : 'rgba(245, 234, 223, 0.95)';
     var s1 = FL && FL.searchBg1 ? FL.searchBg1 : 'rgba(255, 252, 248, 0.98)';
     var searchGrad = app.ctx.createLinearGradient(
@@ -1151,6 +1126,7 @@ module.exports = function registerFriendListHome(app, deps) {
     app.ctx.font =
       app.rpx(24) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
     app.ctx.textAlign = 'left';
+    app.ctx.textBaseline = 'middle';
     if (q) {
       app.ctx.fillStyle = FL && FL.searchText ? FL.searchText : colTitle;
       var qDraw = q;
@@ -1168,14 +1144,14 @@ module.exports = function registerFriendListHome(app, deps) {
       app.ctx.fillText(
         qDraw,
         app.snapPx(panelX + app.rpx(24)),
-        app.snapPx(searchY + (L.searchH - app.rpx(12)) * 0.55)
+        app.snapPx(searchTextCy)
       );
     } else {
       app.ctx.fillStyle = FL && FL.searchPlaceholder ? FL.searchPlaceholder : '#999999';
       app.ctx.fillText(
         '搜索好友昵称',
         app.snapPx(panelX + app.rpx(24)),
-        app.snapPx(searchY + (L.searchH - app.rpx(12)) * 0.55)
+        app.snapPx(searchTextCy)
       );
     }
 
@@ -1256,38 +1232,7 @@ module.exports = function registerFriendListHome(app, deps) {
       app.ctx.fillText(
         '暂无好友',
         app.snapPx(panelX + L.w * 0.5),
-        app.snapPx(L.listTop + L.listH * 0.38)
-      );
-      app.ctx.save();
-      app.ctx.globalAlpha = pa;
-      app.ctx.fillStyle = FL && FL.emptyBtnFill ? FL.emptyBtnFill : '#F5EADF';
-      app.roundRect(
-        panelX + L.w * 0.5 - app.rpx(100),
-        L.listTop + L.listH * 0.48,
-        app.rpx(200),
-        app.rpx(44),
-        app.rpx(22)
-      );
-      app.ctx.fill();
-      app.ctx.strokeStyle =
-        FL && FL.emptyBtnStroke ? FL.emptyBtnStroke : 'rgba(93,64,55,0.35)';
-      app.ctx.lineWidth = app.rpx(1);
-      app.roundRect(
-        panelX + L.w * 0.5 - app.rpx(100),
-        L.listTop + L.listH * 0.48,
-        app.rpx(200),
-        app.rpx(44),
-        app.rpx(22)
-      );
-      app.ctx.stroke();
-      app.ctx.restore();
-      app.ctx.fillStyle = FL && FL.emptyBtnText ? FL.emptyBtnText : colTitle;
-      app.ctx.font =
-        '500 ' + app.rpx(26) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
-      app.ctx.fillText(
-        '去添加',
-        app.snapPx(panelX + L.w * 0.5),
-        app.snapPx(L.listTop + L.listH * 0.48 + app.rpx(22))
+        app.snapPx(L.listTop + L.listH * 0.5)
       );
     } else {
       var ri;

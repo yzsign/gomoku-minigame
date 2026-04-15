@@ -3180,7 +3180,7 @@ app.applyAiMoveResult = function(mv) {
 }
 
 app.openingOptionsForAi = function() {
-  return { rif: true };
+  return { rif: true, dailyDifficulty: 3 };
 }
 
 /**
@@ -4879,6 +4879,9 @@ if (typeof wx.onShow === 'function') {
      * 先完成静默登录再拉资源/分享进房，避免与首帧 silentLogin 并发导致进房失败（请先完成登录）。
      */
     authApi.silentLogin(null, function () {
+      if (typeof app.restartUserSocialSocket === 'function') {
+        app.restartUserSocialSocket();
+      }
       app.loadHomeUiAssets();
       setTimeout(function () {
         app.tryFetchMyProfileAvatar();
@@ -4923,6 +4926,9 @@ if (typeof wx.onNetworkStatusChange === 'function') {
     ) {
       app.clearOnlineReconnectTimer();
       app.scheduleOnlineReconnect(true);
+    }
+    if (res.isConnected && typeof app.restartUserSocialSocket === 'function') {
+      app.restartUserSocialSocket();
     }
   });
 }
