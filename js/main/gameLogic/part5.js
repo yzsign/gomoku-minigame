@@ -2203,7 +2203,7 @@ app.maskChatTextSensitive = function(raw) {
     if (!merged.length || iv[0] > merged[merged.length - 1][1]) {
       merged.push([iv[0], iv[1]]);
     } else {
-      merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1]]);
+      merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1]);
     }
   }
   var out = '';
@@ -2401,6 +2401,9 @@ app._fallbackOnlineChatModal = function() {
 app.promptOnlineChatText = function() {
   if (typeof wx === 'undefined') {
     return;
+  }
+  if (typeof app.dismissFriendListSearchKeyboard === 'function') {
+    app.dismissFriendListSearchKeyboard();
   }
   if (typeof app.dismissOnlineChatKeyboard === 'function') {
     app.dismissOnlineChatKeyboard();
@@ -3930,6 +3933,15 @@ wx.onTouchStart(function (e) {
     return;
   }
 
+  if (app.screen === 'home') {
+    if (
+      typeof app.onHomeFriendListTouchStart === 'function' &&
+      app.onHomeFriendListTouchStart(x, y, e)
+    ) {
+      return;
+    }
+  }
+
   if (app.screen === 'home' && app.homeDrawerOpen) {
     if (app.hitHomeDrawerBackdrop(x, y)) {
       app.homeDrawerOpen = false;
@@ -3963,6 +3975,7 @@ wx.onTouchStart(function (e) {
     !app.ratingCardVisible &&
     !app.checkinModalVisible &&
     !app.pieceSkinModalVisible &&
+    !app.homeFriendListOpen &&
     typeof app.hitHomeDrawerTab === 'function' &&
     app.hitHomeDrawerTab(x, y)
   ) {
@@ -4369,6 +4382,13 @@ if (typeof wx.onTouchMove === 'function') {
       return;
     }
     if (
+      app.screen === 'home' &&
+      typeof app.onHomeFriendListTouchMove === 'function' &&
+      app.onHomeFriendListTouchMove(e)
+    ) {
+      return;
+    }
+    if (
       app.screen === 'replay' ||
       (app.screen === 'history' && app.historyReplayOverlayVisible)
     ) {
@@ -4448,6 +4468,14 @@ if (typeof wx.onTouchEnd === 'function') {
           t.identifier
         );
       }
+      return;
+    }
+    if (
+      app.screen === 'home' &&
+      t &&
+      typeof app.onHomeFriendListTouchEnd === 'function' &&
+      app.onHomeFriendListTouchEnd(t.clientX, t.clientY)
+    ) {
       return;
     }
     if (app.ratingCardAddFriendArmed && e.changedTouches) {
@@ -4597,6 +4625,7 @@ if (typeof wx.onTouchEnd === 'function') {
         !app.ratingCardVisible &&
         !app.checkinModalVisible &&
         !app.pieceSkinModalVisible &&
+        !app.homeFriendListOpen &&
         typeof app.hitHomeDrawerTab === 'function' &&
         app.hitHomeDrawerTab(t.clientX, t.clientY)
       ) {
@@ -4616,7 +4645,8 @@ if (typeof wx.onTouchEnd === 'function') {
         app.homeDrawerOpen ||
         app.ratingCardVisible ||
         app.checkinModalVisible ||
-        app.pieceSkinModalVisible
+        app.pieceSkinModalVisible ||
+        app.homeFriendListOpen
       ) {
         app.homePressedButton = null;
         app.draw();
@@ -4656,7 +4686,8 @@ if (typeof wx.onTouchEnd === 'function') {
         app.homeDrawerOpen ||
         app.ratingCardVisible ||
         app.checkinModalVisible ||
-        app.pieceSkinModalVisible
+        app.pieceSkinModalVisible ||
+        app.homeFriendListOpen
       ) {
         app.homePressedDockCol = null;
         app.draw();
@@ -4758,7 +4789,8 @@ if (typeof wx.onTouchEnd === 'function') {
       app.homeDrawerOpen ||
       app.ratingCardVisible ||
       app.checkinModalVisible ||
-      app.pieceSkinModalVisible
+      app.pieceSkinModalVisible ||
+      app.homeFriendListOpen
     ) {
       return;
     }

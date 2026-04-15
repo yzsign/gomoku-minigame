@@ -1626,6 +1626,95 @@ app.historyPageUiFromTheme = function(th) {
   };
 };
 
+/**
+ * 首页好友列表（侧边 FAB + 面板）：与杂货铺 / 战绩同源色板，跟随后台界面风格。
+ */
+app.friendListHomeUiFromTheme = function(th) {
+  th = th || app.getUiTheme();
+  var id = th.id;
+  var S =
+    typeof app.shopModalUiFromTheme === 'function'
+      ? app.shopModalUiFromTheme(th)
+      : null;
+  var H =
+    typeof app.historyPageUiFromTheme === 'function'
+      ? app.historyPageUiFromTheme(th)
+      : null;
+  var panelArr =
+    S && S.panel && S.panel.length >= 3
+      ? S.panel
+      : th.bg && th.bg.length >= 3
+        ? th.bg
+        : ['#fff9f4', '#fff6ed', '#fffcf9'];
+  var winTitle =
+    th.result && th.result.win && th.result.win.title
+      ? th.result.win.title
+      : '#2e7d32';
+  return {
+    backdropAlpha: id === 'ink' ? 0.52 : id === 'mint' ? 0.4 : 0.45,
+    panelG0: panelArr[0],
+    panelG1: panelArr[1],
+    panelG2: panelArr[2],
+    panelShadow:
+      id === 'mint'
+        ? 'rgba(12, 52, 64, 0.2)'
+        : id === 'ink'
+          ? 'rgba(20, 16, 12, 0.26)'
+          : 'rgba(60, 48, 38, 0.18)',
+    title: th.title,
+    collapse: th.muted,
+    searchBg0: S ? S.cardG0 : '#fffefb',
+    searchBg1: S ? S.cardG1 : '#f5f1eb',
+    sep: S ? S.sep : 'rgba(92, 75, 58, 0.12)',
+    tabActive: th.title,
+    tabInactive: th.muted,
+    searchText: th.title,
+    searchPlaceholder: th.muted,
+    loading: th.muted,
+    emptyTitle: th.title,
+    rowEven: H ? H.parchmentTint : 'rgba(253, 245, 230, 0.32)',
+    rowOdd:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.65)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 248, 0.55)'
+          : 'rgba(255, 252, 246, 0.58)',
+    avatarFallback:
+      id === 'mint'
+        ? '#c8e0dc'
+        : id === 'ink'
+          ? '#ddd4cc'
+          : '#e0d6c8',
+    avatarChar: th.title,
+    name: th.title,
+    online: winTitle,
+    offline: th.muted,
+    actionHint: th.muted,
+    emptyBtnFill: th.btnGhostFill,
+    emptyBtnStroke: S ? S.stroke : 'rgba(92, 75, 58, 0.35)',
+    emptyBtnText: th.btnPrimary,
+    fabFill: th.btnGhostFill,
+    fabStroke: th.btnGhostStroke,
+    fabIcon: th.title,
+    fabShadow: th.btnShadow,
+    /** 侧栏大面板渐变/子块填充：相对实色 1.0 的不透明度（越大越实） */
+    panelBodyAlpha: 0.92,
+    /** 好友列表 Tab：仅选中态药丸（无底层轨道） */
+    tabPill:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.94)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 248, 0.96)'
+          : 'rgba(255, 253, 248, 0.97)',
+    tabPillStroke:
+      id === 'mint'
+        ? 'rgba(46, 117, 134, 0.22)'
+        : id === 'ink'
+          ? 'rgba(74, 66, 58, 0.24)'
+          : 'rgba(200, 188, 172, 0.45)'
+  };
+};
+
 app.SIZE = gomoku.SIZE;
 app.BLACK = gomoku.BLACK;
 app.WHITE = gomoku.WHITE;

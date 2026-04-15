@@ -436,6 +436,43 @@ function socialFriendRequestRejectOptions(requestId) {
   };
 }
 
+/** GET /api/social/friends — 好友列表（最多 50，含在线状态） */
+function socialFriendsListOptions() {
+  return {
+    url: GOMOKU_API_BASE + '/api/social/friends',
+    method: 'GET',
+    header: withAuthHeaders({})
+  };
+}
+
+/** DELETE /api/social/friends/{peerUserId} */
+function socialFriendDeleteOptions(peerUserId) {
+  return {
+    url:
+      GOMOKU_API_BASE +
+      '/api/social/friends/' +
+      encodeURIComponent(String(peerUserId)),
+    method: 'DELETE',
+    header: withAuthHeaders({})
+  };
+}
+
+/** PATCH /api/social/friends/{peerUserId}/remark body: { remark } */
+function socialFriendRemarkOptions(peerUserId, remark) {
+  return {
+    url:
+      GOMOKU_API_BASE +
+      '/api/social/friends/' +
+      encodeURIComponent(String(peerUserId)) +
+      '/remark',
+    method: 'PATCH',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: { remark: remark != null ? String(remark) : '' }
+  };
+}
+
 /** 用户级 WS：/ws/user?sessionToken=（与 /ws/gomoku 并列） */
 function userWebSocketUrl(sessionToken) {
   var token = sessionToken ? String(sessionToken) : '';
@@ -475,6 +512,9 @@ module.exports = {
   socialFriendRequestCreateOptions: socialFriendRequestCreateOptions,
   socialFriendRequestAcceptOptions: socialFriendRequestAcceptOptions,
   socialFriendRequestRejectOptions: socialFriendRequestRejectOptions,
+  socialFriendsListOptions: socialFriendsListOptions,
+  socialFriendDeleteOptions: socialFriendDeleteOptions,
+  socialFriendRemarkOptions: socialFriendRemarkOptions,
   userWebSocketUrl: userWebSocketUrl,
   wsUrlFromApiBase: wsUrlFromApiBase
 };

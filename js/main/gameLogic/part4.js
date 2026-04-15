@@ -676,12 +676,18 @@ app.drawHomeContentBelowPieceSkinModal = function() {
   app.drawThemeChrome(th);
   app.drawRatingCardOverlay(th);
   app.drawCheckinModalOverlay(th);
+  if (typeof app.drawHomeFriendListFab === 'function') {
+    app.drawHomeFriendListFab(th);
+  }
 }
 
 app.drawHome = function() {
   var th = app.getCurrentTheme();
   app.drawHomeContentBelowPieceSkinModal();
   app.drawPieceSkinModalOverlay(th);
+  if (typeof app.drawHomeFriendListOverlay === 'function') {
+    app.drawHomeFriendListOverlay(th);
+  }
 };
 
 app.drawMatching = function() {
