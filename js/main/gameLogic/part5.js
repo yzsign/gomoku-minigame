@@ -2113,6 +2113,234 @@ app.closeOnlineChatPanel = function() {
   }
 };
 
+/**
+ * 与后端 ChatSensitiveInfoFilter#maskSensitiveInfo 一致：敏感片段替换为等长 *（先 NFKC）。
+ */
+app.maskChatTextSensitive = function(raw) {
+  var userText = raw != null ? String(raw) : '';
+  if (!userText) {
+    return userText;
+  }
+  var n = typeof userText.normalize === 'function' ? userText.normalize('NFKC') : userText;
+  var intervals = [];
+  function add(s, e) {
+    if (s < e) {
+      intervals.push([s, e]);
+    }
+  }
+  var re;
+  var m;
+  re = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
+  while ((m = re.exec(n)) !== null) {
+    add(m.index, m.index + m[0].length);
+  }
+  re = /https?:\/\/\S*/gi;
+  while ((m = re.exec(n)) !== null) {
+    add(m.index, m.index + m[0].length);
+  }
+  re = /\bwww\.\S+/gi;
+  while ((m = re.exec(n)) !== null) {
+    add(m.index, m.index + m[0].length);
+  }
+  re = /\d{17}[\dXx]/g;
+  while ((m = re.exec(n)) !== null) {
+    add(m.index, m.index + m[0].length);
+  }
+  var starts = [];
+  var p = 0;
+  for (p = 0; p < n.length; ) {
+    var cp0 = n.codePointAt(p);
+    var w0 = cp0 > 0xffff ? 2 : 1;
+    if (cp0 >= 48 && cp0 <= 57) {
+      starts.push(p);
+    }
+    p += w0;
+  }
+  var dj;
+  for (dj = 0; dj + 11 <= starts.length; dj++) {
+    var chunk = '';
+    var kk;
+    for (kk = 0; kk < 11; kk++) {
+      chunk += String.fromCodePoint(n.codePointAt(starts[dj + kk]));
+    }
+    if (/^1[3-9]\d{9}$/.test(chunk)) {
+      var a = starts[dj];
+      var lastS = starts[dj + 10];
+      var lc = n.codePointAt(lastS);
+      var end = lastS + (lc > 0xffff ? 2 : 1);
+      add(a, end);
+    }
+  }
+  var qi = 0;
+  while (qi < n.length) {
+    var cp1 = n.codePointAt(qi);
+    var w1 = cp1 > 0xffff ? 2 : 1;
+    if (cp1 >= 48 && cp1 <= 57) {
+      var rs = qi;
+      qi += w1;
+      while (qi < n.length) {
+        var cpr = n.codePointAt(qi);
+        var wr = cpr > 0xffff ? 2 : 1;
+        if (cpr < 48 || cpr > 57) {
+          break;
+        }
+        qi += wr;
+      }
+      if (qi - rs >= 8) {
+        add(rs, qi);
+      }
+    } else {
+      qi += w1;
+    }
+  }
+  intervals.sort(function(a, b) {
+    return a[0] - b[0];
+  });
+  var merged = [];
+  var mi;
+  for (mi = 0; mi < intervals.length; mi++) {
+    var iv = intervals[mi];
+    if (!merged.length || iv[0] > merged[merged.length - 1][1]) {
+      merged.push([iv[0], iv[1]]);
+    } else {
+      merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1]]);
+    }
+  }
+  var out = '';
+  var cur = 0;
+  for (mi = 0; mi < merged.length; mi++) {
+    var seg = merged[mi];
+    out += n.slice(cur, seg[0]);
+    var z;
+    for (z = seg[0]; z < seg[1]; z++) {
+      out += '*';
+    }
+    cur = seg[1];
+  }
+  out += n.slice(cur);
+  return out;
+};
+
+/** 词表与顺序须与 ChatAbusiveTextFilter 一致；NFKC 后长词优先，再英文词边界 */
+app.CHAT_ABUSIVE_CN_TERMS = [
+  'motherfucker',
+  '操你妈',
+  '草泥马',
+  '王八蛋',
+  '狗杂种',
+  '狗日的',
+  '狗东西',
+  '杀了你',
+  '砍死你',
+  '下三滥',
+  '神经病',
+  '去死吧',
+  '去死吗',
+  '滚远点',
+  '滚一边',
+  '尼玛的',
+  '尼玛逼',
+  '你麻痹',
+  '泥马逼',
+  '贱骨头',
+  '臭婊子',
+  '臭傻逼',
+  '死全家',
+  '没爹妈',
+  '没娘养',
+  '杂种东西',
+  '畜生东西',
+  '人渣废物',
+  '白痴废物',
+  '弱智儿童',
+  '脑残玩意',
+  '沙雕玩意',
+  '蠢货玩意',
+  '贱人玩意',
+  '烂人一个',
+  '骚货玩意',
+  '尼玛',
+  '泥马',
+  '傻逼',
+  '傻b',
+  '傻B',
+  '萨比',
+  '沙比',
+  '蠢猪',
+  '白痴',
+  '弱智',
+  '智障',
+  '脑残',
+  '沙雕',
+  '废物',
+  '人渣',
+  '贱人',
+  '贱货',
+  '烂人',
+  '婊子',
+  '骚货',
+  '贱婢',
+  '混蛋',
+  '混账',
+  '畜生',
+  '杂种',
+  '下贱',
+  '滚蛋',
+  '滚开',
+  '滚粗',
+  '滚远',
+  'nmsl',
+  'NMSL',
+  'cnm',
+  'CNM',
+  'sb东西',
+  '艹你',
+  '日你'
+];
+
+app.maskChatTextAbusive = function(raw) {
+  var userText = raw != null ? String(raw) : '';
+  if (!userText) {
+    return userText;
+  }
+  var n = typeof userText.normalize === 'function' ? userText.normalize('NFKC') : userText;
+  var rawList = app.CHAT_ABUSIVE_CN_TERMS || [];
+  var terms = rawList.slice().sort(function(a, b) {
+    return b.length - a.length;
+  });
+  var out = n;
+  var ti;
+  for (ti = 0; ti < terms.length; ti++) {
+    var term = terms[ti];
+    if (!term || out.indexOf(term) === -1) {
+      continue;
+    }
+    var stars = '';
+    var si;
+    for (si = 0; si < term.length; si++) {
+      stars += '*';
+    }
+    out = out.split(term).join(stars);
+  }
+  var enAbuse =
+    /\b(fuck|fucks|fucked|fucking|fucker|shit|shits|bitch|bitches|bitching|asshole|bastard|bastards|slut|sluts|whore|whores|damn|piss|motherfuckers?|dickhead|dickheads|douche|douchebag|crap|bullshit|assholes?|cunts?|pricks?|wanker)\b/gi;
+  out = out.replace(enAbuse, function(m) {
+    var r = '';
+    var ri;
+    for (ri = 0; ri < m.length; ri++) {
+      r += '*';
+    }
+    return r;
+  });
+  return out;
+};
+
+/** 敏感信息打码后再做辱骂打码，与 RoomChatService 顺序一致 */
+app.moderateChatOutgoingText = function(s) {
+  var x = typeof app.maskChatTextSensitive === 'function' ? app.maskChatTextSensitive(s) : s;
+  return typeof app.maskChatTextAbusive === 'function' ? app.maskChatTextAbusive(x) : x;
+};
+
 app.trySendOnlineChatText = function(raw) {
   var t = String(raw != null ? raw : '').trim();
   if (!t) {
@@ -2131,8 +2359,14 @@ app.trySendOnlineChatText = function(raw) {
     }
     return false;
   }
+  var toSend =
+    typeof app.moderateChatOutgoingText === 'function'
+      ? app.moderateChatOutgoingText(t)
+      : typeof app.maskChatTextSensitive === 'function'
+        ? app.maskChatTextSensitive(t)
+        : t;
   if (typeof app.sendOnlineChat === 'function') {
-    app.sendOnlineChat('TEXT', t);
+    app.sendOnlineChat('TEXT', toSend);
   }
   if (typeof app.closeOnlineChatPanel === 'function') {
     app.closeOnlineChatPanel();
