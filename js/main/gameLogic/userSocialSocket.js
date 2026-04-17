@@ -144,6 +144,47 @@ module.exports = function registerUserSocialSocket(app, deps) {
     }
     if (data.type === 'FRIENDSHIP_UPDATED') {
       handleFriendshipUpdated(data.payload);
+      return;
+    }
+    if (data.type === 'FRIEND_DM_INCOMING') {
+      handleFriendDmIncoming(data.payload);
+    }
+  }
+
+  function handleFriendDmIncoming(payload) {
+    if (!payload) {
+      return;
+    }
+    var fromId = payload.fromUserId;
+    var nick =
+      typeof payload.fromNickname === 'string' && payload.fromNickname.trim()
+        ? payload.fromNickname.trim()
+        : '好友';
+    var raw = payload.text != null ? String(payload.text) : '';
+    var sentAt =
+      typeof payload.sentAt === 'number' && !isNaN(payload.sentAt)
+        ? payload.sentAt
+        : Date.now();
+    if (typeof app.appendFriendChatIncomingMessage === 'function') {
+      app.appendFriendChatIncomingMessage(fromId, nick, raw, sentAt);
+    }
+    var viewingSame =
+      app.homeFriendChatPeer &&
+      app.homeFriendChatPeer.peerUserId != null &&
+      String(app.homeFriendChatPeer.peerUserId) === String(fromId);
+    if (viewingSame) {
+      return;
+    }
+    var preview = raw.length > 120 ? raw.slice(0, 120) + '…' : raw;
+    if (typeof wx.showModal === 'function') {
+      wx.showModal({
+        title: '好友消息',
+        content: nick + '：' + preview,
+        showCancel: false,
+        confirmText: '知道了'
+      });
+    } else if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: nick + '发来消息', icon: 'none' });
     }
   }
 

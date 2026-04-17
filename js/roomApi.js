@@ -473,6 +473,21 @@ function socialFriendRemarkOptions(peerUserId, remark) {
   };
 }
 
+/** POST /api/social/friend-messages body: { peerUserId, text } — 好友私聊（用户 WS 推送） */
+function socialFriendSendMessageOptions(peerUserId, text) {
+  return {
+    url: GOMOKU_API_BASE + '/api/social/friend-messages',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: {
+      peerUserId: peerUserId != null ? Number(peerUserId) : 0,
+      text: text != null ? String(text) : ''
+    }
+  };
+}
+
 /** 用户级 WS：/ws/user?sessionToken=（与 /ws/gomoku 并列） */
 function userWebSocketUrl(sessionToken) {
   var token = sessionToken ? String(sessionToken) : '';
@@ -515,6 +530,7 @@ module.exports = {
   socialFriendsListOptions: socialFriendsListOptions,
   socialFriendDeleteOptions: socialFriendDeleteOptions,
   socialFriendRemarkOptions: socialFriendRemarkOptions,
+  socialFriendSendMessageOptions: socialFriendSendMessageOptions,
   userWebSocketUrl: userWebSocketUrl,
   wsUrlFromApiBase: wsUrlFromApiBase
 };
