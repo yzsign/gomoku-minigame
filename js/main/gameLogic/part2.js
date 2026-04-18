@@ -2421,34 +2421,61 @@ app.syncMeRatingIfAuthed = function(onDone) {
   if (typeof onDone !== 'function') {
     return;
   }
-  if (!authApi.getSessionToken()) {
-    onDone();
-    return;
+  var hasToken = !!authApi.getSessionToken();
+  var left = hasToken ? 2 : 1;
+  function step() {
+    left -= 1;
+    if (left <= 0) {
+      onDone();
+    }
+  }
+  if (hasToken) {
+    wx.request(
+      Object.assign(roomApi.meRatingOptions(), {
+        success: function (res) {
+          if (res.statusCode === 200 && res.data) {
+            var d = res.data;
+            if (d && typeof d === 'string') {
+              try {
+                d = JSON.parse(d);
+              } catch (eParse) {
+                d = null;
+              }
+            }
+            if (d) {
+              app.syncCheckinStateFromServerPayload(d);
+              app.applyMyGenderFromRatingPayload(d);
+              if (typeof d.eloScore === 'number' && !isNaN(d.eloScore)) {
+                app.homeRatingEloCache = d.eloScore;
+              }
+            }
+          }
+        },
+        complete: function () {
+          step();
+        }
+      })
+    );
   }
   wx.request(
-    Object.assign(roomApi.meRatingOptions(), {
+    Object.assign(roomApi.meShopCatalogOptions(), {
       success: function (res) {
         if (res.statusCode === 200 && res.data) {
           var d = res.data;
           if (d && typeof d === 'string') {
             try {
               d = JSON.parse(d);
-            } catch (eParse) {
+            } catch (eCat) {
               d = null;
             }
           }
-          if (d) {
-            app.syncCheckinStateFromServerPayload(d);
-            app.applyMyGenderFromRatingPayload(d);
-            if (typeof d.eloScore === 'number' && !isNaN(d.eloScore)) {
-              app.homeRatingEloCache = d.eloScore;
-            }
+          if (d && typeof themes.applyShopCatalogFromServerPayload === 'function') {
+            themes.applyShopCatalogFromServerPayload(d);
           }
         }
-        onDone();
       },
-      fail: function () {
-        onDone();
+      complete: function () {
+        step();
       }
     })
   );

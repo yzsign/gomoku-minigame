@@ -376,8 +376,11 @@ var SHOP_CATEGORY_PIECE_SKIN = 'piece_skin';
 var SHOP_CATEGORY_THEME = 'theme';
 var SHOP_CATEGORY_CONSUMABLE = 'consumable';
 
-/** 杂货铺短剑：与后端 ConsumableService.DAGGER_REDEEM_COST_ACTIVITY_POINTS 一致 */
+/** 杂货铺短剑：无 GET /api/me/shop/catalog 时的兜底，与后端 ShopPricingService legacy 一致 */
 var CONSUMABLE_DAGGER_COST_POINTS = 2;
+
+/** GET /api/me/shop/catalog 同步的 itemCode → 当前积分价（ACTIVITY_POINTS）；未拉取时用行内 fallback 常量 */
+var shopCatalogPointsByItemCode = {};
 
 var consumableDaggerCountServerCache = 0;
 
@@ -461,6 +464,53 @@ function setPieceSkinUnlockedIdsFromServer(ids) {
 
 function isPieceSkinUnlockedOnServer(skinId) {
   return !!(skinId && pieceSkinUnlockedIdSet[skinId]);
+}
+
+/**
+ * 将 GET /api/me/shop/catalog 的 body 写入内存价表（覆盖式）。
+ * @param {{ items?: Array<{ itemCode?: string, priceAmount?: number, currency?: string }> }} d
+ */
+function applyShopCatalogFromServerPayload(d) {
+  if (!d || typeof d !== 'object') {
+    return;
+  }
+  var items = d.items;
+  if (!Array.isArray(items)) {
+    return;
+  }
+  var map = {};
+  var i;
+  for (i = 0; i < items.length; i++) {
+    var it = items[i];
+    if (!it || typeof it !== 'object') {
+      continue;
+    }
+    var code = it.itemCode;
+    if (!code) {
+      continue;
+    }
+    var cur = it.currency;
+    if (cur && cur !== 'ACTIVITY_POINTS') {
+      continue;
+    }
+    var amt = it.priceAmount;
+    if (typeof amt !== 'number' || isNaN(amt) || amt < 0) {
+      continue;
+    }
+    map[String(code)] = Math.max(0, Math.floor(amt));
+  }
+  shopCatalogPointsByItemCode = map;
+}
+
+function pointsCostFromShopCatalog(itemCode, fallback) {
+  if (
+    itemCode &&
+    shopCatalogPointsByItemCode &&
+    Object.prototype.hasOwnProperty.call(shopCatalogPointsByItemCode, itemCode)
+  ) {
+    return shopCatalogPointsByItemCode[itemCode];
+  }
+  return fallback;
 }
 
 /** 首页循环切换：檀木 + 已解锁的棋盘风格 */
@@ -793,6 +843,7 @@ var themesExports = {
   setConsumableDaggerCountFromServer: setConsumableDaggerCountFromServer,
   getConsumableDaggerCount: getConsumableDaggerCount,
   getShopCategory: getShopCategory,
+  applyShopCatalogFromServerPayload: applyShopCatalogFromServerPayload,
   getPieceSkinCatalog: getPieceSkinCatalog,
   getPieceSkinCatalogLabel: getPieceSkinCatalogLabel,
   isTuanMoeUnlocked: isTuanMoeUnlocked,

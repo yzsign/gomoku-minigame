@@ -125,6 +125,15 @@ function meRatingOptions() {
   };
 }
 
+/** GET /api/me/shop/catalog：杂货铺商品与有效积分价（可不登录；有 token 则带上） */
+function meShopCatalogOptions() {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/shop/catalog',
+    method: 'GET',
+    header: withAuthHeaders({})
+  };
+}
+
 /** POST /api/me/pve-game：人机终局写入 games（body: JSON，需 Authorization） */
 function mePveGameOptions(bodyObj) {
   return {
@@ -528,6 +537,7 @@ module.exports = {
   roomApiRandomMatchFallbackOptions: roomApiRandomMatchFallbackOptions,
   roomApiRandomBotProfileOptions: roomApiRandomBotProfileOptions,
   meRatingOptions: meRatingOptions,
+  meShopCatalogOptions: meShopCatalogOptions,
   mePveGameOptions: mePveGameOptions,
   meAdminStatusOptions: meAdminStatusOptions,
   adminDailyPuzzleCreateOptions: adminDailyPuzzleCreateOptions,
