@@ -4,6 +4,9 @@
  * 檀木 classic 与青瓷 mint、水墨 ink 各有一套色板，互不覆盖。
  */
 var STORAGE_KEY = 'gomoku_theme_id';
+/** 棋盘技能槽（短剑）：与后端 user_equipped_cosmetics.BOARD_SKILL item_id dagger 一致 */
+var BOARD_SKILL_STORAGE_KEY = 'gomoku_board_skill_id_v1';
+var LEGACY_DAGGER_SKILL_EQUIPPED_KEY = 'gomoku_dagger_skill_equipped_v1';
 
 var THEMES = {
   mint: {
@@ -394,6 +397,67 @@ function setConsumableDaggerCountFromServer(n) {
 
 function getConsumableDaggerCount() {
   return consumableDaggerCountServerCache;
+}
+
+function loadSavedBoardSkillId() {
+  try {
+    if (typeof wx !== 'undefined' && wx.getStorageSync) {
+      var raw = wx.getStorageSync(BOARD_SKILL_STORAGE_KEY);
+      if (raw === 'dagger') {
+        return 'dagger';
+      }
+      if (raw === 'off') {
+        return null;
+      }
+      var leg = wx.getStorageSync(LEGACY_DAGGER_SKILL_EQUIPPED_KEY);
+      if (leg === true || leg === 'true' || leg === 1 || leg === '1') {
+        try {
+          wx.setStorageSync(BOARD_SKILL_STORAGE_KEY, 'dagger');
+        } catch (eM) {}
+        try {
+          wx.removeStorageSync(LEGACY_DAGGER_SKILL_EQUIPPED_KEY);
+        } catch (eR) {}
+        return 'dagger';
+      }
+      if (leg === false || leg === 'false' || leg === 0 || leg === '0') {
+        try {
+          wx.setStorageSync(BOARD_SKILL_STORAGE_KEY, 'off');
+        } catch (eM2) {}
+        try {
+          wx.removeStorageSync(LEGACY_DAGGER_SKILL_EQUIPPED_KEY);
+        } catch (eR2) {}
+        return null;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+var boardSkillIdCache = loadSavedBoardSkillId();
+
+function getBoardSkillId() {
+  return boardSkillIdCache;
+}
+
+function isDaggerSkillEquipped() {
+  return boardSkillIdCache === 'dagger';
+}
+
+function saveBoardSkillId(id) {
+  boardSkillIdCache = id === 'dagger' ? 'dagger' : null;
+  try {
+    if (typeof wx !== 'undefined' && wx.setStorageSync) {
+      wx.setStorageSync(
+        BOARD_SKILL_STORAGE_KEY,
+        boardSkillIdCache === 'dagger' ? 'dagger' : 'off'
+      );
+    }
+  } catch (e) {}
+}
+
+/** 登录后 GET /api/me/rating 的 daggerSkillEquipped：与装备槽 BOARD_SKILL 一致 */
+function applyDaggerSkillEquippedFromServer(equipped) {
+  saveBoardSkillId(equipped ? 'dagger' : null);
 }
 
 /** 杂货铺列表（双列 4 行，每页 8 格） */
@@ -842,6 +906,10 @@ var themesExports = {
   CONSUMABLE_DAGGER_COST_POINTS: CONSUMABLE_DAGGER_COST_POINTS,
   setConsumableDaggerCountFromServer: setConsumableDaggerCountFromServer,
   getConsumableDaggerCount: getConsumableDaggerCount,
+  getBoardSkillId: getBoardSkillId,
+  isDaggerSkillEquipped: isDaggerSkillEquipped,
+  saveBoardSkillId: saveBoardSkillId,
+  applyDaggerSkillEquippedFromServer: applyDaggerSkillEquippedFromServer,
   getShopCategory: getShopCategory,
   applyShopCatalogFromServerPayload: applyShopCatalogFromServerPayload,
   getPieceSkinCatalog: getPieceSkinCatalog,

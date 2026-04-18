@@ -2545,8 +2545,24 @@ app.applyPieceSkinWear = function() {
     return;
   }
   if (themes.getShopCategory(entry) === themes.SHOP_CATEGORY_CONSUMABLE) {
+    if (entry.consumableKind !== 'dagger' && entry.id !== 'dagger_skill') {
+      return;
+    }
+    if (typeof themes.saveBoardSkillId !== 'function') {
+      return;
+    }
+    var wasEq =
+      typeof themes.isDaggerSkillEquipped === 'function' &&
+      themes.isDaggerSkillEquipped();
+    themes.saveBoardSkillId(wasEq ? null : 'dagger');
+    if (typeof app.syncBoardSkillToServerIfAuthed === 'function') {
+      app.syncBoardSkillToServerIfAuthed(!wasEq);
+    }
     if (typeof wx.showToast === 'function') {
-      wx.showToast({ title: '对局内按 Q 使用短剑', icon: 'none' });
+      wx.showToast({
+        title: wasEq ? '已卸下短剑' : '已装备短剑，对局内按 Q 使用',
+        icon: 'none'
+      });
     }
     app.draw();
     return;

@@ -163,22 +163,64 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     }
     app.ctx.restore();
   } else if (entry && themes.getShopCategory(entry) === themes.SHOP_CATEGORY_CONSUMABLE) {
+    /** 与主题卡一致：左侧方形预览 + 右侧竖排品名，避免大图与底栏文案抢垂直空间 */
+    var daggerPvW = app.rpx(118);
+    var daggerPvH = app.rpx(118);
+    var gapDaggerText = app.rpx(6) + 4;
+    var daggerTitlePx = app.rpx(31);
+    themeShopLabelFont =
+      '600 ' +
+      daggerTitlePx +
+      'px "Songti SC","STSong","SimSun","PingFang SC","Microsoft YaHei",serif';
+    app.ctx.font = themeShopLabelFont;
+    var daggerLabLayout = themes.getPieceSkinCatalogLabel(entry);
+    var maxDaggerChW = 0;
+    var dci;
+    for (dci = 0; dci < daggerLabLayout.length; dci++) {
+      var dchW = app.ctx.measureText(daggerLabLayout.charAt(dci)).width;
+      if (dchW > maxDaggerChW) {
+        maxDaggerChW = dchW;
+      }
+    }
+    if (!(maxDaggerChW > 0)) {
+      maxDaggerChW = daggerTitlePx;
+    }
+    var clusterWDagger = daggerPvW + gapDaggerText + maxDaggerChW;
+    var contentLeftDagger = midX - clusterWDagger / 2;
+    cyPv = cyRegion;
+    var daggerImgCx = contentLeftDagger + daggerPvW / 2;
+    nameY = cyRegion;
+    catalogLabelVertical = true;
+    themeLabelCx = contentLeftDagger + daggerPvW + gapDaggerText + maxDaggerChW / 2;
+    catalogLabelAlign = 'center';
+
     var dImg = app.shopConsumableDaggerPreviewImg;
+    var brDag = app.rpx(10);
+    var clipXD = contentLeftDagger;
+    var clipYD = cyRegion - daggerPvH / 2;
+    app.ctx.save();
+    app.ctx.beginPath();
+    app.roundRect(clipXD, clipYD, daggerPvW, daggerPvH, brDag);
+    app.ctx.clip();
     if (dImg && dImg.width && dImg.height) {
-      var maxSz = pr * 4.6;
-      var scD = Math.min(maxSz / dImg.width, maxSz / dImg.height);
+      var scD = Math.min(daggerPvW / dImg.width, daggerPvH / dImg.height);
       var dw = dImg.width * scD;
       var dh = dImg.height * scD;
       app.ctx.drawImage(
         dImg,
-        app.snapPx(midX - dw * 0.5),
+        app.snapPx(daggerImgCx - dw * 0.5),
         app.snapPx(cyPv - dh * 0.5),
         dw,
         dh
       );
     } else {
-      app.drawPieceSkinModalPlaceholderPieces(midX, cyPv, pr);
+      app.drawPieceSkinModalPlaceholderPieces(daggerImgCx, cyPv, app.rpx(16));
     }
+    app.ctx.restore();
+    app.ctx.strokeStyle = U ? U.stroke : 'rgba(200, 188, 172, 0.65)';
+    app.ctx.lineWidth = app.rpx(1.1);
+    app.roundRect(clipXD, clipYD, daggerPvW, daggerPvH, brDag);
+    app.ctx.stroke();
   } else {
   /** 未解锁也绘制真实棋子预览（贴图/渐变），便于「看见皮肤长什么样」；锁定态略降低不透明度 */
   var skinMeta = entry.id && themes.PIECE_SKINS[entry.id];
@@ -334,7 +376,13 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     themes.getShopCategory(entry) === themes.SHOP_CATEGORY_PIECE_SKIN &&
     app.pieceSkinId &&
     entry.id === app.pieceSkinId;
-  if (equippedTheme || equippedPiece) {
+  var equippedDagger =
+    entry &&
+    themes.getShopCategory(entry) === themes.SHOP_CATEGORY_CONSUMABLE &&
+    (entry.consumableKind === 'dagger' || entry.id === 'dagger_skill') &&
+    typeof themes.isDaggerSkillEquipped === 'function' &&
+    themes.isDaggerSkillEquipped();
+  if (equippedTheme || equippedPiece || equippedDagger) {
     var tagText = '已装备';
     var tagFontPx = app.rpx(20);
     app.ctx.font = '600 ' + tagFontPx + 'px ' + app.PIECE_SKIN_FONT_UI;
@@ -2402,7 +2450,9 @@ app.trySendOnlineChatText = function(raw) {
         ? app.maskChatTextSensitive(t)
         : t;
   if (typeof app.sendOnlineChat === 'function') {
-    app.sendOnlineChat('TEXT', toSend);
+    if (!app.sendOnlineChat('TEXT', toSend)) {
+      return false;
+    }
   }
   if (typeof app.closeOnlineChatPanel === 'function') {
     app.closeOnlineChatPanel();
@@ -3527,8 +3577,10 @@ app.tryPlace = function(r, c) {
       app.socketTask.send({
         data: JSON.stringify({ type: 'MOVE', r: r, c: c })
       });
-    } else {
-      wx.showToast({ title: '网络未连接', icon: 'none' });
+    } else if (typeof app.notifyOnlineSocketSendBlocked === 'function') {
+      app.notifyOnlineSocketSendBlocked();
+    } else if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '对战暂时无法同步', icon: 'none' });
     }
     return;
   }
@@ -3941,7 +3993,8 @@ wx.onTouchStart(function (e) {
         entPick &&
         entPick.rowStatus === 'points' &&
         entPick.costPoints &&
-        entPick.costPoints > 0
+        entPick.costPoints > 0 &&
+        themes.getShopCategory(entPick) !== themes.SHOP_CATEGORY_CONSUMABLE
       ) {
         app.draw();
         return;
@@ -4084,7 +4137,9 @@ wx.onTouchStart(function (e) {
       }
       if (chHit.kind === 'phrase_pick' && chHit.phrase) {
         if (typeof app.sendOnlineChat === 'function') {
-          app.sendOnlineChat('QUICK', chHit.phrase);
+          if (!app.sendOnlineChat('QUICK', chHit.phrase)) {
+            return;
+          }
         }
         if (typeof app.closeOnlineChatPanel === 'function') {
           app.closeOnlineChatPanel();
@@ -4094,7 +4149,9 @@ wx.onTouchStart(function (e) {
       if (chHit.kind === 'emoji_pick' && chHit.emoji) {
         app.onlineChatEmojiOpen = false;
         if (typeof app.sendOnlineChat === 'function') {
-          app.sendOnlineChat('EMOJI', chHit.emoji);
+          if (!app.sendOnlineChat('EMOJI', chHit.emoji)) {
+            return;
+          }
         }
         if (typeof app.closeOnlineChatPanel === 'function') {
           app.closeOnlineChatPanel();

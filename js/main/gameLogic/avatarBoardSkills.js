@@ -54,9 +54,8 @@ module.exports = function avatarBoardSkills(app, deps) {
   var authApi = deps.authApi;
   app._avatarBoardSkillCdUntilByKey = Object.create(null);
 
-  app.clearPerGameConsumableSkillState = function() {
-    app.avatarDaggerUsedThisGame = false;
-  };
+  /** 新局时调用；短剑仅受服务端库存约束，无单局次数上限 */
+  app.clearPerGameConsumableSkillState = function() {};
 
   /** @type {Object.<string, AvatarBoardSkillDef>} */
   var BY_PANEL_KEY = {
@@ -322,7 +321,7 @@ module.exports = function avatarBoardSkills(app, deps) {
 
   /**
    * 己方点击某格时触发；仅处理带 fly 的技能，且目前仅 side===my 飞向对手。
-   * 短剑（border）须先 POST /api/me/consumables/use 成功后再播放；单局限一次。
+   * 短剑（border）须先 POST /api/me/consumables/use 成功后再播放；次数仅受库存限制。
    */
   app.startAvatarBoardSkillFromPanelKey = function(side, panelKey) {
     if (side !== 'my' || app.gameOver) {
@@ -405,12 +404,6 @@ module.exports = function avatarBoardSkills(app, deps) {
     }
 
     if (panelKey === 'border') {
-      if (app.avatarDaggerUsedThisGame) {
-        if (typeof wx !== 'undefined' && wx.showToast) {
-          wx.showToast({ title: '本局已使用过短剑', icon: 'none' });
-        }
-        return false;
-      }
       var tok = authApi && authApi.getSessionToken && authApi.getSessionToken();
       if (!tok) {
         if (typeof wx !== 'undefined' && wx.showToast) {
@@ -451,7 +444,6 @@ module.exports = function avatarBoardSkills(app, deps) {
               if (typeof app.mergeConsumableMutationToCache === 'function') {
                 app.mergeConsumableMutationToCache(d);
               }
-              app.avatarDaggerUsedThisGame = true;
               executeAvatarBoardSkillFly();
               return;
             }

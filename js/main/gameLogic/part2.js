@@ -2364,6 +2364,11 @@ app.syncCheckinStateFromServerPayload = function(d) {
       themes.setConsumableDaggerCountFromServer(d.consumableDaggerCount);
     }
   }
+  if (typeof d.daggerSkillEquipped === 'boolean') {
+    if (typeof themes.applyDaggerSkillEquippedFromServer === 'function') {
+      themes.applyDaggerSkillEquippedFromServer(d.daggerSkillEquipped);
+    }
+  }
 }
 
 /**
@@ -2504,6 +2509,22 @@ app.syncThemeToServerIfAuthed = function(themeId) {
       success: function () {},
       fail: function () {}
     })
+  );
+}
+
+/** 短剑技能槽写入 user_equipped_cosmetics.BOARD_SKILL（失败不影响本地已保存） */
+app.syncBoardSkillToServerIfAuthed = function(equipped) {
+  if (!authApi.getSessionToken()) {
+    return;
+  }
+  wx.request(
+    Object.assign(
+      roomApi.meEquipOptions('BOARD_SKILL', equipped ? 'dagger' : 'off'),
+      {
+        success: function () {},
+        fail: function () {}
+      }
+    )
   );
 }
 
@@ -2713,13 +2734,11 @@ app.applyOnlineChatIncoming = function(data) {
 };
 
 app.sendOnlineChat = function(kind, text) {
-  if (
-    !app.socketTask ||
-    typeof app.socketTask.send !== 'function' ||
-    !app.onlineWsConnected ||
-    app.onlineSpectatorMode
-  ) {
-    return;
+  if (!app.onlineSocketCanSend || !app.onlineSocketCanSend()) {
+    if (typeof app.notifyOnlineSocketSendBlocked === 'function') {
+      app.notifyOnlineSocketSendBlocked();
+    }
+    return false;
   }
   try {
     app.socketTask.send({
@@ -2729,18 +2748,21 @@ app.sendOnlineChat = function(kind, text) {
         text: text != null ? String(text) : ''
       })
     });
-  } catch (e1) {}
+    return true;
+  } catch (e1) {
+    return false;
+  }
 };
 
 /** 联机同步头像旁技能表现（短剑等）：服务端仅转发给对手 */
 app.sendOnlineAvatarSkill = function(panelKey) {
-  if (
-    !app.socketTask ||
-    typeof app.socketTask.send !== 'function' ||
-    !app.onlineWsConnected ||
-    app.onlineSpectatorMode ||
-    app.gameOver
-  ) {
+  if (app.gameOver) {
+    return;
+  }
+  if (!app.onlineSocketCanSend || !app.onlineSocketCanSend()) {
+    if (typeof app.notifyOnlineSocketSendBlocked === 'function') {
+      app.notifyOnlineSocketSendBlocked();
+    }
     return;
   }
   try {

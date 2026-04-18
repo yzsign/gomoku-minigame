@@ -462,15 +462,15 @@ app.computeBoardNameLabelLayout = function(layout) {
   var oppCx = r.bx + r.bw - pad - avR;
   var oppCy = r.by - outerGap - fontPx * 0.5;
   /**
-   * 仅 Q（短剑 / border）；W/E/R 不展示。短剑服务端库存为 0 时不展示技能条。
+   * 仅 Q（短剑 / border）；W/E/R 不展示。短剑在杂货铺「装备」后展示技能条，库存为 0 仍展示（角标为 0）。
    * 对手条：标题/局时区下方（topBar 起算）；己方条：底栏「离开/悔棋…」上方（红框区域）。
    */
-  var daggerInv =
-    themes && typeof themes.getConsumableDaggerCount === 'function'
-      ? themes.getConsumableDaggerCount()
-      : 0;
-  var propKeys = daggerInv > 0 ? ['border'] : [];
-  var propSlots = daggerInv > 0 ? ['Q'] : [];
+  var daggerEquipped =
+    themes &&
+    typeof themes.isDaggerSkillEquipped === 'function' &&
+    themes.isDaggerSkillEquipped();
+  var propKeys = daggerEquipped ? ['border'] : [];
+  var propSlots = daggerEquipped ? ['Q'] : [];
   var numItems = propKeys.length;
   var itemGap = app.rpx(10);
   var itemSize = Math.max(44, Math.min(70, Math.round(avR * 0.92)));
@@ -998,6 +998,38 @@ app.drawBoardAvatarPropPanels = function(ctx, layout, th) {
           );
           ctx.restore();
         }
+      }
+      if (
+        side === 'my' &&
+        itm.key === 'border' &&
+        themes &&
+        typeof themes.getConsumableDaggerCount === 'function'
+      ) {
+        var invRaw = themes.getConsumableDaggerCount();
+        var invN = Math.max(0, Math.floor(Number(invRaw) || 0));
+        var invLabel = invN > 99 ? '99+' : String(invN);
+        var bPadR = Math.max(3, app.rpx(4));
+        var bPadB = Math.max(2, app.rpx(3));
+        var bFs = Math.max(10, Math.round(Math.min(itm.w, itm.h) * 0.24));
+        ctx.save();
+        ctx.font =
+          '700 ' +
+          bFs +
+          'px "PingFang SC","Microsoft YaHei",sans-serif';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'alphabetic';
+        var tx = itm.left + itm.w - bPadR;
+        var ty = itm.top + itm.h - bPadB;
+        var ink = th.id === 'ink';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = Math.max(2, app.rpx(2.2));
+        ctx.strokeStyle = ink
+          ? 'rgba(255, 252, 248, 0.92)'
+          : 'rgba(255, 252, 248, 0.94)';
+        ctx.strokeText(invLabel, tx, ty);
+        ctx.fillStyle = pc.btnLetter || th.title || '#2c2620';
+        ctx.fillText(invLabel, tx, ty);
+        ctx.restore();
       }
     }
     ctx.restore();
@@ -3232,6 +3264,39 @@ app.onlineSocketCanSend = function() {
   );
 }
 
+/**
+ * 联机操作（落子/悔棋/和棋/认输等）在无法经 WS 发送时提示。
+ * 多数情况并非手机「无网络」，而是对战通道未就绪或断线重连中；避免一律提示「网络未连接」。
+ */
+app.notifyOnlineSocketSendBlocked = function() {
+  if (typeof wx === 'undefined' || typeof wx.showToast !== 'function') {
+    return;
+  }
+  if (app.onlineSpectatorMode) {
+    wx.showToast({ title: '旁观模式无法操作', icon: 'none' });
+    return;
+  }
+  if (typeof app.shouldAutoReconnectOnline === 'function' && app.shouldAutoReconnectOnline()) {
+    if (
+      app.socketTask &&
+      typeof app.socketTask.send === 'function' &&
+      !app.onlineWsConnected
+    ) {
+      wx.showToast({ title: '正在连接服务器…', icon: 'none' });
+      return;
+    }
+    if (typeof app.clearOnlineReconnectTimer === 'function') {
+      app.clearOnlineReconnectTimer();
+    }
+    if (typeof app.scheduleOnlineReconnect === 'function') {
+      app.scheduleOnlineReconnect(true);
+    }
+    wx.showToast({ title: '对战连接中断，正在重连…', icon: 'none' });
+    return;
+  }
+  wx.showToast({ title: '无法连接到对战服务器', icon: 'none' });
+};
+
 app.copyBoardFromServer = function(b) {
   var out = [];
   var i;
@@ -3664,7 +3729,7 @@ app.execLocalUndoCancel = function() {
 
 app.sendOnlineUndo = function(msgType) {
   if (!app.onlineSocketCanSend()) {
-    wx.showToast({ title: '网络未连接', icon: 'none' });
+    app.notifyOnlineSocketSendBlocked();
     return;
   }
   if (msgType === 'UNDO_REQUEST') {
@@ -3767,7 +3832,7 @@ app.execLocalDrawCancel = function() {
 
 app.sendOnlineDraw = function(msgType) {
   if (!app.onlineSocketCanSend()) {
-    wx.showToast({ title: '网络未连接', icon: 'none' });
+    app.notifyOnlineSocketSendBlocked();
     return;
   }
   if (msgType === 'DRAW_REQUEST') {
@@ -3808,7 +3873,7 @@ app.handleDrawButtonTap = function() {
   }
   if (app.isPvpOnline) {
     if (!app.onlineSocketCanSend()) {
-      wx.showToast({ title: '网络未连接', icon: 'none' });
+      app.notifyOnlineSocketSendBlocked();
       return;
     }
     if (app.onlineDrawPending) {
@@ -3924,7 +3989,7 @@ app.handleResignTap = function() {
   }
   if (app.isPvpOnline) {
     if (!app.onlineSocketCanSend()) {
-      wx.showToast({ title: '网络未连接', icon: 'none' });
+      app.notifyOnlineSocketSendBlocked();
       return;
     }
     app.socketTask.send({

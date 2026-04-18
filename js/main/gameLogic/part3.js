@@ -1598,7 +1598,9 @@ app.notifyCannotOnlineRematchOpponentLeft = function() {
  */
 app.sendOnlineRematchRequest = function() {
   if (!app.onlineSocketCanSend()) {
-    if (typeof wx.showToast === 'function') {
+    if (typeof app.notifyOnlineSocketSendBlocked === 'function') {
+      app.notifyOnlineSocketSendBlocked();
+    } else if (typeof wx.showToast === 'function') {
       wx.showToast({ title: '未连接，请稍后重试', icon: 'none' });
     }
     return;
@@ -1626,6 +1628,9 @@ app.sendOnlineRematchRequest = function() {
 
 app.sendOnlineRematchAccept = function() {
   if (!app.onlineSocketCanSend()) {
+    if (typeof app.notifyOnlineSocketSendBlocked === 'function') {
+      app.notifyOnlineSocketSendBlocked();
+    }
     return;
   }
   app.socketTask.send({
@@ -1635,6 +1640,9 @@ app.sendOnlineRematchAccept = function() {
 
 app.sendOnlineRematchDecline = function() {
   if (!app.onlineSocketCanSend()) {
+    if (typeof app.notifyOnlineSocketSendBlocked === 'function') {
+      app.notifyOnlineSocketSendBlocked();
+    }
     return;
   }
   app.socketTask.send({
