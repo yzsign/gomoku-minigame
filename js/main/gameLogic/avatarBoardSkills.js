@@ -25,6 +25,7 @@ function smoothstep01(t) {
  * @property {string} panelKey 与 computeBoardNameLabelLayout 一致（border/Q、love/W）
  * @property {string} [iconSrc] 槽内小图标；无则显示字母
  * @property {number} [imageAngleOffsetRad] 贴图「剑尖/朝前」相对飞行向量的旋转修正（与飞行共用）
+ * @property {boolean} [screenUprightIcon] 为 true 时槽内与飞行中不随轨迹旋转，保持 PNG 原始朝向（仅刺入可叠加 wobble）
  * @property {object} [fly] 仅己方点按触发、飞向对手时有效
  * @property {number} fly.sizeMul
  * @property {number} [fly.baseWidthRpx=88]
@@ -94,6 +95,8 @@ module.exports = function avatarBoardSkills(app, deps) {
       id: 'love',
       panelKey: 'love',
       iconSrc: 'images/skill/w-love.png',
+      /** 爱心与资源图一致：不沿飞行方向旋转 */
+      screenUprightIcon: true,
       imageAngleOffsetRad: 0,
       fly: {
         sizeMul: 0.52,
@@ -214,6 +217,9 @@ module.exports = function avatarBoardSkills(app, deps) {
   };
 
   app.getAvatarBoardSkillBladeRotationRad = function(layout, skillDef) {
+    if (skillDef && skillDef.screenUprightIcon) {
+      return 0;
+    }
     var off =
       skillDef && skillDef.imageAngleOffsetRad != null
         ? skillDef.imageAngleOffsetRad
@@ -913,7 +919,9 @@ module.exports = function avatarBoardSkills(app, deps) {
 
     var imgOff =
       def.imageAngleOffsetRad != null ? def.imageAngleOffsetRad : (3 * Math.PI) / 4;
-    var bladeRot = Math.atan2(tdy, tdx) + imgOff + wobbleRot;
+    var bladeRot = def.screenUprightIcon
+      ? wobbleRot
+      : Math.atan2(tdy, tdx) + imgOff + wobbleRot;
 
     var mul =
       fly.sizeMul != null ? fly.sizeMul : app.Q_SWORD_FLY_SIZE_MUL != null
