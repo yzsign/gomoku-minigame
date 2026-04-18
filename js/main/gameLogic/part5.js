@@ -194,7 +194,10 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     themeLabelCx = contentLeftDagger + daggerPvW + gapDaggerText + maxDaggerChW / 2;
     catalogLabelAlign = 'center';
 
-    var dImg = app.shopConsumableDaggerPreviewImg;
+    var dImg =
+      entry.consumableKind === 'love' || entry.id === 'love_skill'
+        ? app.shopConsumableLovePreviewImg
+        : app.shopConsumableDaggerPreviewImg;
     var brDag = app.rpx(10);
     var clipXD = contentLeftDagger;
     var clipYD = cyRegion - daggerPvH / 2;
@@ -307,10 +310,20 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     var pointsSlotLeft = rx + cardPad;
     var pointsSlotRight = btnL - gapBeforeBtn;
     var pointsTextCx = (pointsSlotLeft + pointsSlotRight) / 2;
-    var holdCt =
-      entry.kind === 'consumable' && typeof themes.getConsumableDaggerCount === 'function'
-        ? themes.getConsumableDaggerCount()
-        : null;
+    var holdCt = null;
+    if (entry.kind === 'consumable') {
+      if (entry.consumableKind === 'dagger' || entry.id === 'dagger_skill') {
+        holdCt =
+          typeof themes.getConsumableDaggerCount === 'function'
+            ? themes.getConsumableDaggerCount()
+            : null;
+      } else if (entry.consumableKind === 'love' || entry.id === 'love_skill') {
+        holdCt =
+          typeof themes.getConsumableLoveCount === 'function'
+            ? themes.getConsumableLoveCount()
+            : null;
+      }
+    }
     app.ctx.textAlign = 'center';
     app.ctx.textBaseline = 'middle';
     if (holdCt != null) {
@@ -382,7 +395,13 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     (entry.consumableKind === 'dagger' || entry.id === 'dagger_skill') &&
     typeof themes.isDaggerSkillEquipped === 'function' &&
     themes.isDaggerSkillEquipped();
-  if (equippedTheme || equippedPiece || equippedDagger) {
+  var equippedLove =
+    entry &&
+    themes.getShopCategory(entry) === themes.SHOP_CATEGORY_CONSUMABLE &&
+    (entry.consumableKind === 'love' || entry.id === 'love_skill') &&
+    typeof themes.isLoveSkillEquipped === 'function' &&
+    themes.isLoveSkillEquipped();
+  if (equippedTheme || equippedPiece || equippedDagger || equippedLove) {
     var tagText = '已装备';
     var tagFontPx = app.rpx(20);
     app.ctx.font = '600 ' + tagFontPx + 'px ' + app.PIECE_SKIN_FONT_UI;

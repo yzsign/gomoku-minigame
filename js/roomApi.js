@@ -304,7 +304,7 @@ function mePieceSkinSelectOptions(pieceSkinId) {
   };
 }
 
-/** POST /api/me/equip：按种类装备唯一一件（category: PIECE_SKIN | THEME | BOARD_SKILL；短剑卸下 itemId: off） */
+/** POST /api/me/equip：按种类装备唯一一件（BOARD_SKILL / BOARD_SKILL_LOVE 卸下 itemId: off） */
 function meEquipOptions(category, itemId) {
   return {
     url: GOMOKU_API_BASE + '/api/me/equip',

@@ -2364,15 +2364,25 @@ app.syncCheckinStateFromServerPayload = function(d) {
       themes.setConsumableDaggerCountFromServer(d.consumableDaggerCount);
     }
   }
+  if (typeof d.consumableLoveCount === 'number' && !isNaN(d.consumableLoveCount)) {
+    if (typeof themes.setConsumableLoveCountFromServer === 'function') {
+      themes.setConsumableLoveCountFromServer(d.consumableLoveCount);
+    }
+  }
   if (typeof d.daggerSkillEquipped === 'boolean') {
     if (typeof themes.applyDaggerSkillEquippedFromServer === 'function') {
       themes.applyDaggerSkillEquippedFromServer(d.daggerSkillEquipped);
     }
   }
+  if (typeof d.loveSkillEquipped === 'boolean') {
+    if (typeof themes.applyLoveSkillEquippedFromServer === 'function') {
+      themes.applyLoveSkillEquippedFromServer(d.loveSkillEquipped);
+    }
+  }
 }
 
 /**
- * POST /api/me/consumables/redeem|use 成功后合并积分与短剑库存。
+ * POST /api/me/consumables/redeem|use 成功后合并积分与消耗品库存。
  * @param {object} d
  */
 app.mergeConsumableMutationToCache = function(d) {
@@ -2391,6 +2401,13 @@ app.mergeConsumableMutationToCache = function(d) {
     typeof themes.setConsumableDaggerCountFromServer === 'function'
   ) {
     themes.setConsumableDaggerCountFromServer(d.consumableDaggerCount);
+  }
+  if (
+    typeof d.consumableLoveCount === 'number' &&
+    !isNaN(d.consumableLoveCount) &&
+    typeof themes.setConsumableLoveCountFromServer === 'function'
+  ) {
+    themes.setConsumableLoveCountFromServer(d.consumableLoveCount);
   }
 }
 
@@ -2520,6 +2537,22 @@ app.syncBoardSkillToServerIfAuthed = function(equipped) {
   wx.request(
     Object.assign(
       roomApi.meEquipOptions('BOARD_SKILL', equipped ? 'dagger' : 'off'),
+      {
+        success: function () {},
+        fail: function () {}
+      }
+    )
+  );
+}
+
+/** 爱心技能槽写入 user_equipped_cosmetics.BOARD_SKILL_LOVE */
+app.syncBoardSkillLoveToServerIfAuthed = function(equipped) {
+  if (!authApi.getSessionToken()) {
+    return;
+  }
+  wx.request(
+    Object.assign(
+      roomApi.meEquipOptions('BOARD_SKILL_LOVE', equipped ? 'love' : 'off'),
       {
         success: function () {},
         fail: function () {}

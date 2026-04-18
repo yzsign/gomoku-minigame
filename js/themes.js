@@ -4,8 +4,10 @@
  * 檀木 classic 与青瓷 mint、水墨 ink 各有一套色板，互不覆盖。
  */
 var STORAGE_KEY = 'gomoku_theme_id';
-/** 棋盘技能槽（短剑）：与后端 user_equipped_cosmetics.BOARD_SKILL item_id dagger 一致 */
+/** 棋盘技能槽 Q（短剑）：与后端 user_equipped_cosmetics.BOARD_SKILL item_id dagger 一致 */
 var BOARD_SKILL_STORAGE_KEY = 'gomoku_board_skill_id_v1';
+/** 技能槽 W（爱心）：与后端 BOARD_SKILL_LOVE item_id love 一致 */
+var BOARD_SKILL_LOVE_STORAGE_KEY = 'gomoku_board_skill_love_v1';
 var LEGACY_DAGGER_SKILL_EQUIPPED_KEY = 'gomoku_dagger_skill_equipped_v1';
 
 var THEMES = {
@@ -379,13 +381,15 @@ var SHOP_CATEGORY_PIECE_SKIN = 'piece_skin';
 var SHOP_CATEGORY_THEME = 'theme';
 var SHOP_CATEGORY_CONSUMABLE = 'consumable';
 
-/** 杂货铺短剑：无 GET /api/me/shop/catalog 时的兜底，与后端 ShopPricingService legacy 一致 */
+/** 杂货铺短剑 / 爱心：无 GET /api/me/shop/catalog 时的兜底，与后端 ShopPricingService legacy 一致 */
 var CONSUMABLE_DAGGER_COST_POINTS = 2;
+var CONSUMABLE_LOVE_COST_POINTS = 2;
 
 /** GET /api/me/shop/catalog 同步的 itemCode → 当前积分价（ACTIVITY_POINTS）；未拉取时用行内 fallback 常量 */
 var shopCatalogPointsByItemCode = {};
 
 var consumableDaggerCountServerCache = 0;
+var consumableLoveCountServerCache = 0;
 
 function setConsumableDaggerCountFromServer(n) {
   if (typeof n === 'number' && !isNaN(n)) {
@@ -397,6 +401,18 @@ function setConsumableDaggerCountFromServer(n) {
 
 function getConsumableDaggerCount() {
   return consumableDaggerCountServerCache;
+}
+
+function setConsumableLoveCountFromServer(n) {
+  if (typeof n === 'number' && !isNaN(n)) {
+    consumableLoveCountServerCache = Math.max(0, Math.floor(n));
+  } else {
+    consumableLoveCountServerCache = 0;
+  }
+}
+
+function getConsumableLoveCount() {
+  return consumableLoveCountServerCache;
 }
 
 function loadSavedBoardSkillId() {
@@ -435,12 +451,30 @@ function loadSavedBoardSkillId() {
 
 var boardSkillIdCache = loadSavedBoardSkillId();
 
+function loadSavedBoardSkillLoveId() {
+  try {
+    if (typeof wx !== 'undefined' && wx.getStorageSync) {
+      var raw = wx.getStorageSync(BOARD_SKILL_LOVE_STORAGE_KEY);
+      if (raw === 'love') {
+        return 'love';
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+var boardSkillLoveIdCache = loadSavedBoardSkillLoveId();
+
 function getBoardSkillId() {
   return boardSkillIdCache;
 }
 
 function isDaggerSkillEquipped() {
   return boardSkillIdCache === 'dagger';
+}
+
+function isLoveSkillEquipped() {
+  return boardSkillLoveIdCache === 'love';
 }
 
 function saveBoardSkillId(id) {
@@ -455,9 +489,26 @@ function saveBoardSkillId(id) {
   } catch (e) {}
 }
 
+function saveLoveBoardSkillId(id) {
+  boardSkillLoveIdCache = id === 'love' ? 'love' : null;
+  try {
+    if (typeof wx !== 'undefined' && wx.setStorageSync) {
+      wx.setStorageSync(
+        BOARD_SKILL_LOVE_STORAGE_KEY,
+        boardSkillLoveIdCache === 'love' ? 'love' : 'off'
+      );
+    }
+  } catch (e) {}
+}
+
 /** 登录后 GET /api/me/rating 的 daggerSkillEquipped：与装备槽 BOARD_SKILL 一致 */
 function applyDaggerSkillEquippedFromServer(equipped) {
   saveBoardSkillId(equipped ? 'dagger' : null);
+}
+
+/** 登录后 GET /api/me/rating 的 loveSkillEquipped：与装备槽 BOARD_SKILL_LOVE 一致 */
+function applyLoveSkillEquippedFromServer(equipped) {
+  saveLoveBoardSkillId(equipped ? 'love' : null);
 }
 
 /** 杂货铺列表（双列 4 行，每页 8 格） */
@@ -658,6 +709,16 @@ function getPieceSkinCatalog() {
       label: '短剑',
       rowStatus: 'points',
       costPoints: CONSUMABLE_DAGGER_COST_POINTS
+    },
+    {
+      kind: 'consumable',
+      consumableKind: 'love',
+      shopCategory: SHOP_CATEGORY_CONSUMABLE,
+      id: 'love_skill',
+      locked: false,
+      label: '爱心',
+      rowStatus: 'points',
+      costPoints: CONSUMABLE_LOVE_COST_POINTS
     }
   ];
 }
@@ -668,6 +729,9 @@ function getPieceSkinCatalogLabel(entry) {
   }
   if (entry.kind === 'consumable' && entry.id === 'dagger_skill') {
     return '短剑';
+  }
+  if (entry.kind === 'consumable' && entry.id === 'love_skill') {
+    return '爱心';
   }
   if (entry.label) {
     return entry.label;
@@ -904,12 +968,18 @@ var themesExports = {
   SHOP_CATEGORY_THEME: SHOP_CATEGORY_THEME,
   SHOP_CATEGORY_CONSUMABLE: SHOP_CATEGORY_CONSUMABLE,
   CONSUMABLE_DAGGER_COST_POINTS: CONSUMABLE_DAGGER_COST_POINTS,
+  CONSUMABLE_LOVE_COST_POINTS: CONSUMABLE_LOVE_COST_POINTS,
   setConsumableDaggerCountFromServer: setConsumableDaggerCountFromServer,
   getConsumableDaggerCount: getConsumableDaggerCount,
+  setConsumableLoveCountFromServer: setConsumableLoveCountFromServer,
+  getConsumableLoveCount: getConsumableLoveCount,
   getBoardSkillId: getBoardSkillId,
   isDaggerSkillEquipped: isDaggerSkillEquipped,
+  isLoveSkillEquipped: isLoveSkillEquipped,
   saveBoardSkillId: saveBoardSkillId,
+  saveLoveBoardSkillId: saveLoveBoardSkillId,
   applyDaggerSkillEquippedFromServer: applyDaggerSkillEquippedFromServer,
+  applyLoveSkillEquippedFromServer: applyLoveSkillEquippedFromServer,
   getShopCategory: getShopCategory,
   applyShopCatalogFromServerPayload: applyShopCatalogFromServerPayload,
   getPieceSkinCatalog: getPieceSkinCatalog,

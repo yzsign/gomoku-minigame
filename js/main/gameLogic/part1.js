@@ -297,6 +297,22 @@ app.isMyOnlineOpponentBot = function() {
   return false;
 };
 
+/**
+ * 技能栏不展示：仅单机人机对战（首页人机）与每日残局。联机（含对机器人）、同桌不因此隐藏。
+ */
+app.isVersusAiOpponentGame = function() {
+  if (!app.screen || app.screen !== 'game') {
+    return false;
+  }
+  if (app.isDailyPuzzle) {
+    return true;
+  }
+  if (app.isPvpOnline || app.isPvpLocal) {
+    return false;
+  }
+  return true;
+};
+
 app.syncOnlineOpponentProfileForBotSeat = function() {
   if (!app.isPvpOnline) {
     return;
@@ -462,15 +478,34 @@ app.computeBoardNameLabelLayout = function(layout) {
   var oppCx = r.bx + r.bw - pad - avR;
   var oppCy = r.by - outerGap - fontPx * 0.5;
   /**
-   * 仅 Q（短剑 / border）；W/E/R 不展示。短剑在杂货铺「装备」后展示技能条，库存为 0 仍展示（角标为 0）。
+   * Q/W 各自依赖装备：短剑→Q、爱心→W；可只装其一。E/R 不展示。库存为 0 仍展示（角标为 0）。
    * 对手条：标题/局时区下方（topBar 起算）；己方条：底栏「离开/悔棋…」上方（红框区域）。
    */
   var daggerEquipped =
     themes &&
     typeof themes.isDaggerSkillEquipped === 'function' &&
     themes.isDaggerSkillEquipped();
-  var propKeys = daggerEquipped ? ['border'] : [];
-  var propSlots = daggerEquipped ? ['Q'] : [];
+  var loveEquipped =
+    themes &&
+    typeof themes.isLoveSkillEquipped === 'function' &&
+    themes.isLoveSkillEquipped();
+  if (
+    typeof app.isVersusAiOpponentGame === 'function' &&
+    app.isVersusAiOpponentGame()
+  ) {
+    daggerEquipped = false;
+    loveEquipped = false;
+  }
+  var propKeys = [];
+  var propSlots = [];
+  if (daggerEquipped) {
+    propKeys.push('border');
+    propSlots.push('Q');
+  }
+  if (loveEquipped) {
+    propKeys.push('love');
+    propSlots.push('W');
+  }
   var numItems = propKeys.length;
   var itemGap = app.rpx(10);
   var itemSize = Math.max(44, Math.min(70, Math.round(avR * 0.92)));
@@ -861,6 +896,12 @@ app.shouldShowAvatarPropBar = function() {
   ) {
     return false;
   }
+  if (
+    typeof app.isVersusAiOpponentGame === 'function' &&
+    app.isVersusAiOpponentGame()
+  ) {
+    return false;
+  }
   return true;
 };
 
@@ -999,12 +1040,7 @@ app.drawBoardAvatarPropPanels = function(ctx, layout, th) {
           ctx.restore();
         }
       }
-      if (
-        side === 'my' &&
-        itm.key === 'border' &&
-        themes &&
-        typeof themes.getConsumableDaggerCount === 'function'
-      ) {
+      if (side === 'my' && itm.key === 'border' && themes && typeof themes.getConsumableDaggerCount === 'function') {
         var invRaw = themes.getConsumableDaggerCount();
         var invN = Math.max(0, Math.floor(Number(invRaw) || 0));
         var invLabel = invN > 99 ? '99+' : String(invN);
@@ -1029,6 +1065,33 @@ app.drawBoardAvatarPropPanels = function(ctx, layout, th) {
         ctx.strokeText(invLabel, tx, ty);
         ctx.fillStyle = pc.btnLetter || th.title || '#2c2620';
         ctx.fillText(invLabel, tx, ty);
+        ctx.restore();
+      }
+      if (side === 'my' && itm.key === 'love' && themes && typeof themes.getConsumableLoveCount === 'function') {
+        var invLove = themes.getConsumableLoveCount();
+        var invN2 = Math.max(0, Math.floor(Number(invLove) || 0));
+        var invLabel2 = invN2 > 99 ? '99+' : String(invN2);
+        var bPadR2 = Math.max(3, app.rpx(4));
+        var bPadB2 = Math.max(2, app.rpx(3));
+        var bFs2 = Math.max(10, Math.round(Math.min(itm.w, itm.h) * 0.24));
+        ctx.save();
+        ctx.font =
+          '700 ' +
+          bFs2 +
+          'px "PingFang SC","Microsoft YaHei",sans-serif';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'alphabetic';
+        var tx2 = itm.left + itm.w - bPadR2;
+        var ty2 = itm.top + itm.h - bPadB2;
+        var ink2 = th.id === 'ink';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = Math.max(2, app.rpx(2.2));
+        ctx.strokeStyle = ink2
+          ? 'rgba(255, 252, 248, 0.92)'
+          : 'rgba(255, 252, 248, 0.94)';
+        ctx.strokeText(invLabel2, tx2, ty2);
+        ctx.fillStyle = pc.btnLetter || th.title || '#2c2620';
+        ctx.fillText(invLabel2, tx2, ty2);
         ctx.restore();
       }
     }
@@ -1106,6 +1169,9 @@ app.flashAvatarPropKeyPress = function(side, key) {
     return;
   }
   if (!started && side === 'my' && key === 'border' && app._consumableDaggerUseInFlight) {
+    return;
+  }
+  if (!started && side === 'my' && key === 'love' && app._consumableLoveUseInFlight) {
     return;
   }
   var pulseName = side === 'my' ? 'avatarPropPressPulseMy' : 'avatarPropPressPulseOpp';

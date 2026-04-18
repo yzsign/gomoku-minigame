@@ -2071,6 +2071,26 @@ app.ensureShopConsumableDaggerPreview = function() {
   });
 };
 
+app.ensureShopConsumableLovePreview = function() {
+  if (
+    app.shopConsumableLovePreviewImg &&
+    app.shopConsumableLovePreviewImg.width
+  ) {
+    return;
+  }
+  if (typeof app.ensureAvatarBoardSkillImage !== 'function') {
+    return;
+  }
+  app.ensureAvatarBoardSkillImage('images/skill/w-love.png', function(img) {
+    if (img && img.width) {
+      app.shopConsumableLovePreviewImg = img;
+    }
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+  });
+};
+
 app.openPieceSkinModal = function() {
   if (app.pieceSkinModalVisible) {
     return;
@@ -2081,6 +2101,9 @@ app.openPieceSkinModal = function() {
   app.syncMeRatingIfAuthed(function () {
     if (typeof app.ensureShopConsumableDaggerPreview === 'function') {
       app.ensureShopConsumableDaggerPreview();
+    }
+    if (typeof app.ensureShopConsumableLovePreview === 'function') {
+      app.ensureShopConsumableLovePreview();
     }
     app.pieceSkinModalVisible = true;
     app.pieceSkinModalAnim = 0;
@@ -2400,7 +2423,9 @@ app.redeemPieceSkinWithPoints = function() {
     return;
   }
   if (themes.getShopCategory(entry) === themes.SHOP_CATEGORY_CONSUMABLE) {
-    if (entry.consumableKind !== 'dagger' && entry.id !== 'dagger_skill') {
+    var redeemDagger = entry.consumableKind === 'dagger' || entry.id === 'dagger_skill';
+    var redeemLove = entry.consumableKind === 'love' || entry.id === 'love_skill';
+    if (!redeemDagger && !redeemLove) {
       return;
     }
     if (!authApi.getSessionToken()) {
@@ -2413,9 +2438,10 @@ app.redeemPieceSkinWithPoints = function() {
     if (app.pieceSkinRedeemInFlight) {
       return;
     }
+    var redeemKind = redeemDagger ? 'dagger' : 'love';
     app.pieceSkinRedeemInFlight = true;
     wx.request(
-      Object.assign(roomApi.meConsumableRedeemOptions('dagger'), {
+      Object.assign(roomApi.meConsumableRedeemOptions(redeemKind), {
         success: function(res) {
           app.pieceSkinRedeemInFlight = false;
           var d = res.data;
@@ -2437,8 +2463,23 @@ app.redeemPieceSkinWithPoints = function() {
             if (typeof app.mergeConsumableMutationToCache === 'function') {
               app.mergeConsumableMutationToCache(d);
             }
+            if (redeemDagger) {
+              if (typeof themes.saveBoardSkillId === 'function') {
+                themes.saveBoardSkillId('dagger');
+              }
+              if (typeof app.syncBoardSkillToServerIfAuthed === 'function') {
+                app.syncBoardSkillToServerIfAuthed(true);
+              }
+            } else {
+              if (typeof themes.saveLoveBoardSkillId === 'function') {
+                themes.saveLoveBoardSkillId('love');
+              }
+              if (typeof app.syncBoardSkillLoveToServerIfAuthed === 'function') {
+                app.syncBoardSkillLoveToServerIfAuthed(true);
+              }
+            }
             if (typeof wx.showToast === 'function') {
-              wx.showToast({ title: '兑换成功', icon: 'none' });
+              wx.showToast({ title: '兑换成功，已自动装备', icon: 'none' });
             }
             app.draw();
             return;
@@ -2545,26 +2586,48 @@ app.applyPieceSkinWear = function() {
     return;
   }
   if (themes.getShopCategory(entry) === themes.SHOP_CATEGORY_CONSUMABLE) {
-    if (entry.consumableKind !== 'dagger' && entry.id !== 'dagger_skill') {
+    var wearDagger = entry.consumableKind === 'dagger' || entry.id === 'dagger_skill';
+    var wearLove = entry.consumableKind === 'love' || entry.id === 'love_skill';
+    if (wearDagger) {
+      if (typeof themes.saveBoardSkillId !== 'function') {
+        return;
+      }
+      var wasEq =
+        typeof themes.isDaggerSkillEquipped === 'function' &&
+        themes.isDaggerSkillEquipped();
+      themes.saveBoardSkillId(wasEq ? null : 'dagger');
+      if (typeof app.syncBoardSkillToServerIfAuthed === 'function') {
+        app.syncBoardSkillToServerIfAuthed(!wasEq);
+      }
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({
+          title: wasEq ? '已卸下短剑' : '已装备短剑，对局中可使用',
+          icon: 'none'
+        });
+      }
+      app.draw();
       return;
     }
-    if (typeof themes.saveBoardSkillId !== 'function') {
+    if (wearLove) {
+      if (typeof themes.saveLoveBoardSkillId !== 'function') {
+        return;
+      }
+      var wasEqL =
+        typeof themes.isLoveSkillEquipped === 'function' &&
+        themes.isLoveSkillEquipped();
+      themes.saveLoveBoardSkillId(wasEqL ? null : 'love');
+      if (typeof app.syncBoardSkillLoveToServerIfAuthed === 'function') {
+        app.syncBoardSkillLoveToServerIfAuthed(!wasEqL);
+      }
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({
+          title: wasEqL ? '已卸下爱心' : '已装备爱心，对局中可使用',
+          icon: 'none'
+        });
+      }
+      app.draw();
       return;
     }
-    var wasEq =
-      typeof themes.isDaggerSkillEquipped === 'function' &&
-      themes.isDaggerSkillEquipped();
-    themes.saveBoardSkillId(wasEq ? null : 'dagger');
-    if (typeof app.syncBoardSkillToServerIfAuthed === 'function') {
-      app.syncBoardSkillToServerIfAuthed(!wasEq);
-    }
-    if (typeof wx.showToast === 'function') {
-      wx.showToast({
-        title: wasEq ? '已卸下短剑' : '已装备短剑，对局内按 Q 使用',
-        icon: 'none'
-      });
-    }
-    app.draw();
     return;
   }
   if (entry.rowStatus === 'points' && entry.costPoints && entry.costPoints > 0) {

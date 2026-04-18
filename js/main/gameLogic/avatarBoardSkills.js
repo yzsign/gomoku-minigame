@@ -3,7 +3,7 @@
  * 在 gameLogic/index.js 中于 part1 之前 require，由 app 上的方法供绘制与触控调用。
  *
  * 新增技能步骤概要：
- * 1. 在 BY_PANEL_KEY 中增加一项；当前对局条仅展示 border（Q），与 computeBoardNameLabelLayout 一致。
+ * 1. 在 BY_PANEL_KEY 中增加一项；对局条与 computeBoardNameLabelLayout 一致（Q/W 各自依赖装备与库存）。
  * 2. 配置 iconSrc、imageAngleOffsetRad、fly（时长、sizeMul、刺入点 toInsetAlongAvatar 等）、pierce、audio.src。
  * 3. 若与当前「直线飞向对手头像」不同，在 drawAvatarBoardSkillVfx 内按 def.id 或 def.fly.trajectory 分支扩展绘制/插值。
  * 4. 复杂轨迹可把位置计算抽到独立函数并在本文件内引用。
@@ -22,7 +22,7 @@ function smoothstep01(t) {
 /**
  * @typedef {object} AvatarBoardSkillDef
  * @property {string} id 唯一 id
- * @property {string} panelKey 与 computeBoardNameLabelLayout 一致（当前仅 border/Q）
+ * @property {string} panelKey 与 computeBoardNameLabelLayout 一致（border/Q、love/W）
  * @property {string} [iconSrc] 槽内小图标；无则显示字母
  * @property {number} [imageAngleOffsetRad] 贴图「剑尖/朝前」相对飞行向量的旋转修正（与飞行共用）
  * @property {object} [fly] 仅己方点按触发、飞向对手时有效
@@ -88,6 +88,37 @@ module.exports = function avatarBoardSkills(app, deps) {
         scaleInSlot: 0.55
       },
       cooldownMs: 2000
+    },
+    /** W 槽：独立消耗品 kind=love、独立冷却与独立飞行/受击参数 */
+    love: {
+      id: 'love',
+      panelKey: 'love',
+      iconSrc: 'images/skill/w-love.png',
+      imageAngleOffsetRad: 0,
+      fly: {
+        sizeMul: 0.52,
+        baseWidthRpx: 96,
+        durationMs: 520,
+        holdMs: 1650,
+        fromAlongAvatar: { avRMul: 1.05, rpxExtra: 12 },
+        toInsetAlongAvatar: 0.38
+      },
+      pierce: {
+        hitPulseAmplitude: 0.11,
+        shadowBlurRpx: 14,
+        shadowColor: 'rgba(180, 40, 70, 0.38)',
+        embedRpx: 12,
+        impactBurstMs: 340,
+        oppShakeRpx: 4,
+        oppScaleThump: 0.065
+      },
+      audio: {
+        src: null
+      },
+      slotIcon: {
+        scaleInSlot: 0.55
+      },
+      cooldownMs: 2800
     }
   };
 
@@ -248,7 +279,7 @@ module.exports = function avatarBoardSkills(app, deps) {
       return 0;
     }
     var u = by[panelKey];
-    if (u == null) {
+    if (u == null || u === 0) {
       return 0;
     }
     var left = u - Date.now();
@@ -333,7 +364,7 @@ module.exports = function avatarBoardSkills(app, deps) {
     }
     if (def.cooldownMs != null && def.cooldownMs > 0) {
       var untilCd = app._avatarBoardSkillCdUntilByKey[panelKey];
-      if (untilCd != null && Date.now() < untilCd) {
+      if (untilCd != null && untilCd > 0 && Date.now() < untilCd) {
         return false;
       }
     }
@@ -459,6 +490,71 @@ module.exports = function avatarBoardSkills(app, deps) {
           },
           fail: function() {
             app._consumableDaggerUseInFlight = false;
+            if (typeof wx !== 'undefined' && wx.showToast) {
+              wx.showToast({ title: '网络错误', icon: 'none' });
+            }
+          }
+        })
+      );
+      return false;
+    }
+
+    if (panelKey === 'love') {
+      var tokL = authApi && authApi.getSessionToken && authApi.getSessionToken();
+      if (!tokL) {
+        if (typeof wx !== 'undefined' && wx.showToast) {
+          wx.showToast({ title: '请先登录后使用爱心', icon: 'none' });
+        }
+        return false;
+      }
+      var cntL =
+        themes && typeof themes.getConsumableLoveCount === 'function'
+          ? themes.getConsumableLoveCount()
+          : 0;
+      if (cntL < 1) {
+        if (typeof wx !== 'undefined' && wx.showToast) {
+          wx.showToast({ title: '爱心不足，请在杂货铺兑换', icon: 'none' });
+        }
+        return false;
+      }
+      if (app._consumableLoveUseInFlight) {
+        return false;
+      }
+      if (!roomApi || typeof roomApi.meConsumableUseOptions !== 'function') {
+        return false;
+      }
+      app._consumableLoveUseInFlight = true;
+      wx.request(
+        Object.assign(roomApi.meConsumableUseOptions('love'), {
+          success: function(res) {
+            app._consumableLoveUseInFlight = false;
+            var d = res.data;
+            if (d && typeof d === 'string') {
+              try {
+                d = JSON.parse(d);
+              } catch (eParse) {
+                d = null;
+              }
+            }
+            if (res.statusCode === 200 && d) {
+              if (typeof app.mergeConsumableMutationToCache === 'function') {
+                app.mergeConsumableMutationToCache(d);
+              }
+              executeAvatarBoardSkillFly();
+              return;
+            }
+            var msg = '无法使用爱心';
+            if (res.statusCode === 409 && d && d.code === 'NONE_LEFT') {
+              msg = '爱心数量不足';
+            } else if (res.statusCode === 401) {
+              msg = '请先登录';
+            }
+            if (typeof wx !== 'undefined' && wx.showToast) {
+              wx.showToast({ title: msg, icon: 'none' });
+            }
+          },
+          fail: function() {
+            app._consumableLoveUseInFlight = false;
             if (typeof wx !== 'undefined' && wx.showToast) {
               wx.showToast({ title: '网络错误', icon: 'none' });
             }
