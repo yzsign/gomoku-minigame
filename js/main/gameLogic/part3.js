@@ -1507,6 +1507,9 @@ app.pixelToCell = function(clientX, clientY) {
 
 app.resetGame = function() {
   app.lastOpponentMove = null;
+  if (typeof app.clearAvatarPropPressVisual === 'function') {
+    app.clearAvatarPropPressVisual();
+  }
   if (app.isPvpOnline) {
     if (app.gameOver) {
       app.screen = 'game';

@@ -5,10 +5,28 @@ module.exports = function registerFriendListHome(app, deps) {
   var wx = deps.wx;
   var roomApi = deps.roomApi;
   var authApi = deps.authApi;
+  var render = deps.render;
 
   var STORAGE_OPEN = 'gomoku_home_friend_list_open';
   var STORAGE_CACHE = 'gomoku_home_friend_list_cache_v1';
   var STORAGE_FAB_POS = 'gomoku_home_friend_fab_pos_v1';
+  /** 悬浮球半径（逻辑 px），与拖拽/吸附/命中共用 */
+  var HOME_FRIEND_LIST_FAB_R = 22.5;
+  /** 好友列表行高（设计 rpx，原 96 增大 20%） */
+  var HOME_FRIEND_LIST_ROW_DESIGN_RPX = Math.round(96 * 1.2);
+  /** 抠图或 contain 策略变更时递增，使缓存失效 */
+  var FRIEND_FAB_DRAW_REV = 7;
+  /**
+   * contain 边长 = 直径×系数；显著 >1 时图标主体放大，外圈黑边/毛边落在圆外被裁掉。
+   */
+  var FRIEND_FAB_CONTAIN_MUL = 1.48;
+  /** 圆形裁剪相对半径的比例；略 <1 再切掉最外一圈像素，去黑毛边 */
+  var FRIEND_FAB_CLIP_R_MUL = 0.93;
+  /**
+   * 未读呼吸动画对整页 drawHome 的节流（ms）。过低会徒增 CPU；过高动画发涩。
+   */
+  var FRIEND_FAB_UNREAD_PULSE_MIN_DRAW_MS = 33;
+  var friendFabUnreadPulseLastDrawMs = 0;
 
   /** 好友面板 / 默认 FAB 相对原锚点略下移 */
   function homeFriendExtraDown() {
@@ -16,6 +34,8 @@ module.exports = function registerFriendListHome(app, deps) {
   }
 
   app.homeFriendListOpen = false;
+  /** 是否已执行过一次 ensureHomeFriendListPersistedStateOnce */
+  app._friendListPersistRestored = false;
   app.homeFriendFabPressed = false;
   /** 用户拖动后的悬浮按钮中心；未设置时用默认（左侧对齐吉祥物高度） */
   app.homeFriendFabCustomCx = undefined;
@@ -31,6 +51,9 @@ module.exports = function registerFriendListHome(app, deps) {
   app._fabSnapAnim = null;
   app._fabSnapRaf = null;
   app._fabSnapUsesTimeout = false;
+  /** 未读私聊时 FAB 呼吸动画；仅首页且列表收起时跑 rAF */
+  app._friendFabUnreadPulseRaf = null;
+  app._friendFabUnreadPulseUsesTimeout = false;
   app._friendFabInEdgeSnap = false;
   app.friendListRaw = [];
   app.friendListSearchQuery = '';
@@ -46,14 +69,32 @@ module.exports = function registerFriendListHome(app, deps) {
   app.homeFriendChatPeer = null;
   app.friendChatScrollY = 0;
   app.friendChatMessagesByPeer = {};
+  /** 私聊输入草稿（画布白框与键盘 defaultValue 同步；仅点「发送」才 POST） */
+  app.friendChatComposeDraft = '';
+  /** 有未读好友私聊时 FAB 呼吸动画（见 drawHomeFriendListFab） */
+  app._friendDmUnreadPeers = {};
   app._friendChatMsgId = 0;
   app._friendChatScrollTouchId = null;
   app._friendChatScrollLastY = 0;
+  /** 私聊消息区本次手势是否发生过滚动，用于区分「点空白关面板」与滑动列表 */
+  app._friendChatScrollMoved = false;
   app._friendChatNeedScrollBottom = false;
   app._friendChatLayoutTotalH = 0;
   app._friendChatBarDownX = undefined;
   app._friendChatBarDownY = undefined;
+  app._friendChatBarHitKind = null;
+  /** 私聊输入框光标闪烁（键盘打开时 setInterval 驱动 draw） */
+  app._friendChatInpBlinkTimer = null;
+  /** 系统键盘高度（与 window 同逻辑 px）；仅私聊输入使用 */
+  app._friendDmKeyboardHeight = 0;
+  app._friendDmKeyboardHeightListener = null;
+  /** 唤起键盘前一刻的 window 高度，用于区分「窗口已随键盘缩小」与「仅上报 kb 高度」 */
+  app._friendDmLayoutFullH = 0;
   app._friendAvImgs = app._friendAvImgs || {};
+  /** 黑底抠图缓存：与 {@link app.homeFriendFabImg} 引用对应 */
+  app._friendFabKeyCacheImg = null;
+  app._friendFabKeyCacheCanvas = null;
+  app._friendFabKeyCacheRev = -1;
   app._flSlideT = 1;
   app._flAnimRaf = null;
   app._flAnimUsesTimeout = false;
@@ -300,33 +341,27 @@ module.exports = function registerFriendListHome(app, deps) {
       return;
     }
     app._friendListPersistRestored = true;
-    try {
-      if (wx && wx.getStorageSync) {
-        var o = wx.getStorageSync(STORAGE_OPEN);
-        if (o === '1') {
-          app.homeFriendListOpen = true;
-          app._flSlideT = 1;
-          if (!app._friendListRestoredFetched) {
-            app._friendListRestoredFetched = true;
-            app.refreshHomeFriendListFromServer();
-          }
-        }
-      }
-    } catch (e) {}
     var cached = loadCache();
     if (cached && cached.length) {
+      normalizeFriendListRowsInPlace(cached);
       app.friendListRaw = cached;
     }
     var fabPos = loadFabPos();
     if (fabPos) {
-      var sp0 = snapFabHorizontalEdge(fabPos.cx, fabPos.cy, 24);
+      var sp0 = snapFabHorizontalEdge(
+        fabPos.cx,
+        fabPos.cy,
+        HOME_FRIEND_LIST_FAB_R
+      );
       app.homeFriendFabCustomCx = sp0.cx;
       app.homeFriendFabCustomCy = sp0.cy;
     }
+    app.homeFriendListOpen = false;
+    persistOpen();
   };
 
   app.getHomeFriendListFabLayout = function () {
-    var r = 24;
+    var r = HOME_FRIEND_LIST_FAB_R;
     var hl =
       typeof app.getHomeLayout === 'function' ? app.getHomeLayout() : null;
     var safeL =
@@ -385,6 +420,38 @@ module.exports = function registerFriendListHome(app, deps) {
     app.ctx.fill();
   };
 
+  /**
+   * 键盘顶沿 Y（输入条底边应 ≤ 该值 − pad）。见 _friendDmLayoutFullH + syncCanvas。
+   */
+  function friendChatKeyboardTopLineY(kbH) {
+    if (!kbH || kbH <= 0) {
+      return app.H;
+    }
+    var padR =
+      typeof app.friendDmKeyboardTopExtraPadRpx === 'number'
+        ? app.friendDmKeyboardTopExtraPadRpx
+        : 16;
+    var pad = app.rpx(padR);
+    var full = app._friendDmLayoutFullH || app.H;
+    var wh = app.H;
+    if (typeof wx.getWindowInfo === 'function') {
+      try {
+        var wi = wx.getWindowInfo();
+        if (wi && typeof wi.windowHeight === 'number' && wi.windowHeight > 0) {
+          wh = wi.windowHeight;
+        }
+      } catch (eW) {}
+    }
+    var shrunkTh =
+      typeof app.friendDmKeyboardShrinkThresholdRpx === 'number'
+        ? app.rpx(app.friendDmKeyboardShrinkThresholdRpx)
+        : app.rpx(24);
+    if (wh < full - shrunkTh) {
+      return wh - pad;
+    }
+    return full - kbH - pad;
+  }
+
   app.getHomeFriendListPanelLayout = function () {
     var panelW = app.W * (280 / 375);
     var nav =
@@ -414,10 +481,34 @@ module.exports = function registerFriendListHome(app, deps) {
     var listH = Math.max(app.rpx(120), panelH - headerH - searchH);
     var chatInputBarH = app.rpx(112);
     var chatMsgTop = y0 + headerH;
+    var panelBottom = y0 + panelH;
+    var chatInputBarY = panelBottom - chatInputBarH;
     var chatMsgH = Math.max(
       app.rpx(80),
       panelH - headerH - chatInputBarH
     );
+    var chatMsgHNoKb = chatMsgH;
+    var chatMsgLiftPx = 0;
+    if (app.homeFriendChatPeer) {
+      chatMsgHNoKb = Math.max(
+        app.rpx(80),
+        chatInputBarY - chatMsgTop
+      );
+      chatMsgH = chatMsgHNoKb;
+      var kbH = app._friendDmKeyboardHeight || 0;
+      if (kbH > 0) {
+        var keyboardTop = friendChatKeyboardTopLineY(kbH);
+        var yInp0 = chatInputBarY;
+        chatInputBarY = Math.max(
+          chatMsgTop + app.rpx(80),
+          Math.min(yInp0, keyboardTop - chatInputBarH)
+        );
+        chatMsgH = Math.max(app.rpx(80), chatInputBarY - chatMsgTop);
+      }
+      if (chatMsgHNoKb > chatMsgH) {
+        chatMsgLiftPx = chatMsgHNoKb - chatMsgH;
+      }
+    }
     return {
       x0: x0,
       y0: y0,
@@ -427,10 +518,12 @@ module.exports = function registerFriendListHome(app, deps) {
       searchH: searchH,
       listTop: listTop,
       listH: listH,
-      rowH: app.rpx(96),
+      rowH: app.rpx(HOME_FRIEND_LIST_ROW_DESIGN_RPX),
       chatInputBarH: chatInputBarH,
+      chatInputBarY: chatInputBarY,
       chatMsgTop: chatMsgTop,
-      chatMsgH: chatMsgH
+      chatMsgH: chatMsgH,
+      chatMsgLiftPx: chatMsgLiftPx
     };
   };
 
@@ -450,8 +543,8 @@ module.exports = function registerFriendListHome(app, deps) {
       out.push(f);
     }
     out.sort(function (a, b) {
-      var ao = a && a.online ? 1 : 0;
-      var bo = b && b.online ? 1 : 0;
+      var ao = friendRowIsOnline(a) ? 1 : 0;
+      var bo = friendRowIsOnline(b) ? 1 : 0;
       if (ao !== bo) {
         return bo - ao;
       }
@@ -491,7 +584,152 @@ module.exports = function registerFriendListHome(app, deps) {
   }
 
   function getFriendChatKey(peerId) {
-    return 'k' + String(peerId);
+    if (peerId == null || peerId === '') {
+      return 'k';
+    }
+    return 'k' + String(peerId).trim();
+  }
+
+  /**
+   * 在线状态：接口为 boolean online；缓存/序列化可能为 1/0、字符串或 isOnline 字段。
+   */
+  function friendRowIsOnline(fr) {
+    if (!fr) {
+      return false;
+    }
+    var v = fr.online;
+    if (v == null && fr.isOnline != null) {
+      v = fr.isOnline;
+    }
+    if (v === true || v === 1) {
+      return true;
+    }
+    if (typeof v === 'string') {
+      var s = v.replace(/^\s+|\s+$/g, '').toLowerCase();
+      return s === 'true' || s === '1' || s === 'yes';
+    }
+    return false;
+  }
+
+  /** 兼容缓存/旧字段，保证列表行与未读 map、头像缓存共用 peerUserId；并规范 online 为布尔值 */
+  function normalizeFriendListRowsInPlace(list) {
+    if (!list || !list.length) {
+      return;
+    }
+    var i;
+    for (i = 0; i < list.length; i++) {
+      var r = list[i];
+      if (!r) {
+        continue;
+      }
+      if (r.peerUserId == null) {
+        if (r.peer_user_id != null) {
+          r.peerUserId = r.peer_user_id;
+        } else if (r.userId != null) {
+          r.peerUserId = r.userId;
+        }
+      }
+      r.online = friendRowIsOnline(r);
+    }
+  }
+
+  function friendDmHasAnyUnread() {
+    var m = app._friendDmUnreadPeers;
+    if (!m) {
+      return false;
+    }
+    var k;
+    for (k in m) {
+      if (Object.prototype.hasOwnProperty.call(m, k) && m[k]) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function friendDmPeerHasUnread(peerUserId) {
+    if (peerUserId == null || !app._friendDmUnreadPeers) {
+      return false;
+    }
+    return !!app._friendDmUnreadPeers[getFriendChatKey(peerUserId)];
+  }
+
+  function stopFriendFabUnreadPulse() {
+    if (app._friendFabUnreadPulseRaf != null) {
+      try {
+        if (app._friendFabUnreadPulseUsesTimeout) {
+          clearTimeout(app._friendFabUnreadPulseRaf);
+        } else if (typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(app._friendFabUnreadPulseRaf);
+        }
+      } catch (eStop) {}
+    }
+    app._friendFabUnreadPulseRaf = null;
+    app._friendFabUnreadPulseUsesTimeout = false;
+    friendFabUnreadPulseLastDrawMs = 0;
+  }
+
+  function ensureFriendFabUnreadPulse() {
+    if (
+      !friendDmHasAnyUnread() ||
+      app.homeFriendListOpen ||
+      app.screen !== 'home'
+    ) {
+      stopFriendFabUnreadPulse();
+      return;
+    }
+    if (app._friendFabUnreadPulseRaf != null) {
+      return;
+    }
+    function tick() {
+      if (
+        !friendDmHasAnyUnread() ||
+        app.homeFriendListOpen ||
+        app.screen !== 'home'
+      ) {
+        stopFriendFabUnreadPulse();
+        return;
+      }
+      var nowPulse = Date.now();
+      if (
+        typeof app.draw === 'function' &&
+        nowPulse - friendFabUnreadPulseLastDrawMs >=
+          FRIEND_FAB_UNREAD_PULSE_MIN_DRAW_MS
+      ) {
+        friendFabUnreadPulseLastDrawMs = nowPulse;
+        app.draw();
+      }
+      if (
+        !friendDmHasAnyUnread() ||
+        app.homeFriendListOpen ||
+        app.screen !== 'home'
+      ) {
+        stopFriendFabUnreadPulse();
+        return;
+      }
+      // 勿在 draw() 前把 _friendFabUnreadPulseRaf 置空：draw → drawHomeFriendListFab →
+      // ensureFriendFabUnreadPulse 会误以为未调度而再注册 RAF，与此处尾调度叠成指数级回调导致卡死。
+      if (typeof requestAnimationFrame === 'function') {
+        app._friendFabUnreadPulseUsesTimeout = false;
+        app._friendFabUnreadPulseRaf = requestAnimationFrame(tick);
+      } else {
+        app._friendFabUnreadPulseUsesTimeout = true;
+        app._friendFabUnreadPulseRaf = setTimeout(
+          tick,
+          FRIEND_FAB_UNREAD_PULSE_MIN_DRAW_MS
+        );
+      }
+    }
+    if (typeof requestAnimationFrame === 'function') {
+      app._friendFabUnreadPulseUsesTimeout = false;
+      app._friendFabUnreadPulseRaf = requestAnimationFrame(tick);
+    } else {
+      app._friendFabUnreadPulseUsesTimeout = true;
+      app._friendFabUnreadPulseRaf = setTimeout(
+        tick,
+        FRIEND_FAB_UNREAD_PULSE_MIN_DRAW_MS
+      );
+    }
   }
 
   function appendFriendChatMessage(peerUserId, text, isSelf, ts) {
@@ -524,8 +762,16 @@ module.exports = function registerFriendListHome(app, deps) {
       false,
       typeof sentAt === 'number' ? sentAt : Date.now()
     );
+    var viewingSame =
+      app.homeFriendChatPeer &&
+      app.homeFriendChatPeer.peerUserId != null &&
+      String(app.homeFriendChatPeer.peerUserId) === String(fromUserId);
+    if (!viewingSame) {
+      app._friendDmUnreadPeers[getFriendChatKey(fromUserId)] = true;
+    }
     if (typeof app.draw === 'function') {
       app.draw();
+      friendFabUnreadPulseLastDrawMs = Date.now();
     }
   };
 
@@ -533,6 +779,8 @@ module.exports = function registerFriendListHome(app, deps) {
     app.homeFriendChatPeer = null;
     app.friendChatScrollY = 0;
     app._friendChatScrollTouchId = null;
+    app.friendChatComposeDraft = '';
+    app._friendChatBarHitKind = null;
     app.dismissFriendDmKeyboard();
   }
 
@@ -573,9 +821,8 @@ module.exports = function registerFriendListHome(app, deps) {
             success: function (res) {
               if (res.statusCode === 200) {
                 appendFriendChatMessage(peerUserId, trimmed, true, Date.now());
-                if (typeof wx.showToast === 'function') {
-                  wx.showToast({ title: '已发送', icon: 'none' });
-                }
+                app.friendChatComposeDraft = '';
+                app.dismissFriendDmKeyboard();
                 if (typeof app.draw === 'function') {
                   app.draw();
                 }
@@ -644,6 +891,7 @@ module.exports = function registerFriendListHome(app, deps) {
               return;
             }
             app.friendListRaw = d.friends;
+            normalizeFriendListRowsInPlace(app.friendListRaw);
             persistCache(app.friendListRaw);
             var fi;
             for (fi = 0; fi < app.friendListRaw.length; fi++) {
@@ -798,6 +1046,7 @@ module.exports = function registerFriendListHome(app, deps) {
   }
 
   app.openHomeFriendList = function () {
+    stopFriendFabUnreadPulse();
     app.homeFriendListOpen = true;
     app.homeFriendChatPeer = null;
     app.friendChatScrollY = 0;
@@ -956,12 +1205,32 @@ module.exports = function registerFriendListHome(app, deps) {
     });
   };
 
+  function clearFriendDmKeyboardHeightWatch() {
+    if (
+      app._friendDmKeyboardHeightListener &&
+      typeof wx !== 'undefined' &&
+      typeof wx.offKeyboardHeightChange === 'function'
+    ) {
+      try {
+        wx.offKeyboardHeightChange(app._friendDmKeyboardHeightListener);
+      } catch (eKbOff) {}
+    }
+    app._friendDmKeyboardHeightListener = null;
+    app._friendDmKeyboardHeight = 0;
+    app._friendDmLayoutFullH = 0;
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+  }
+
   app.dismissFriendDmKeyboard = function () {
     if (typeof app._friendDmKbCleanup === 'function') {
       try {
         app._friendDmKbCleanup();
       } catch (eDm) {}
       app._friendDmKbCleanup = null;
+    } else {
+      clearFriendDmKeyboardHeightWatch();
     }
     if (typeof wx !== 'undefined' && typeof wx.hideKeyboard === 'function') {
       try {
@@ -986,6 +1255,10 @@ module.exports = function registerFriendListHome(app, deps) {
       app.dismissOnlineChatKeyboard();
     }
     app.homeFriendChatPeer = f;
+    app.friendChatComposeDraft = '';
+    if (f.peerUserId != null && app._friendDmUnreadPeers) {
+      delete app._friendDmUnreadPeers[getFriendChatKey(f.peerUserId)];
+    }
     app.friendChatScrollY = 0;
     app._friendChatNeedScrollBottom = true;
     if (f.avatarUrl) {
@@ -998,7 +1271,7 @@ module.exports = function registerFriendListHome(app, deps) {
 
   app.openFriendDirectMessageComposer = app.openHomeFriendChatMode;
 
-  /** 会话底部输入区：调起系统键盘发送 */
+  /** 会话底部输入区：调起系统键盘编辑草稿；发送仅通过画布「发送」按钮 */
   app.openFriendChatKeyboard = function () {
     var peer = app.homeFriendChatPeer;
     if (!peer || peer.peerUserId == null || typeof wx === 'undefined') {
@@ -1057,25 +1330,35 @@ module.exports = function registerFriendListHome(app, deps) {
           wx.offKeyboardComplete(onCompleteDm);
         }
       } catch (e3) {}
+      clearFriendDmKeyboardHeightWatch();
+      if (app._friendChatInpBlinkTimer != null) {
+        clearInterval(app._friendChatInpBlinkTimer);
+        app._friendChatInpBlinkTimer = null;
+      }
       app._friendDmKbCleanup = null;
     }
 
-    var draftDm = '';
-
     function onInputDm(res) {
-      draftDm = res && res.value != null ? String(res.value) : '';
+      app.friendChatComposeDraft =
+        res && res.value != null ? String(res.value) : '';
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
     }
 
     function onConfirmDm(res) {
-      var v =
-        res && res.value != null ? String(res.value) : draftDm;
+      if (res && res.value != null) {
+        app.friendChatComposeDraft = String(res.value);
+      }
       cleanupDm();
       try {
         if (typeof wx.hideKeyboard === 'function') {
           wx.hideKeyboard({});
         }
       } catch (eH) {}
-      postFriendDirectMessage(peer.peerUserId, v);
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
     }
 
     function onCompleteDm() {
@@ -1096,20 +1379,92 @@ module.exports = function registerFriendListHome(app, deps) {
       if (typeof wx.onKeyboardComplete === 'function') {
         wx.onKeyboardComplete(onCompleteDm);
       }
+      if (typeof wx.onKeyboardHeightChange === 'function') {
+        if (
+          app._friendDmKeyboardHeightListener &&
+          typeof wx.offKeyboardHeightChange === 'function'
+        ) {
+          try {
+            wx.offKeyboardHeightChange(app._friendDmKeyboardHeightListener);
+          } catch (eKb0) {}
+        }
+        var onKbH = function (res) {
+          var raw =
+            res && typeof res.height === 'number' && !isNaN(res.height)
+              ? res.height
+              : 0;
+          var h = raw;
+          if (app.friendDmKeyboardHeightDivideDpr) {
+            var dprKb = app.DPR;
+            if (typeof dprKb === 'number' && dprKb > 0 && dprKb === dprKb) {
+              h = h / dprKb;
+            }
+          }
+          var scKb = app.friendDmKeyboardHeightScale;
+          if (typeof scKb === 'number' && scKb > 0 && scKb === scKb) {
+            h *= scKb;
+          }
+          app._friendDmKeyboardHeight = Math.max(0, h);
+          if (typeof app.syncCanvasWithWindow === 'function') {
+            try {
+              app.syncCanvasWithWindow();
+            } catch (eSy) {}
+          }
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+          if (
+            h > 0 &&
+            typeof requestAnimationFrame === 'function'
+          ) {
+            requestAnimationFrame(function () {
+              if (typeof app.syncCanvasWithWindow === 'function') {
+                try {
+                  app.syncCanvasWithWindow();
+                } catch (eSy2) {}
+              }
+              if (typeof app.draw === 'function') {
+                app.draw();
+              }
+            });
+          }
+        };
+        app._friendDmKeyboardHeightListener = onKbH;
+        wx.onKeyboardHeightChange(onKbH);
+      }
     } catch (eL) {
       cleanupDm();
       fallbackModal();
       return;
     }
 
+    app._friendDmLayoutFullH = app.H;
+    // 微信小游戏：showKeyboard 会在键盘上方固定显示系统输入条（与 defaultValue 同步），
+    // 文档无隐藏参数；社区反馈亦无法关闭。画布内输入框仅为自绘，无法替代该原生条。
     wx.showKeyboard({
-      defaultValue: '',
+      defaultValue: app.friendChatComposeDraft || '',
       maxLength: 300,
       multiple: false,
       confirmHold: false,
-      confirmType: 'send',
+      confirmType: 'done',
+      success: function () {
+        if (app._friendChatInpBlinkTimer != null) {
+          clearInterval(app._friendChatInpBlinkTimer);
+          app._friendChatInpBlinkTimer = null;
+        }
+        app._friendChatInpBlinkTimer = setInterval(function () {
+          if (
+            app.homeFriendListOpen &&
+            app.homeFriendChatPeer &&
+            typeof app.draw === 'function'
+          ) {
+            app.draw();
+          }
+        }, 420);
+      },
       fail: function () {
         cleanupDm();
+        app._friendDmLayoutFullH = 0;
         fallbackModal();
       }
     });
@@ -1173,8 +1528,11 @@ module.exports = function registerFriendListHome(app, deps) {
   }
 
   function hitFriendChatInputLayout(L, panelX) {
-    var yInp = L.y0 + L.h - L.chatInputBarH;
-    var sendW = app.rpx(100);
+    var yInp =
+      L.chatInputBarY != null
+        ? L.chatInputBarY
+        : L.y0 + L.h - L.chatInputBarH;
+    var sendW = app.rpx(72);
     var inpH = app.rpx(56);
     var inpY = yInp + (L.chatInputBarH - inpH) * 0.5;
     var inpX = panelX + app.rpx(12);
@@ -1275,11 +1633,13 @@ module.exports = function registerFriendListHome(app, deps) {
       if (hitFriendChatInputField(L, panelX, x, y)) {
         app._friendChatBarDownX = x;
         app._friendChatBarDownY = y;
+        app._friendChatBarHitKind = 'input';
         return true;
       }
       if (hitFriendChatSend(L, panelX, x, y)) {
         app._friendChatBarDownX = x;
         app._friendChatBarDownY = y;
+        app._friendChatBarHitKind = 'send';
         return true;
       }
       var cmt = L.chatMsgTop;
@@ -1293,6 +1653,7 @@ module.exports = function registerFriendListHome(app, deps) {
         e.touches &&
         e.touches[0]
       ) {
+        app._friendChatScrollMoved = false;
         app._friendChatScrollTouchId = e.touches[0].identifier;
         app._friendChatScrollLastY = y;
         return true;
@@ -1359,7 +1720,7 @@ module.exports = function registerFriendListHome(app, deps) {
         app.homeFriendFabDragging = true;
         app.homeFriendFabPressed = false;
       }
-      var rFab = 24;
+      var rFab = HOME_FRIEND_LIST_FAB_R;
       var tcx = app._friendFabGrabCx + (tFab.clientX - app._friendFabGrabFx);
       var tcy = app._friendFabGrabCy + (tFab.clientY - app._friendFabGrabFy);
       var cDrag = clampFabCenter(tcx, tcy, rFab);
@@ -1430,17 +1791,21 @@ module.exports = function registerFriendListHome(app, deps) {
       }
       var dyC = tc.clientY - app._friendChatScrollLastY;
       app._friendChatScrollLastY = tc.clientY;
+      if (Math.abs(dyC) > 2) {
+        app._friendChatScrollMoved = true;
+      }
       var Lc = app.getHomeFriendListPanelLayout();
+      var liftLc = Lc.chatMsgLiftPx || 0;
       var maxScrollC = Math.min(
         0,
         Lc.chatMsgH - (app._friendChatLayoutTotalH || 0)
       );
       app.friendChatScrollY += dyC;
-      if (app.friendChatScrollY > 0) {
-        app.friendChatScrollY = 0;
+      if (app.friendChatScrollY - liftLc > 0) {
+        app.friendChatScrollY = liftLc;
       }
-      if (app.friendChatScrollY < maxScrollC) {
-        app.friendChatScrollY = maxScrollC;
+      if (app.friendChatScrollY - liftLc < maxScrollC) {
+        app.friendChatScrollY = maxScrollC + liftLc;
       }
       if (typeof app.draw === 'function') {
         app.draw();
@@ -1504,7 +1869,7 @@ module.exports = function registerFriendListHome(app, deps) {
           app.homeFriendFabPressed = false;
           app._friendFabInEdgeSnap = false;
           stopFabSnapAnim(true);
-          var rEnd = 24;
+          var rEnd = HOME_FRIEND_LIST_FAB_R;
           var spEnd = snapFabHorizontalEdge(
             app.homeFriendFabCustomCx,
             app.homeFriendFabCustomCy,
@@ -1539,6 +1904,7 @@ module.exports = function registerFriendListHome(app, deps) {
 
     app._friendListScrollTouchId = null;
     app._friendChatScrollTouchId = null;
+    app._friendChatScrollMoved = false;
 
     var slop = 14;
     var moved =
@@ -1559,26 +1925,57 @@ module.exports = function registerFriendListHome(app, deps) {
         }
         return true;
       }
-      var barHit =
-        hitFriendChatInputField(L, panelX, x, y) ||
-        hitFriendChatSend(L, panelX, x, y);
-      if (
-        barHit &&
+      var barKind = app._friendChatBarHitKind;
+      app._friendChatBarHitKind = null;
+      var barHadDown =
         typeof app._friendChatBarDownX === 'number' &&
-        typeof app._friendChatBarDownY === 'number'
-      ) {
+        typeof app._friendChatBarDownY === 'number';
+      if (barHadDown && (barKind === 'input' || barKind === 'send')) {
         var ds =
           Math.abs(x - app._friendChatBarDownX) <= 20 &&
           Math.abs(y - app._friendChatBarDownY) <= 20;
         app._friendChatBarDownX = undefined;
         app._friendChatBarDownY = undefined;
-        if (ds && typeof app.openFriendChatKeyboard === 'function') {
-          app.openFriendChatKeyboard();
+        if (ds) {
+          if (
+            barKind === 'input' &&
+            typeof app.openFriendChatKeyboard === 'function'
+          ) {
+            app.openFriendChatKeyboard();
+          } else if (barKind === 'send') {
+            var peerSend = app.homeFriendChatPeer;
+            if (peerSend && peerSend.peerUserId != null) {
+              var tSend = String(app.friendChatComposeDraft || '').replace(
+                /^\s+|\s+$/g,
+                ''
+              );
+              if (tSend) {
+                postFriendDirectMessage(peerSend.peerUserId, tSend);
+              } else if (typeof wx.showToast === 'function') {
+                wx.showToast({ title: '消息不能为空', icon: 'none' });
+              }
+            }
+          }
         }
         return true;
       }
       app._friendChatBarDownX = undefined;
       app._friendChatBarDownY = undefined;
+
+      var insidePanelChat =
+        x >= panelX &&
+        x <= panelX + L.w &&
+        y >= L.y0 &&
+        y <= L.y0 + L.h;
+
+      if (!insidePanelChat) {
+        app.closeHomeFriendList();
+        if (typeof app.draw === 'function') {
+          app.draw();
+        }
+        return true;
+      }
+
       app._friendListRowTapIdx = -1;
       return true;
     }
@@ -1660,6 +2057,127 @@ module.exports = function registerFriendListHome(app, deps) {
     return true;
   };
 
+  /**
+   * 抠图后再剥边：8 邻域 + 多遍，去掉与透明相邻的暗部/半透明晕边。
+   */
+  function friendFabErodeKeyFringe(cvs, passes) {
+    if (!cvs || !cvs.width || !cvs.height) {
+      return;
+    }
+    var nPass = passes > 0 ? passes : 1;
+    var c2 = cvs.getContext('2d');
+    if (!c2 || !c2.getImageData) {
+      return;
+    }
+    var w = cvs.width;
+    var h = cvs.height;
+    /** 与「近似透明」相邻且 RGB 和低于此值的像素剥掉 */
+    var maxSum = 210;
+    /** 邻域 alpha 低于此视为透明（略抬高以吃掉抗锯齿灰边） */
+    var alphaNear0 = 22;
+    var p;
+    for (p = 0; p < nPass; p++) {
+      var imgData = c2.getImageData(0, 0, w, h);
+      var d = imgData.data;
+      var copy = new Uint8ClampedArray(d.length);
+      copy.set(d);
+      var x;
+      var y;
+      var i;
+      var sum;
+      var row = w * 4;
+      for (y = 1; y < h - 1; y++) {
+        for (x = 1; x < w - 1; x++) {
+          i = (y * w + x) * 4;
+          if (copy[i + 3] < alphaNear0) {
+            continue;
+          }
+          sum = copy[i] + copy[i + 1] + copy[i + 2];
+          if (sum >= maxSum) {
+            continue;
+          }
+          if (
+            copy[i - row - 4 + 3] < alphaNear0 ||
+            copy[i - row + 3] < alphaNear0 ||
+            copy[i - row + 4 + 3] < alphaNear0 ||
+            copy[i - 4 + 3] < alphaNear0 ||
+            copy[i + 4 + 3] < alphaNear0 ||
+            copy[i + row - 4 + 3] < alphaNear0 ||
+            copy[i + row + 3] < alphaNear0 ||
+            copy[i + row + 4 + 3] < alphaNear0
+          ) {
+            d[i + 3] = 0;
+          }
+        }
+      }
+      c2.putImageData(imgData, 0, 0);
+    }
+  }
+
+  /** 去掉仍残留的半透明黑灰（抠图/缩放产生的弱 alpha） */
+  function friendFabCullDarkHalos(cvs) {
+    if (!cvs || !cvs.width || !cvs.height) {
+      return;
+    }
+    var c2 = cvs.getContext('2d');
+    if (!c2 || !c2.getImageData) {
+      return;
+    }
+    var w = cvs.width;
+    var h = cvs.height;
+    var imgData = c2.getImageData(0, 0, w, h);
+    var d = imgData.data;
+    var i;
+    var a;
+    var sum;
+    for (i = 0; i < d.length; i += 4) {
+      a = d[i + 3];
+      if (a < 1) {
+        continue;
+      }
+      sum = d[i] + d[i + 1] + d[i + 2];
+      if (a < 72 && sum < 125) {
+        d[i + 3] = 0;
+      } else if (a < 110 && sum < 85) {
+        d[i + 3] = 0;
+      }
+    }
+    c2.putImageData(imgData, 0, 0);
+  }
+
+  /**
+   * 悬浮球用图：对近黑底做软边抠透明（与水墨叠图同源 {@link render.buildBlackKeyForeground}）。
+   * 纯黑细部（如极小纯黑眼睛）可能被误抠，更稳妥请使用透明底 PNG。
+   */
+  function getFriendFabDrawSource() {
+    var src = app.homeFriendFabImg;
+    if (!src || !src.width || !src.height) {
+      return null;
+    }
+    if (
+      app._friendFabKeyCacheImg === src &&
+      app._friendFabKeyCacheRev === FRIEND_FAB_DRAW_REV
+    ) {
+      return app._friendFabKeyCacheCanvas || src;
+    }
+    app._friendFabKeyCacheImg = src;
+    app._friendFabKeyCacheRev = FRIEND_FAB_DRAW_REV;
+    var keyed =
+      render && typeof render.buildBlackKeyForeground === 'function'
+        ? render.buildBlackKeyForeground(src, {
+            sum0: 52,
+            sum1: 102,
+            keyLinear: true
+          })
+        : null;
+    if (keyed) {
+      friendFabErodeKeyFringe(keyed, 3);
+      friendFabCullDarkHalos(keyed);
+    }
+    app._friendFabKeyCacheCanvas = keyed || null;
+    return app._friendFabKeyCacheCanvas || src;
+  }
+
   app.drawHomeFriendListFab = function (th) {
     if (app.homeFriendListOpen) {
       return;
@@ -1673,16 +2191,24 @@ module.exports = function registerFriendListHome(app, deps) {
         : null;
     var fillB = FL ? FL.fabFill : '#F5EADF';
     var strokeB = FL ? FL.fabStroke : 'rgba(93, 64, 55, 0.35)';
-    var shCol = FL && FL.fabShadow ? FL.fabShadow : 'rgba(0,0,0,0.12)';
     var iconC = FL && FL.fabIcon ? FL.fabIcon : '#5D4037';
     var F = app.getHomeFriendListFabLayout();
-    var scale = app.homeFriendFabPressed ? 0.95 : 1;
+    var hasUnread = friendDmHasAnyUnread();
+    var breath = 1;
+    if (hasUnread && !app.homeFriendFabPressed && !app.homeFriendFabDragging) {
+      breath = 1 + 0.06 * (0.5 + 0.5 * Math.sin(Date.now() * 0.007));
+    }
+    var scale = (app.homeFriendFabPressed ? 0.95 : 1) * breath;
     var cx = F.cx;
     var cy = F.cy;
     var r = F.r;
     var d = fabEdgeCollapseDrawCenter(cx, cy, r);
     var px = d.cx;
     var py = d.cy;
+    var sPx = app.snapPx(px);
+    var sPy = app.snapPx(py);
+    var sPr = app.snapPx(r);
+    var clipR = sPr * FRIEND_FAB_CLIP_R_MUL;
 
     app.ctx.save();
     app.ctx.beginPath();
@@ -1691,24 +2217,110 @@ module.exports = function registerFriendListHome(app, deps) {
     app.ctx.translate(cx, cy);
     app.ctx.scale(scale, scale);
     app.ctx.translate(-cx, -cy);
-    app.ctx.fillStyle = fillB;
-    app.ctx.shadowColor = shCol;
-    app.ctx.shadowBlur = 8;
-    app.ctx.shadowOffsetY = 3;
-    app.ctx.beginPath();
-    app.ctx.arc(app.snapPx(px), app.snapPx(py), app.snapPx(r), 0, Math.PI * 2);
-    app.ctx.fill();
-    app.ctx.shadowBlur = 0;
-    app.ctx.shadowOffsetY = 0;
-    app.ctx.strokeStyle = strokeB;
-    app.ctx.lineWidth = Math.max(1, app.rpx(1.5));
-    app.ctx.beginPath();
-    app.ctx.arc(app.snapPx(px), app.snapPx(py), app.snapPx(r), 0, Math.PI * 2);
-    app.ctx.stroke();
-    if (typeof app.drawHomeFriendListFabIcon === 'function') {
-      app.drawHomeFriendListFabIcon(px, py, r, iconC);
+    app.ctx.globalAlpha = 1;
+    app.ctx.globalCompositeOperation = 'source-over';
+
+    var fabImg = getFriendFabDrawSource();
+    var useFabImg =
+      fabImg &&
+      fabImg.width > 0 &&
+      fabImg.height > 0 &&
+      typeof app.drawHomeUiImageContain === 'function';
+
+    function drawFriendFabSphereShadeDisk() {
+      app.ctx.save();
+      app.ctx.shadowColor = 'rgba(12, 10, 8, 0.38)';
+      app.ctx.shadowBlur = Math.max(8, app.rpx(12));
+      app.ctx.shadowOffsetY = Math.max(3, app.rpx(4.5));
+      app.ctx.shadowOffsetX = 0;
+      app.ctx.fillStyle = fillB;
+      app.ctx.beginPath();
+      app.ctx.arc(sPx, sPy, sPr * 0.985, 0, Math.PI * 2);
+      app.ctx.fill();
+      app.ctx.restore();
+    }
+
+    function drawFriendFabGlossInCircle(radiusPx) {
+      var g0x = px - r * 0.4;
+      var g0y = py - r * 0.46;
+      var gr = app.ctx.createRadialGradient(
+        app.snapPx(g0x),
+        app.snapPx(g0y),
+        app.snapPx(Math.max(1, r * 0.06)),
+        sPx,
+        sPy,
+        radiusPx * 1.05
+      );
+      gr.addColorStop(0, 'rgba(255,255,255,0.36)');
+      gr.addColorStop(0.32, 'rgba(255,255,255,0.07)');
+      gr.addColorStop(0.68, 'rgba(0,0,0,0)');
+      gr.addColorStop(1, 'rgba(0,0,0,0.13)');
+      app.ctx.fillStyle = gr;
+      app.ctx.fillRect(sPx - radiusPx * 2, sPy - radiusPx * 2, radiusPx * 4, radiusPx * 4);
+    }
+
+    function drawFriendFabTopRimArc(radiusPx) {
+      app.ctx.save();
+      app.ctx.strokeStyle = 'rgba(255,255,255,0.48)';
+      app.ctx.lineWidth = Math.max(1, app.rpx(1.35));
+      app.ctx.lineCap = 'round';
+      app.ctx.beginPath();
+      app.ctx.arc(
+        sPx,
+        sPy,
+        radiusPx * 0.93,
+        -Math.PI * 0.92,
+        -Math.PI * 0.08,
+        false
+      );
+      app.ctx.stroke();
+      app.ctx.restore();
+    }
+
+    if (useFabImg) {
+      drawFriendFabSphereShadeDisk();
+      app.ctx.save();
+      app.ctx.beginPath();
+      app.ctx.arc(sPx, sPy, clipR, 0, Math.PI * 2);
+      app.ctx.clip();
+      app.drawHomeUiImageContain(
+        fabImg,
+        px,
+        py,
+        r * 2 * FRIEND_FAB_CONTAIN_MUL
+      );
+      drawFriendFabGlossInCircle(clipR);
+      app.ctx.restore();
+      drawFriendFabTopRimArc(clipR);
+    } else {
+      app.ctx.fillStyle = fillB;
+      app.ctx.shadowColor = 'rgba(12, 10, 8, 0.36)';
+      app.ctx.shadowBlur = Math.max(10, app.rpx(14));
+      app.ctx.shadowOffsetY = Math.max(4, app.rpx(5));
+      app.ctx.shadowOffsetX = 0;
+      app.ctx.beginPath();
+      app.ctx.arc(sPx, sPy, sPr, 0, Math.PI * 2);
+      app.ctx.fill();
+      app.ctx.shadowBlur = 0;
+      app.ctx.shadowOffsetY = 0;
+      app.ctx.strokeStyle = strokeB;
+      app.ctx.lineWidth = Math.max(1, app.rpx(1.5));
+      app.ctx.beginPath();
+      app.ctx.arc(sPx, sPy, sPr, 0, Math.PI * 2);
+      app.ctx.stroke();
+      app.ctx.save();
+      app.ctx.beginPath();
+      app.ctx.arc(sPx, sPy, sPr * 0.96, 0, Math.PI * 2);
+      app.ctx.clip();
+      drawFriendFabGlossInCircle(sPr * 0.96);
+      app.ctx.restore();
+      drawFriendFabTopRimArc(sPr);
+      if (typeof app.drawHomeFriendListFabIcon === 'function') {
+        app.drawHomeFriendListFabIcon(px, py, r, iconC);
+      }
     }
     app.ctx.restore();
+    ensureFriendFabUnreadPulse();
   };
 
   function wrapFriendChatLines(ctx, text, maxW) {
@@ -1785,6 +2397,34 @@ module.exports = function registerFriendListHome(app, deps) {
     var colMuted = FL && FL.collapse ? FL.collapse : '#888888';
 
     if (app.homeFriendChatPeer) {
+      var yChatInpBar = L.chatInputBarY;
+      app.ctx.save();
+      app.ctx.globalAlpha = pa;
+      app.ctx.fillStyle =
+        FL && FL.chatHeaderBg ? FL.chatHeaderBg : '#f9f6f2';
+      app.ctx.fillRect(panelX, L.y0, L.w, L.headerH);
+      app.ctx.fillStyle =
+        FL && FL.chatMsgBg ? FL.chatMsgBg : 'rgba(244, 236, 226, 0.96)';
+      app.ctx.fillRect(
+        panelX,
+        L.y0 + L.headerH,
+        L.w,
+        Math.max(0, yChatInpBar - (L.y0 + L.headerH))
+      );
+      app.ctx.strokeStyle = FL && FL.sep ? FL.sep : 'rgba(92,75,58,0.12)';
+      app.ctx.lineWidth = 1;
+      app.ctx.beginPath();
+      app.ctx.moveTo(
+        app.snapPx(panelX),
+        app.snapPx(L.y0 + L.headerH - 0.5)
+      );
+      app.ctx.lineTo(
+        app.snapPx(panelX + L.w),
+        app.snapPx(L.y0 + L.headerH - 0.5)
+      );
+      app.ctx.stroke();
+      app.ctx.restore();
+
       var peer = app.homeFriendChatPeer;
       var chatName0 = String(peer.displayName || peer.nickname || '好友');
       var chatName = chatName0;
@@ -1827,7 +2467,8 @@ module.exports = function registerFriendListHome(app, deps) {
       );
       app.ctx.textAlign = 'left';
 
-      var chatAvR = app.rpx(22);
+      var chatAvDesignRpx = Math.round(22 * 1.3);
+      var chatAvR = app.rpx(chatAvDesignRpx);
       var msgFs = app.rpx(26);
       var lh = app.rpx(30);
       var gapMsg = app.rpx(10);
@@ -1878,18 +2519,21 @@ module.exports = function registerFriendListHome(app, deps) {
       }
       app._friendChatLayoutTotalH = totalH;
 
+      var liftPx = L.chatMsgLiftPx || 0;
       if (app._friendChatNeedScrollBottom) {
         var smin0 = Math.min(0, L.chatMsgH - totalH);
-        app.friendChatScrollY = smin0;
+        app.friendChatScrollY = smin0 + liftPx;
         app._friendChatNeedScrollBottom = false;
       }
       var maxS0 = Math.min(0, L.chatMsgH - totalH);
-      if (app.friendChatScrollY < maxS0) {
-        app.friendChatScrollY = maxS0;
+      var scrollEff0 = app.friendChatScrollY - liftPx;
+      if (scrollEff0 < maxS0) {
+        app.friendChatScrollY = maxS0 + liftPx;
       }
-      if (app.friendChatScrollY > 0) {
-        app.friendChatScrollY = 0;
+      if (scrollEff0 > 0) {
+        app.friendChatScrollY = liftPx;
       }
+      var yDrawScroll = app.friendChatScrollY - liftPx;
 
       app.ctx.save();
       app.ctx.beginPath();
@@ -1914,7 +2558,34 @@ module.exports = function registerFriendListHome(app, deps) {
         );
         app.ctx.textAlign = 'left';
       } else {
-        var yC = L.chatMsgTop + app.rpx(8) + app.friendChatScrollY;
+        function drawFriendChatRoundAvatar(img, acx, acy, avR, drawPlaceholder) {
+          var diam = avR * 2;
+          if (
+            img &&
+            img.complete &&
+            img.width &&
+            !img._failed &&
+            typeof app.drawHomeUiImageContain === 'function'
+          ) {
+            app.ctx.save();
+            app.ctx.beginPath();
+            app.ctx.arc(
+              app.snapPx(acx),
+              app.snapPx(acy),
+              app.snapPx(avR),
+              0,
+              Math.PI * 2
+            );
+            app.ctx.clip();
+            var drew = app.drawHomeUiImageContain(img, acx, acy, diam);
+            app.ctx.restore();
+            if (drew) {
+              return;
+            }
+          }
+          drawPlaceholder();
+        }
+        var yC = L.chatMsgTop + app.rpx(8) + yDrawScroll;
         var bi;
         for (bi = 0; bi < blocks.length; bi++) {
           var blk = blocks[bi];
@@ -1928,8 +2599,21 @@ module.exports = function registerFriendListHome(app, deps) {
           var bubbleTop = yC + app.rpx(6);
           var avCx;
           var avCy = yC + rowHH * 0.5 - gapMsg * 0.35;
-          var bubbleColOther = 'rgba(255,255,255,0.96)';
-          var bubbleColSelf = 'rgba(220,248,198,0.95)';
+          var bubbleColOther =
+            FL && FL.chatBubbleOther
+              ? FL.chatBubbleOther
+              : 'rgba(255, 253, 248, 0.97)';
+          var bubbleColSelf =
+            FL && FL.chatBubbleSelf
+              ? FL.chatBubbleSelf
+              : 'rgba(191, 144, 99, 0.34)';
+          var bubbleStrokeOther =
+            FL && FL.chatBubbleOtherStroke
+              ? FL.chatBubbleOtherStroke
+              : 'rgba(200, 188, 172, 0.4)';
+          var bubbleRad = app.rpx(6);
+          var textOnOther = colTitle;
+          var textOnSelf = colTitle;
           var lj;
 
           if (!isSelf) {
@@ -1938,27 +2622,7 @@ module.exports = function registerFriendListHome(app, deps) {
             var imgO =
               peer.peerUserId &&
               app._friendAvImgs['k' + peer.peerUserId];
-            if (imgO && imgO.complete && imgO.width && !imgO._failed) {
-              app.ctx.save();
-              app.ctx.beginPath();
-              app.ctx.arc(
-                app.snapPx(avCx),
-                app.snapPx(avCy),
-                app.snapPx(chatAvR),
-                0,
-                Math.PI * 2
-              );
-              app.ctx.clip();
-              var sz = chatAvR * 2;
-              app.ctx.drawImage(
-                imgO,
-                app.snapPx(avCx - chatAvR),
-                app.snapPx(avCy - chatAvR),
-                app.snapPx(sz),
-                app.snapPx(sz)
-              );
-              app.ctx.restore();
-            } else {
+            drawFriendChatRoundAvatar(imgO, avCx, avCy, chatAvR, function () {
               app.ctx.fillStyle = FL && FL.avatarFallback
                 ? FL.avatarFallback
                 : '#E0D6C8';
@@ -1973,7 +2637,8 @@ module.exports = function registerFriendListHome(app, deps) {
               app.ctx.fill();
               app.ctx.fillStyle = colTitle;
               app.ctx.font =
-                app.rpx(22) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
+                app.rpx(chatAvDesignRpx) +
+                'px "PingFang SC","Hiragino Sans GB",sans-serif';
               app.ctx.textAlign = 'center';
               app.ctx.textBaseline = 'middle';
               app.ctx.fillText(
@@ -1984,17 +2649,20 @@ module.exports = function registerFriendListHome(app, deps) {
               app.ctx.textAlign = 'left';
               app.ctx.font =
                 msgFs + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
-            }
+            });
             app.ctx.fillStyle = bubbleColOther;
             app.roundRect(
               bubbleLeft,
               bubbleTop,
               bubbleW2,
               bubbleH,
-              app.rpx(10)
+              bubbleRad
             );
             app.ctx.fill();
-            app.ctx.fillStyle = colTitle;
+            app.ctx.strokeStyle = bubbleStrokeOther;
+            app.ctx.lineWidth = 1;
+            app.ctx.stroke();
+            app.ctx.fillStyle = textOnOther;
             app.ctx.textBaseline = 'middle';
             for (lj = 0; lj < lines2.length; lj++) {
               app.ctx.fillText(
@@ -2007,30 +2675,13 @@ module.exports = function registerFriendListHome(app, deps) {
             avCx = panelX + L.w - edgePad - chatAvR;
             bubbleLeft = avCx - chatAvR - app.rpx(8) - bubbleW2;
             var imgMe = app.myNetworkAvatarImg;
-            if (imgMe && imgMe.complete && imgMe.width) {
-              app.ctx.save();
-              app.ctx.beginPath();
-              app.ctx.arc(
-                app.snapPx(avCx),
-                app.snapPx(avCy),
-                app.snapPx(chatAvR),
-                0,
-                Math.PI * 2
-              );
-              app.ctx.clip();
-              var sz2 = chatAvR * 2;
-              app.ctx.drawImage(
-                imgMe,
-                app.snapPx(avCx - chatAvR),
-                app.snapPx(avCy - chatAvR),
-                app.snapPx(sz2),
-                app.snapPx(sz2)
-              );
-              app.ctx.restore();
-            } else {
-              app.ctx.fillStyle = FL && FL.avatarFallback
-                ? FL.avatarFallback
-                : '#C5E1A5';
+            drawFriendChatRoundAvatar(imgMe, avCx, avCy, chatAvR, function () {
+              app.ctx.fillStyle =
+                FL && FL.chatAvatarSelfFallback
+                  ? FL.chatAvatarSelfFallback
+                  : FL && FL.avatarFallback
+                    ? FL.avatarFallback
+                    : '#ead8c8';
               app.ctx.beginPath();
               app.ctx.arc(
                 app.snapPx(avCx),
@@ -2042,7 +2693,8 @@ module.exports = function registerFriendListHome(app, deps) {
               app.ctx.fill();
               app.ctx.fillStyle = colTitle;
               app.ctx.font =
-                app.rpx(22) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
+                app.rpx(chatAvDesignRpx) +
+                'px "PingFang SC","Hiragino Sans GB",sans-serif';
               app.ctx.textAlign = 'center';
               app.ctx.textBaseline = 'middle';
               app.ctx.fillText(
@@ -2053,17 +2705,17 @@ module.exports = function registerFriendListHome(app, deps) {
               app.ctx.textAlign = 'left';
               app.ctx.font =
                 msgFs + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
-            }
+            });
             app.ctx.fillStyle = bubbleColSelf;
             app.roundRect(
               bubbleLeft,
               bubbleTop,
               bubbleW2,
               bubbleH,
-              app.rpx(10)
+              bubbleRad
             );
             app.ctx.fill();
-            app.ctx.fillStyle = colTitle;
+            app.ctx.fillStyle = textOnSelf;
             app.ctx.textBaseline = 'middle';
             for (lj = 0; lj < lines2.length; lj++) {
               app.ctx.fillText(
@@ -2078,7 +2730,10 @@ module.exports = function registerFriendListHome(app, deps) {
       }
       app.ctx.restore();
 
-      var yInp = L.y0 + L.h - L.chatInputBarH;
+      var yInp =
+        L.chatInputBarY != null
+          ? L.chatInputBarY
+          : L.y0 + L.h - L.chatInputBarH;
       app.ctx.save();
       app.ctx.globalAlpha = pa;
       app.ctx.fillStyle =
@@ -2089,41 +2744,115 @@ module.exports = function registerFriendListHome(app, deps) {
       app.ctx.strokeStyle = FL && FL.sep ? FL.sep : 'rgba(92,75,58,0.12)';
       app.ctx.lineWidth = 1;
       app.ctx.beginPath();
-      app.ctx.moveTo(app.snapPx(panelX + app.rpx(8)), app.snapPx(yInp));
+      app.ctx.moveTo(app.snapPx(panelX), app.snapPx(yInp + 0.5));
       app.ctx.lineTo(
-        app.snapPx(panelX + L.w - app.rpx(8)),
-        app.snapPx(yInp)
+        app.snapPx(panelX + L.w),
+        app.snapPx(yInp + 0.5)
       );
       app.ctx.stroke();
 
-      var sendW = app.rpx(100);
+      var sendW = app.rpx(72);
       var inpX = panelX + app.rpx(12);
       var inpW = L.w - app.rpx(24) - sendW - app.rpx(8);
       var inpH = app.rpx(56);
       var inpY = yInp + (L.chatInputBarH - inpH) * 0.5;
-      app.ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      app.roundRect(inpX, inpY, inpW, inpH, app.rpx(8));
+      app.ctx.fillStyle =
+        FL && FL.chatBubbleOther
+          ? FL.chatBubbleOther
+          : 'rgba(255, 253, 248, 0.97)';
+      app.roundRect(inpX, inpY, inpW, inpH, app.rpx(6));
       app.ctx.fill();
-      app.ctx.strokeStyle = 'rgba(92,75,58,0.14)';
+      app.ctx.strokeStyle =
+        FL && FL.chatBubbleOtherStroke
+          ? FL.chatBubbleOtherStroke
+          : 'rgba(200, 188, 172, 0.4)';
       app.ctx.stroke();
-      app.ctx.fillStyle = colMuted;
+      var padInpL = app.rpx(14);
+      var inpTextMaxW = inpW - padInpL - app.rpx(10);
       app.ctx.font =
         app.rpx(24) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
       app.ctx.textBaseline = 'middle';
-      app.ctx.fillText(
-        '说点什么...',
-        app.snapPx(inpX + app.rpx(14)),
-        app.snapPx(inpY + inpH * 0.5)
-      );
+      var composeRaw =
+        app.friendChatComposeDraft != null
+          ? String(app.friendChatComposeDraft)
+          : '';
+      var hasCompose = composeRaw.replace(/\s/g, '').length > 0;
+      var inpTextX = inpX + padInpL;
+      var inpTextY = inpY + inpH * 0.5;
+      var kbInpActive =
+        typeof app._friendDmKbCleanup === 'function' &&
+        app._friendDmKbCleanup;
+      var cursorPrefix = '';
+      if (hasCompose) {
+        app.ctx.fillStyle = colTitle;
+        var tVis = composeRaw;
+        while (
+          tVis.length > 0 &&
+          app.ctx.measureText(tVis).width > inpTextMaxW
+        ) {
+          tVis = tVis.slice(0, -1);
+        }
+        if (tVis.length < composeRaw.length) {
+          var ellInp = '…';
+          while (
+            tVis.length > 0 &&
+            app.ctx.measureText(tVis + ellInp).width > inpTextMaxW
+          ) {
+            tVis = tVis.slice(0, -1);
+          }
+          cursorPrefix = tVis;
+          tVis += ellInp;
+        } else {
+          cursorPrefix = tVis;
+        }
+        app.ctx.fillText(
+          tVis,
+          app.snapPx(inpTextX),
+          app.snapPx(inpTextY)
+        );
+      } else if (!kbInpActive) {
+        app.ctx.fillStyle = colMuted;
+        app.ctx.fillText(
+          '说点什么...',
+          app.snapPx(inpTextX),
+          app.snapPx(inpTextY)
+        );
+      }
+      if (kbInpActive) {
+        var curW0 = hasCompose
+          ? app.ctx.measureText(cursorPrefix).width
+          : 0;
+        var cxCur = inpTextX + curW0;
+        var cxMax = inpX + inpW - app.rpx(8);
+        if (cxCur > cxMax) {
+          cxCur = cxMax;
+        }
+        if ((Date.now() % 920) < 460) {
+          app.ctx.fillStyle =
+            FL && FL.chatCursor ? FL.chatCursor : colTitle;
+          var curH = app.rpx(22);
+          var curT = Math.max(1, app.rpx(2));
+          app.ctx.fillRect(
+            app.snapPx(cxCur),
+            app.snapPx(inpTextY - curH * 0.5),
+            curT,
+            curH
+          );
+        }
+      }
 
       var sendX = panelX + L.w - app.rpx(12) - sendW;
-      app.ctx.fillStyle = colTitle;
-      app.roundRect(sendX, inpY, sendW, inpH, app.rpx(8));
-      app.ctx.fill();
-      app.ctx.fillStyle = '#fffefb';
       app.ctx.font =
-        '500 ' + app.rpx(26) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
+        '500 ' + app.rpx(28) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
       app.ctx.textAlign = 'center';
+      app.ctx.textBaseline = 'middle';
+      app.ctx.fillStyle = hasCompose
+        ? FL && FL.chatSendActive
+          ? FL.chatSendActive
+          : colTitle
+        : FL && FL.chatSendInactive
+          ? FL.chatSendInactive
+          : colMuted;
       app.ctx.fillText(
         '发送',
         app.snapPx(sendX + sendW * 0.5),
@@ -2235,7 +2964,8 @@ module.exports = function registerFriendListHome(app, deps) {
     } else if (!rows.length) {
       app.ctx.fillStyle = FL && FL.emptyTitle ? FL.emptyTitle : colTitle;
       app.ctx.font =
-        app.rpx(26) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
+        app.rpx(Math.round(26 * 1.2)) +
+        'px "PingFang SC","Hiragino Sans GB",sans-serif';
       app.ctx.textAlign = 'left';
       app.ctx.textBaseline = 'middle';
       app.ctx.fillText(
@@ -2269,9 +2999,11 @@ module.exports = function registerFriendListHome(app, deps) {
         if (yRow > L.listTop + L.listH + L.rowH || yRow + L.rowH < L.listTop) {
           continue;
         }
-        var avR = app.rpx(28);
+        var avR = app.rpx(Math.round(28 * 1.2));
         var acx = panelX + app.rpx(8) + avR;
         var acy = yRow + L.rowH * 0.5;
+        var hasDmUnread = friendDmPeerHasUnread(fr.peerUserId);
+        var frOnline = friendRowIsOnline(fr);
         var img =
           fr.peerUserId && app._friendAvImgs['k' + fr.peerUserId];
         if (img && img.complete && img.width && !img._failed) {
@@ -2290,7 +3022,7 @@ module.exports = function registerFriendListHome(app, deps) {
           var ay0 = app.snapPx(acy - avR);
           var asz = app.snapPx(sz);
           var usedGrayFilter = false;
-          if (!fr.online && typeof app.ctx.filter !== 'undefined') {
+          if (!frOnline && typeof app.ctx.filter !== 'undefined') {
             try {
               app.ctx.filter = 'grayscale(1)';
               usedGrayFilter = true;
@@ -2301,7 +3033,7 @@ module.exports = function registerFriendListHome(app, deps) {
             try {
               app.ctx.filter = 'none';
             } catch (eGray2) {}
-          } else if (!fr.online) {
+          } else if (!frOnline) {
             app.ctx.globalCompositeOperation = 'source-atop';
             app.ctx.fillStyle = 'rgba(175, 178, 188, 0.48)';
             app.ctx.fillRect(ax0, ay0, asz, asz);
@@ -2309,7 +3041,7 @@ module.exports = function registerFriendListHome(app, deps) {
           }
           app.ctx.restore();
         } else {
-          app.ctx.fillStyle = !fr.online
+          app.ctx.fillStyle = !frOnline
             ? '#C4BEB4'
             : FL && FL.avatarFallback
               ? FL.avatarFallback
@@ -2323,32 +3055,66 @@ module.exports = function registerFriendListHome(app, deps) {
             Math.PI * 2
           );
           app.ctx.fill();
-          app.ctx.fillStyle = !fr.online
+          app.ctx.fillStyle = !frOnline
             ? '#8A8580'
             : FL && FL.avatarChar
               ? FL.avatarChar
               : colTitle;
           app.ctx.font =
-            app.rpx(26) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
+            app.rpx(Math.round(26 * 1.2)) +
+            'px "PingFang SC","Hiragino Sans GB",sans-serif';
           app.ctx.textAlign = 'center';
           app.ctx.textBaseline = 'middle';
           var ch = String(fr.displayName || fr.nickname || '?').charAt(0);
           app.ctx.fillText(ch, app.snapPx(acx), app.snapPx(acy));
         }
 
+        if (hasDmUnread) {
+          var badgeR = Math.max(5.5, app.rpx(Math.round(9 * 1.2)));
+          var bcx = app.snapPx(acx + avR * 0.58);
+          var bcy = app.snapPx(acy - avR * 0.58);
+          app.ctx.save();
+          app.ctx.fillStyle = FL && FL.unreadDot ? FL.unreadDot : '#E53935';
+          app.ctx.beginPath();
+          app.ctx.arc(bcx, bcy, app.snapPx(badgeR), 0, Math.PI * 2);
+          app.ctx.fill();
+          app.ctx.strokeStyle = 'rgba(255,255,255,0.94)';
+          app.ctx.lineWidth = Math.max(1, app.rpx(2));
+          app.ctx.stroke();
+          app.ctx.restore();
+        }
+
         app.ctx.textAlign = 'left';
         app.ctx.textBaseline = 'middle';
         app.ctx.fillStyle = FL && FL.name ? FL.name : colTitle;
         app.ctx.font =
-          '500 ' + app.rpx(26) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
+          (hasDmUnread ? '600 ' : '500 ') +
+          app.rpx(Math.round(26 * 1.2)) +
+          'px "PingFang SC","Hiragino Sans GB",sans-serif';
         var nameStr = String(fr.displayName || fr.nickname || '');
-        if (nameStr.length > 10) {
-          nameStr = nameStr.slice(0, 10) + '…';
+        var nameX = acx + avR + app.rpx(12);
+        var nameY = yRow + L.rowH * 0.5;
+        var nameMaxPx = Math.max(
+          app.rpx(48),
+          L.w - app.rpx(16) - (nameX - panelX) - app.rpx(6)
+        );
+        while (
+          nameStr.length > 0 &&
+          app.ctx.measureText(nameStr).width > nameMaxPx &&
+          nameStr.length > 1
+        ) {
+          nameStr = nameStr.slice(0, -1);
+        }
+        if (
+          nameStr.length <
+          String(fr.displayName || fr.nickname || '').length
+        ) {
+          nameStr += '…';
         }
         app.ctx.fillText(
           nameStr,
-          app.snapPx(acx + avR + app.rpx(12)),
-          app.snapPx(yRow + L.rowH * 0.5)
+          app.snapPx(nameX),
+          app.snapPx(nameY)
         );
       }
     }

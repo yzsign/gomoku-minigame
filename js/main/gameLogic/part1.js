@@ -349,7 +349,7 @@ app.truncateNameToWidth = function(ctx, text, maxW) {
 }
 
 /**
- * 棋盘两侧昵称与头像几何（绘制与点击共用）
+ * 棋盘两侧头像几何（绘制与点击共用）
  */
 app.computeBoardNameLabelLayout = function(layout) {
   var lay = layout || app.layout;
@@ -457,6 +457,86 @@ app.computeBoardNameLabelLayout = function(layout) {
   var myTextX = r.bx + pad + myNameExtra;
   var oppNameExtra = hasOppAv ? 2 * avR + 6 : 0;
   var oppNameRightX = r.bx + r.bw - pad - oppNameExtra;
+  var myCx = r.bx + pad + avR;
+  var myCy = textTop + fontPx * 0.5;
+  var oppCx = r.bx + r.bw - pad - avR;
+  var oppCy = r.by - outerGap - fontPx * 0.5;
+  /**
+   * Q/W/E/R：独立于头像，横向居中。
+   * 对手条：标题/局时区下方（topBar 起算）；己方条：底栏「离开/悔棋…」上方（红框区域）。
+   */
+  var itemGap = app.rpx(10);
+  var itemSize = Math.max(44, Math.min(70, Math.round(avR * 0.92)));
+  var propPanelW = 4 * itemSize + 3 * itemGap;
+  var propPanelH = itemSize;
+  var propMargin = app.rpx(16);
+  var maxPanelW = app.W - 2 * propMargin;
+  if (propPanelW > maxPanelW) {
+    itemSize = Math.max(36, Math.floor((maxPanelW - 3 * itemGap) / 4));
+    propPanelW = 4 * itemSize + 3 * itemGap;
+    propPanelH = itemSize;
+  }
+  var propKeys = ['border', 'shadow', 'blur', 'reset'];
+  var propSlots = ['Q', 'W', 'E', 'R'];
+  function buildPropPanel(panelLeft, panelTop) {
+    var items = [];
+    var pi;
+    for (pi = 0; pi < 4; pi++) {
+      items.push({
+        key: propKeys[pi],
+        slotLetter: propSlots[pi],
+        left: panelLeft + pi * (itemSize + itemGap),
+        top: panelTop,
+        w: itemSize,
+        h: itemSize
+      });
+    }
+    return {
+      left: panelLeft,
+      top: panelTop,
+      w: propPanelW,
+      h: propPanelH,
+      btnRadius: Math.max(6, app.rpx(8)),
+      items: items
+    };
+  }
+  var safeBottom = 0;
+  if (
+    app.sys &&
+    app.sys.safeArea &&
+    typeof app.sys.safeArea.bottom === 'number'
+  ) {
+    safeBottom = Math.max(0, app.H - app.sys.safeArea.bottom);
+  }
+  var barH =
+    lay.bottomY != null
+      ? 2 * (app.H - safeBottom - lay.bottomY)
+      : 0;
+  if (!(barH > 0 && barH < app.H * 0.4)) {
+    barH = (app.W * (app.GAME_ACTION_BAR_H_RPX != null ? app.GAME_ACTION_BAR_H_RPX : 128)) / 750;
+  }
+  var stripGap = app.rpx(10);
+  var topBarReserve = lay.topBar != null ? lay.topBar : app.rpx(88);
+  /** 对手条：优先在标题/局时区下（与截图上区一致）；放不下时再贴棋盘顶缘上方 */
+  var underHeader = topBarReserve + app.rpx(8);
+  var aboveBoard = r.by - propPanelH - stripGap;
+  var oppPropTop =
+    underHeader + propPanelH <= r.by - stripGap
+      ? underHeader
+      : Math.max(topBarReserve + app.rpx(4), aboveBoard);
+  /** 己方条：底栏「离开/悔棋…」正上方；不与本人头像、底栏重叠 */
+  var barTop = app.H - safeBottom - barH;
+  var myPropTop = barTop - stripGap - propPanelH;
+  var myAvBottom = myCy + avR + app.rpx(8);
+  if (myPropTop < myAvBottom) {
+    myPropTop = myAvBottom;
+  }
+  if (myPropTop + propPanelH > barTop - stripGap) {
+    myPropTop = Math.max(myAvBottom, barTop - stripGap - propPanelH);
+  }
+  var propCenterLeft = (app.W - propPanelW) * 0.5;
+  var myPropPanel = buildPropPanel(propCenterLeft, myPropTop);
+  var oppPropPanel = buildPropPanel(propCenterLeft, oppPropTop);
   return {
     r: r,
     pad: pad,
@@ -470,13 +550,15 @@ app.computeBoardNameLabelLayout = function(layout) {
     hasOppAv: hasOppAv,
     textTop: textTop,
     myTextX: myTextX,
-    myCx: r.bx + pad + avR,
-    /** 与本人昵称同一行垂直中线（见 draw 中 textBaseline 'middle'） */
-    myCy: textTop + fontPx * 0.5,
+    myCx: myCx,
+    /** 本人头像圆心纵坐标 */
+    myCy: myCy,
     oppNameRightX: oppNameRightX,
-    oppCx: r.bx + r.bw - pad - avR,
-    /** 与对手昵称同一行垂直中线（见 draw 中 textBaseline 'middle'） */
-    oppCy: r.by - outerGap - fontPx * 0.5
+    oppCx: oppCx,
+    /** 对手头像圆心纵坐标 */
+    oppCy: oppCy,
+    myPropPanel: myPropPanel,
+    oppPropPanel: oppPropPanel
   };
 }
 
@@ -545,34 +627,22 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
     return;
   }
   th = th || (typeof app.getUiTheme === 'function' ? app.getUiTheme() : {});
-  var oppName = app.getOpponentDisplayName();
-  var myName = app.getMyDisplayName();
   ctx.save();
-  var ink = th && th.id === 'ink';
-  ctx.shadowColor = ink ? 'rgba(0, 0, 0, 0.35)' : 'rgba(255, 252, 248, 0.75)';
-  ctx.shadowBlur = ink ? 3 : 4;
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = ink ? 1 : 1;
-  ctx.font =
-    'bold ' +
-    L.fontPx +
-    'px "PingFang SC","Hiragino Sans GB",sans-serif';
-  ctx.fillStyle = (th && th.title) || (th && th.subtitle) || '#333';
-  oppName = app.truncateNameToWidth(
-    ctx,
-    oppName,
-    Math.max(32, L.maxW - (L.hasOppAv ? L.avR * 2 + 6 : 0))
-  );
-  myName = app.truncateNameToWidth(
-    ctx,
-    myName,
-    Math.max(32, L.maxW - (L.hasMyAv ? L.avR * 2 + 6 : 0))
-  );
+  var strikeAvatarFx =
+    typeof app.getAvatarBoardSkillStrikeAvatarFrameFx === 'function'
+      ? app.getAvatarBoardSkillStrikeAvatarFrameFx(layout)
+      : null;
   /** 对手：棋盘右上角外侧；无网络图时用服务端性别或「与本人相反」默认 */
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(oppName, app.snapPx(L.oppNameRightX), app.snapPx(L.oppCy));
   if (L.hasOppAv) {
+    var oppSkillFx =
+      strikeAvatarFx && strikeAvatarFx.forSide === 'opp' ? strikeAvatarFx : null;
+    ctx.save();
+    if (oppSkillFx) {
+      ctx.translate(oppSkillFx.dx, oppSkillFx.dy);
+      ctx.translate(oppSkillFx.cx, oppSkillFx.cy);
+      ctx.scale(oppSkillFx.scale, oppSkillFx.scale);
+      ctx.translate(-oppSkillFx.cx, -oppSkillFx.cy);
+    }
     if (
       L.oppImg === defaultAvatars.getGuardianBotAvatarImage() &&
       L.oppImg &&
@@ -618,9 +688,45 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
         th
       );
     }
+    if (
+      oppSkillFx &&
+      oppSkillFx.extraRing &&
+      oppSkillFx.extraRing.alpha > 0.012
+    ) {
+      var or = oppSkillFx.extraRing;
+      var ringPad = app.rpx(or.padRpx != null ? or.padRpx : 2);
+      var ringLw = Math.max(1.1, app.rpx(or.lineRpx != null ? or.lineRpx : 2.2));
+      var sc = oppSkillFx.scale > 0.001 ? oppSkillFx.scale : 1;
+      ctx.save();
+      ctx.shadowColor =
+        'rgba(255, 165, 85, ' + (0.42 * (or.glow != null ? or.glow : 0)) + ')';
+      ctx.shadowBlur = app.rpx(11) * (or.glow != null ? or.glow : 0);
+      ctx.beginPath();
+      ctx.arc(
+        L.oppCx,
+        L.oppCy,
+        L.avR + ringPad,
+        0,
+        Math.PI * 2
+      );
+      ctx.strokeStyle = 'rgba(255, 210, 155, ' + or.alpha + ')';
+      ctx.lineWidth = ringLw / sc;
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
   }
   /** 我：棋盘左下角外侧；无网络图时用服务端 users.gender 对应默认 */
   if (L.hasMyAv) {
+    var myStrikeFx =
+      strikeAvatarFx && strikeAvatarFx.forSide === 'my' ? strikeAvatarFx : null;
+    ctx.save();
+    if (myStrikeFx) {
+      ctx.translate(myStrikeFx.dx, myStrikeFx.dy);
+      ctx.translate(myStrikeFx.cx, myStrikeFx.cy);
+      ctx.scale(myStrikeFx.scale, myStrikeFx.scale);
+      ctx.translate(-myStrikeFx.cx, -myStrikeFx.cy);
+    }
     defaultAvatars.drawCircleAvatar(
       ctx,
       L.myImg,
@@ -649,14 +755,338 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
         th
       );
     }
+    if (
+      myStrikeFx &&
+      myStrikeFx.extraRing &&
+      myStrikeFx.extraRing.alpha > 0.012
+    ) {
+      var mr = myStrikeFx.extraRing;
+      var myRingPad = app.rpx(mr.padRpx != null ? mr.padRpx : 2);
+      var myRingLw = Math.max(1.1, app.rpx(mr.lineRpx != null ? mr.lineRpx : 2.2));
+      var mySc = myStrikeFx.scale > 0.001 ? myStrikeFx.scale : 1;
+      ctx.save();
+      ctx.shadowColor =
+        'rgba(255, 165, 85, ' + (0.42 * (mr.glow != null ? mr.glow : 0)) + ')';
+      ctx.shadowBlur = app.rpx(11) * (mr.glow != null ? mr.glow : 0);
+      ctx.beginPath();
+      ctx.arc(L.myCx, L.myCy, L.avR + myRingPad, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255, 210, 155, ' + mr.alpha + ')';
+      ctx.lineWidth = myRingLw / mySc;
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
   }
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = (th && th.title) || (th && th.subtitle) || '#333';
-  ctx.fillText(myName, app.snapPx(L.myTextX), app.snapPx(L.myCy));
-  ctx.shadowBlur = 0;
-  ctx.shadowOffsetY = 0;
   ctx.restore();
+};
+
+/**
+ * 对局头像旁 Q/W/E/R：与当前界面风格（檀木 / 青瓷 / 水墨）一致，同源 {@link shopModalUiFromTheme} 卡面色与主色描边。
+ */
+app.getPropBarUiColors = function(th) {
+  th = th || (typeof app.getUiTheme === 'function' ? app.getUiTheme() : {});
+  var id = th.id || 'classic';
+  var primary = th.btnPrimary || '#5C4738';
+  var title = th.title || '#2c2620';
+  var S =
+    typeof app.shopModalUiFromTheme === 'function'
+      ? app.shopModalUiFromTheme(th)
+      : null;
+  if (S) {
+    return {
+      btnInnerG0: S.cardG0,
+      btnInnerG1: S.cardG1,
+      btnIdleBorder: S.stroke,
+      btnOnBorder: S.focusStroke || primary,
+      btnLetter: title,
+      pressShadow: S.focusShadow
+    };
+  }
+  if (id === 'mint') {
+    return {
+      btnInnerG0: 'rgba(255, 255, 255, 0.94)',
+      btnInnerG1: 'rgba(225, 241, 237, 0.95)',
+      btnIdleBorder: 'rgba(46, 117, 134, 0.32)',
+      btnOnBorder: primary,
+      btnLetter: '#143942',
+      pressShadow: 'rgba(31, 86, 100, 0.28)'
+    };
+  }
+  if (id === 'ink') {
+    return {
+      btnInnerG0: 'rgba(255, 252, 248, 0.97)',
+      btnInnerG1: 'rgba(236, 228, 218, 0.95)',
+      btnIdleBorder: 'rgba(74, 66, 58, 0.36)',
+      btnOnBorder: primary,
+      btnLetter: '#242018',
+      pressShadow: 'rgba(34, 28, 24, 0.24)'
+    };
+  }
+  return {
+    btnInnerG0: '#fffefb',
+    btnInnerG1: '#f5f1eb',
+    btnIdleBorder: 'rgba(200, 188, 172, 0.85)',
+    btnOnBorder: primary,
+    btnLetter: title,
+    pressShadow: 'rgba(224, 124, 46, 0.28)'
+  };
+};
+
+app.shouldShowAvatarPropBar = function() {
+  if (app.screen !== 'game' || app.gameOver) {
+    return false;
+  }
+  if (app.showResultOverlay && (app.gameOver || app.onlineResultOverlaySticky)) {
+    return false;
+  }
+  if (
+    typeof app.isOnlineFriendMatchNotStarted === 'function' &&
+    app.isOnlineFriendMatchNotStarted()
+  ) {
+    return false;
+  }
+  return true;
+};
+
+app.drawBoardAvatarPropPanels = function(ctx, layout, th) {
+  if (!app.shouldShowAvatarPropBar()) {
+    return;
+  }
+  var L = app.computeBoardNameLabelLayout(layout);
+  if (!L || !L.myPropPanel || !L.oppPropPanel) {
+    return;
+  }
+  if (!L.hasMyAv && !L.hasOppAv) {
+    return;
+  }
+  th = th || (typeof app.getUiTheme === 'function' ? app.getUiTheme() : {});
+  var pc =
+    typeof app.getPropBarUiColors === 'function'
+      ? app.getPropBarUiColors(th)
+      : app.getPropBarUiColors({});
+
+  function rrPath(c, x, y, w, h, rad) {
+    c.beginPath();
+    c.moveTo(x + rad, y);
+    c.arcTo(x + w, y, x + w, y + h, rad);
+    c.arcTo(x + w, y + h, x, y + h, rad);
+    c.arcTo(x, y + h, x, y, rad);
+    c.arcTo(x, y, x + w, y, rad);
+    c.closePath();
+  }
+
+  if (typeof app.prepareAvatarBoardSkillPanelImages === 'function') {
+    app.prepareAvatarBoardSkillPanelImages();
+  }
+
+  function drawOnePanel(panel, side) {
+    var slotR = Math.max(6, app.rpx(8));
+    var letterFs = Math.max(16, Math.round(panel.items[0].h * 0.42));
+    var pulse =
+      side === 'my' ? app.avatarPropPressPulseMy : app.avatarPropPressPulseOpp;
+    var it;
+    ctx.save();
+    for (it = 0; it < panel.items.length; it++) {
+      var itm = panel.items[it];
+      var isPressVis =
+        pulse &&
+        pulse.key === itm.key &&
+        pulse.until != null &&
+        Date.now() < pulse.until;
+
+      ctx.save();
+      if (isPressVis) {
+        ctx.shadowColor = pc.pressShadow || 'rgba(92, 71, 56, 0.22)';
+        ctx.shadowBlur = app.rpx(10);
+      }
+      rrPath(ctx, itm.left, itm.top, itm.w, itm.h, slotR);
+      var lg = ctx.createLinearGradient(
+        itm.left,
+        itm.top,
+        itm.left + itm.w,
+        itm.top + itm.h
+      );
+      lg.addColorStop(0, pc.btnInnerG0 || '#fffefb');
+      lg.addColorStop(1, pc.btnInnerG1 || '#f5f1eb');
+      ctx.fillStyle = lg;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = isPressVis ? pc.btnOnBorder || th.btnPrimary : pc.btnIdleBorder;
+      ctx.lineWidth = isPressVis ? Math.max(2, app.rpx(2)) : 1;
+      ctx.stroke();
+      ctx.restore();
+
+      var skillDef =
+        typeof app.getAvatarBoardSkillDef === 'function'
+          ? app.getAvatarBoardSkillDef(itm.key)
+          : null;
+      var skillImg =
+        skillDef && skillDef.iconSrc && typeof app.getAvatarBoardSkillImageIfReady === 'function'
+          ? app.getAvatarBoardSkillImageIfReady(skillDef.iconSrc)
+          : null;
+      if (skillDef && skillDef.iconSrc && skillImg && skillImg.width && skillImg.height) {
+        var slotScale =
+          skillDef.slotIcon && skillDef.slotIcon.scaleInSlot != null
+            ? skillDef.slotIcon.scaleInSlot
+            : 0.55;
+        var iconM = Math.min(itm.w, itm.h) * slotScale;
+        var iconW = iconM;
+        var iconH = (skillImg.height / skillImg.width) * iconW;
+        var cx = itm.left + itm.w * 0.5;
+        var cy = itm.top + itm.h * 0.5;
+        var slotRot =
+          typeof app.getAvatarBoardSkillBladeRotationRad === 'function'
+            ? app.getAvatarBoardSkillBladeRotationRad(layout, skillDef)
+            : Math.PI / 6;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(slotRot);
+        ctx.drawImage(skillImg, -iconW * 0.5, -iconH * 0.5, iconW, iconH);
+        ctx.restore();
+      } else {
+        ctx.font =
+          '700 ' +
+          letterFs +
+          'px "PingFang SC","Microsoft YaHei",sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = pc.btnLetter || th.title || '#2c2620';
+        ctx.fillText(
+          itm.slotLetter || '?',
+          itm.left + itm.w * 0.5,
+          itm.top + itm.h * 0.5
+        );
+      }
+      if (
+        side === 'my' &&
+        typeof app.getAvatarBoardSkillCooldownRemainMs === 'function'
+      ) {
+        var cdRem = app.getAvatarBoardSkillCooldownRemainMs('my', itm.key);
+        if (cdRem > 0) {
+          ctx.save();
+          rrPath(ctx, itm.left, itm.top, itm.w, itm.h, slotR);
+          ctx.fillStyle = 'rgba(22, 18, 16, 0.48)';
+          ctx.fill();
+          ctx.font =
+            '700 ' +
+            Math.max(12, Math.round(Math.min(itm.w, itm.h) * 0.34)) +
+            'px "PingFang SC","Microsoft YaHei",sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = 'rgba(255, 248, 240, 0.95)';
+          ctx.fillText(
+            String(Math.ceil(cdRem / 1000)),
+            itm.left + itm.w * 0.5,
+            itm.top + itm.h * 0.52
+          );
+          ctx.restore();
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  if (L.hasMyAv) {
+    drawOnePanel(L.myPropPanel, 'my');
+  }
+  if (L.hasOppAv) {
+    drawOnePanel(L.oppPropPanel, 'opp');
+  }
+};
+
+app.hitAvatarPropPanel = function(clientX, clientY) {
+  if (!app.shouldShowAvatarPropBar()) {
+    return null;
+  }
+  var L = app.computeBoardNameLabelLayout(app.layout);
+  if (!L || !L.myPropPanel) {
+    return null;
+  }
+  function inRect(x, y, rect) {
+    return (
+      x >= rect.left &&
+      x <= rect.left + rect.w &&
+      y >= rect.top &&
+      y <= rect.top + rect.h
+    );
+  }
+  var i;
+  if (L.hasMyAv) {
+    for (i = 0; i < L.myPropPanel.items.length; i++) {
+      if (inRect(clientX, clientY, L.myPropPanel.items[i])) {
+        return { side: 'my', key: L.myPropPanel.items[i].key };
+      }
+    }
+  }
+  if (L.hasOppAv) {
+    for (i = 0; i < L.oppPropPanel.items.length; i++) {
+      if (inRect(clientX, clientY, L.oppPropPanel.items[i])) {
+        return { side: 'opp', key: L.oppPropPanel.items[i].key };
+      }
+    }
+  }
+  return null;
+};
+
+/** 点击 Q/W/E/R 后短时高亮（无技能逻辑）；约 280ms */
+app.AVATAR_PROP_PRESS_MS = 280;
+
+app.clearAvatarPropPressVisual = function() {
+  if (typeof app.clearAvatarBoardSkillVfx === 'function') {
+    app.clearAvatarBoardSkillVfx();
+  }
+  if (typeof app.clearAvatarBoardSkillCooldowns === 'function') {
+    app.clearAvatarBoardSkillCooldowns();
+  }
+  app.avatarPropPressPulseMy = null;
+  app.avatarPropPressPulseOpp = null;
+  if (app._avatarPropPressTmrMy) {
+    try {
+      clearTimeout(app._avatarPropPressTmrMy);
+    } catch (eM) {}
+    app._avatarPropPressTmrMy = null;
+  }
+  if (app._avatarPropPressTmrOpp) {
+    try {
+      clearTimeout(app._avatarPropPressTmrOpp);
+    } catch (eO) {}
+    app._avatarPropPressTmrOpp = null;
+  }
+};
+
+app.flashAvatarPropKeyPress = function(side, key) {
+  var started = false;
+  if (typeof app.startAvatarBoardSkillFromPanelKey === 'function') {
+    started = !!app.startAvatarBoardSkillFromPanelKey(side, key);
+  }
+  if (
+    !started &&
+    side === 'my' &&
+    typeof app.isAvatarBoardSkillOnCooldown === 'function' &&
+    app.isAvatarBoardSkillOnCooldown(side, key)
+  ) {
+    return;
+  }
+  var pulseName = side === 'my' ? 'avatarPropPressPulseMy' : 'avatarPropPressPulseOpp';
+  var tmrName = side === 'my' ? '_avatarPropPressTmrMy' : '_avatarPropPressTmrOpp';
+  var dur = app.AVATAR_PROP_PRESS_MS != null ? app.AVATAR_PROP_PRESS_MS : 280;
+  app[pulseName] = { key: key, until: Date.now() + dur };
+  if (app[tmrName]) {
+    try {
+      clearTimeout(app[tmrName]);
+    } catch (eT) {}
+  }
+  var self = app;
+  app[tmrName] = setTimeout(function() {
+    app[tmrName] = null;
+    app[pulseName] = null;
+    if (typeof self.draw === 'function') {
+      self.draw();
+    }
+  }, dur + 20);
+  if (typeof app.draw === 'function') {
+    app.draw();
+  }
 };
 
 app.clearOnlineChatAvatarBubbleState = function() {
@@ -1687,6 +2117,13 @@ app.friendListHomeUiFromTheme = function(th) {
           : '#e0d6c8',
     avatarChar: th.title,
     name: th.title,
+    /** 好友列表未读私聊角标 */
+    unreadDot:
+      id === 'mint'
+        ? '#e53935'
+        : id === 'ink'
+          ? '#e57373'
+          : '#d32f2f',
     online: winTitle,
     offline: th.muted,
     actionHint: th.muted,
@@ -1708,7 +2145,45 @@ app.friendListHomeUiFromTheme = function(th) {
         ? 'rgba(46, 117, 134, 0.22)'
         : id === 'ink'
           ? 'rgba(74, 66, 58, 0.24)'
-          : 'rgba(200, 188, 172, 0.45)'
+          : 'rgba(200, 188, 172, 0.45)',
+    /** 私聊顶栏：与侧栏渐变中段一致 */
+    chatHeaderBg: panelArr[1],
+    /** 私聊消息列表区（暖色 parchment，非微信灰） */
+    chatMsgBg:
+      id === 'mint'
+        ? 'rgba(226, 241, 239, 0.96)'
+        : id === 'ink'
+          ? 'rgba(235, 229, 221, 0.96)'
+          : 'rgba(244, 236, 226, 0.96)',
+    /** 对方气泡：与列表药丸卡片一致 */
+    chatBubbleOther:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.94)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 248, 0.96)'
+          : 'rgba(255, 253, 248, 0.97)',
+    chatBubbleOtherStroke:
+      id === 'mint'
+        ? 'rgba(46, 117, 134, 0.2)'
+        : id === 'ink'
+          ? 'rgba(74, 66, 58, 0.22)'
+          : 'rgba(200, 188, 172, 0.4)',
+    /** 己方气泡：主题色浅铺，与杂货铺主按钮同源 */
+    chatBubbleSelf:
+      id === 'mint'
+        ? 'rgba(55, 132, 146, 0.24)'
+        : id === 'ink'
+          ? 'rgba(105, 86, 68, 0.3)'
+          : 'rgba(191, 144, 99, 0.34)',
+    chatAvatarSelfFallback:
+      id === 'mint'
+        ? '#c5e0dc'
+        : id === 'ink'
+          ? '#cfc4b8'
+          : '#ead8c8',
+    chatCursor: th.btnPrimary,
+    chatSendActive: th.btnPrimary,
+    chatSendInactive: th.muted
   };
 };
 
@@ -2204,6 +2679,18 @@ app.gameBarResetImg = null;
 app.gameBarInviteImg = null;
 app.gameBarDrawImg = null;
 app.gameBarResignImg = null;
+/** 首页好友列表悬浮球 `images/ui/chat4.png`（失败时回退矢量圆+图标） */
+app.homeFriendFabImg = null;
+/**
+ * 好友私聊键盘上推：对 wx.onKeyboardHeightChange 的 height 再换算到与 app.W/app.H 一致的逻辑 px。
+ * 顶起过量可把 scale 改小（如 0.92）；若仍明显偏大且 DPR>1，可将 divideDpr 设为 true 再试。
+ */
+app.friendDmKeyboardHeightScale = 1;
+app.friendDmKeyboardHeightDivideDpr = false;
+/** 输入条与键盘之间的留白（rpx，经 app.rpx） */
+app.friendDmKeyboardTopExtraPadRpx = 16;
+/** 当前 windowHeight 比唤起键盘前小超过此 rpx 时，视为系统已缩小窗口，不再减 kbH */
+app.friendDmKeyboardShrinkThresholdRpx = 24;
 /** 战绩页：在当前页面上以遮罩弹出棋谱回放（不切换 screen） */
 app.historyReplayOverlayVisible = false;
 /** 战绩列表：在回放图标上按下时的行记录与 touch identifier */
@@ -2250,7 +2737,7 @@ app.homeMascotSheetImg = null;
 app.MASCOT_SHEET_FRAME_COUNT = 41;
 app.MASCOT_SHEET_FPS = 8;
 /** 修改首页 PNG 或路径时递增，避免热重载仍认为「已加载」而跳过 */
-app.HOME_UI_ASSETS_REV = 47;
+app.HOME_UI_ASSETS_REV = 49;
 /** 吉祥物资源所在分包（见 game.json）；wx.loadSubpackage 成功后再加载大图 */
 app.HOME_SUBPACKAGE_NAME = 'res-mascot';
 /** 分包内吉祥物路径前缀；失败时回退主包 images/ui/ */

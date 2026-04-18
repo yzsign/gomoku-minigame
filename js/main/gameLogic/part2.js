@@ -284,6 +284,12 @@ app.startOnlineSocket = function() {
       }
       return;
     }
+    if (data.type === 'AVATAR_SKILL') {
+      if (typeof app.applyOnlineIncomingAvatarBoardSkill === 'function') {
+        app.applyOnlineIncomingAvatarBoardSkill(data);
+      }
+      return;
+    }
     if (data.type === 'STATE') {
       app.applyOnlineState(data);
     }
@@ -1235,9 +1241,10 @@ app.loadHomeUiAssets = function() {
   app.gameBarInviteImg = null;
   app.gameBarDrawImg = null;
   app.gameBarResignImg = null;
+  app.homeFriendFabImg = null;
 
   var loadPhase = 1;
-  var remaining = 16;
+  var remaining = 17;
   function oneDone() {
     remaining--;
     if (remaining > 0) {
@@ -1392,6 +1399,9 @@ app.loadHomeUiAssets = function() {
   });
   bind('images/ui/game-bar-resign.png', function (im) {
     app.gameBarResignImg = im;
+  });
+  bind('images/ui/chat4.png', function (im) {
+    app.homeFriendFabImg = im;
   });
 }
 
@@ -2653,6 +2663,27 @@ app.sendOnlineChat = function(kind, text) {
       })
     });
   } catch (e1) {}
+};
+
+/** 联机同步头像旁技能表现（短剑等）：服务端仅转发给对手 */
+app.sendOnlineAvatarSkill = function(panelKey) {
+  if (
+    !app.socketTask ||
+    typeof app.socketTask.send !== 'function' ||
+    !app.onlineWsConnected ||
+    app.onlineSpectatorMode ||
+    app.gameOver
+  ) {
+    return;
+  }
+  try {
+    app.socketTask.send({
+      data: JSON.stringify({
+        type: 'AVATAR_SKILL_SEND',
+        panelKey: panelKey != null ? String(panelKey) : 'border'
+      })
+    });
+  } catch (eAv) {}
 };
 
 };

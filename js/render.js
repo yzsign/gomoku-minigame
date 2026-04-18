@@ -178,11 +178,13 @@ function sampleInkPaperColors(img) {
 
 /**
  * 黑底抠图：近黑背景变透明（软边）
+ * @param {{ sum0?: number, sum1?: number, keyLinear?: boolean }} [opts] 可选；不传则与水墨荷花一致。keyLinear 时过渡区用线性 α（更亮，适合已是彩图/透明底素材）
  */
-function buildBlackKeyForeground(img) {
+function buildBlackKeyForeground(img, opts) {
   if (typeof wx === 'undefined' || !wx.createCanvas || !img.width) {
     return null;
   }
+  opts = opts && typeof opts === 'object' ? opts : {};
   var maxDim = 560;
   var w = img.width;
   var h = img.height;
@@ -199,8 +201,9 @@ function buildBlackKeyForeground(img) {
   c2.drawImage(img, 0, 0, nw, nh);
   var data = c2.getImageData(0, 0, nw, nh);
   var d = data.data;
-  var sum0 = 22;
-  var sum1 = 52;
+  var sum0 = opts.sum0 != null ? opts.sum0 : 22;
+  var sum1 = opts.sum1 != null ? opts.sum1 : 52;
+  var keyLinear = !!opts.keyLinear;
   var i;
   var r;
   var g;
@@ -219,7 +222,7 @@ function buildBlackKeyForeground(img) {
       a = 1;
     } else {
       t = (sum - sum0) / (sum1 - sum0);
-      a = t * t;
+      a = keyLinear ? t : t * t;
     }
     d[i + 3] = Math.round(d[i + 3] * a);
   }
@@ -1215,6 +1218,8 @@ module.exports = {
   snapLogical: snapLogical,
   preloadQinghuaPattern: preloadQinghuaPattern,
   preloadInkLotusPattern: preloadInkLotusPattern,
+  /** 近黑背景软边抠透明（水墨叠图、好友 FAB 等复用） */
+  buildBlackKeyForeground: buildBlackKeyForeground,
   drawBoard: drawBoard,
   drawBoardCoordinateLabels: drawBoardCoordinateLabels,
   drawPieces: drawPieces,

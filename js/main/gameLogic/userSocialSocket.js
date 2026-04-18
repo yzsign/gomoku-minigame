@@ -7,7 +7,6 @@ module.exports = function registerUserSocialSocket(app, deps) {
   var roomApi = deps.roomApi;
   var authApi = deps.authApi;
 
-  app.userSocialSocketConnectGen = 0;
   app.userSocialSocketTask = null;
   app._userSocialPingTimer = null;
   app._userSocialReconnectTimer = null;
@@ -118,8 +117,8 @@ module.exports = function registerUserSocialSocket(app, deps) {
     }
   }
 
-  function handleUserSocialMessage(raw, myGen) {
-    if (myGen !== app.userSocialSocketConnectGen) {
+  function handleUserSocialMessage(raw, sock) {
+    if (!sock || app.userSocialSocketTask !== sock) {
       return;
     }
     var data;
@@ -155,10 +154,27 @@ module.exports = function registerUserSocialSocket(app, deps) {
     if (!payload) {
       return;
     }
-    var fromId = payload.fromUserId;
+    if (typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch (ePl) {
+        return;
+      }
+    }
+    var fromId =
+      payload.fromUserId != null
+        ? payload.fromUserId
+        : payload.from_user_id != null
+          ? payload.from_user_id
+          : payload.senderUserId != null
+            ? payload.senderUserId
+            : payload.sender_user_id != null
+              ? payload.sender_user_id
+              : null;
+    var rawNick = payload.fromNickname || payload.from_nickname;
     var nick =
-      typeof payload.fromNickname === 'string' && payload.fromNickname.trim()
-        ? payload.fromNickname.trim()
+      typeof rawNick === 'string' && rawNick.trim()
+        ? rawNick.trim()
         : '好友';
     var raw = payload.text != null ? String(payload.text) : '';
     var sentAt =
@@ -167,24 +183,6 @@ module.exports = function registerUserSocialSocket(app, deps) {
         : Date.now();
     if (typeof app.appendFriendChatIncomingMessage === 'function') {
       app.appendFriendChatIncomingMessage(fromId, nick, raw, sentAt);
-    }
-    var viewingSame =
-      app.homeFriendChatPeer &&
-      app.homeFriendChatPeer.peerUserId != null &&
-      String(app.homeFriendChatPeer.peerUserId) === String(fromId);
-    if (viewingSame) {
-      return;
-    }
-    var preview = raw.length > 120 ? raw.slice(0, 120) + '…' : raw;
-    if (typeof wx.showModal === 'function') {
-      wx.showModal({
-        title: '好友消息',
-        content: nick + '：' + preview,
-        showCancel: false,
-        confirmText: '知道了'
-      });
-    } else if (typeof wx.showToast === 'function') {
-      wx.showToast({ title: nick + '发来消息', icon: 'none' });
     }
   }
 
@@ -279,7 +277,6 @@ module.exports = function registerUserSocialSocket(app, deps) {
   }
 
   app.stopUserSocialSocket = function() {
-    app.userSocialSocketConnectGen++;
     clearUserSocialPing();
     clearUserSocialReconnectTimer();
     if (app.userSocialSocketTask && typeof app.userSocialSocketTask.close === 'function') {
@@ -300,8 +297,6 @@ module.exports = function registerUserSocialSocket(app, deps) {
       app.stopUserSocialSocket();
       return;
     }
-    app.userSocialSocketConnectGen++;
-    var myGen = app.userSocialSocketConnectGen;
     clearUserSocialPing();
     clearUserSocialReconnectTimer();
     if (app.userSocialSocketTask && typeof app.userSocialSocketTask.close === 'function') {
@@ -312,10 +307,10 @@ module.exports = function registerUserSocialSocket(app, deps) {
     app.userSocialSocketTask = null;
 
     var url = roomApi.userWebSocketUrl(st);
-    app.userSocialSocketTask = wx.connectSocket({
+    var sock = wx.connectSocket({
       url: url,
       fail: function() {
-        if (myGen !== app.userSocialSocketConnectGen) {
+        if (app.userSocialSocketTask !== sock) {
           return;
         }
         app.userSocialSocketTask = null;
@@ -323,28 +318,29 @@ module.exports = function registerUserSocialSocket(app, deps) {
         scheduleUserSocialReconnect(false);
       }
     });
-    if (!app.userSocialSocketTask || !app.userSocialSocketTask.onOpen) {
+    app.userSocialSocketTask = sock;
+    if (!sock || !sock.onOpen) {
       return;
     }
-    app.userSocialSocketTask.onOpen(function() {
-      if (myGen !== app.userSocialSocketConnectGen) {
+    sock.onOpen(function() {
+      if (app.userSocialSocketTask !== sock) {
         return;
       }
       app.userSocialReconnectAttempt = 0;
       app._userSocialPingTimer = setInterval(function() {
-        if (myGen !== app.userSocialSocketConnectGen || !app.userSocialSocketTask) {
+        if (app.userSocialSocketTask !== sock) {
           return;
         }
         try {
-          app.userSocialSocketTask.send({ data: 'ping' });
+          sock.send({ data: 'ping' });
         } catch (eSend) {}
       }, PING_INTERVAL_MS);
     });
-    app.userSocialSocketTask.onMessage(function(res) {
-      handleUserSocialMessage(res.data, myGen);
+    sock.onMessage(function(res) {
+      handleUserSocialMessage(res.data, sock);
     });
-    app.userSocialSocketTask.onClose(function() {
-      if (myGen !== app.userSocialSocketConnectGen) {
+    sock.onClose(function() {
+      if (app.userSocialSocketTask !== sock) {
         return;
       }
       clearUserSocialPing();
@@ -352,8 +348,8 @@ module.exports = function registerUserSocialSocket(app, deps) {
       app.userSocialReconnectAttempt = (app.userSocialReconnectAttempt || 0) + 1;
       scheduleUserSocialReconnect(false);
     });
-    app.userSocialSocketTask.onError(function() {
-      if (myGen !== app.userSocialSocketConnectGen) {
+    sock.onError(function() {
+      if (app.userSocialSocketTask !== sock) {
         return;
       }
       clearUserSocialPing();

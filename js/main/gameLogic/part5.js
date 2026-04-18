@@ -560,7 +560,13 @@ app.draw = function() {
     );
   }
 
+  if (typeof app.drawBoardAvatarPropPanels === 'function') {
+    app.drawBoardAvatarPropPanels(app.ctx, app.layout, th);
+  }
   app.drawBoardNameLabels(app.ctx, app.layout, th);
+  if (typeof app.drawQSwordSkillEffect === 'function') {
+    app.drawQSwordSkillEffect(app.ctx, app.layout);
+  }
   if (typeof app.drawOnlineAvatarChatBubbles === 'function') {
     app.drawOnlineAvatarChatBubbles(app.ctx, app.layout, th);
   }
@@ -4085,6 +4091,16 @@ wx.onTouchStart(function (e) {
       if (chHit.kind === 'inside') {
         return;
       }
+    }
+  }
+
+  if (app.screen === 'game') {
+    var propHit = app.hitAvatarPropPanel(x, y);
+    if (propHit) {
+      if (typeof app.flashAvatarPropKeyPress === 'function') {
+        app.flashAvatarPropKeyPress(propHit.side, propHit.key);
+      }
+      return;
     }
   }
 
