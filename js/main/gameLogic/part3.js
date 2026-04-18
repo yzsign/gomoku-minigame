@@ -1540,6 +1540,9 @@ app.resetGame = function() {
   app.current = app.BLACK;
   app.gameOver = false;
   app.winner = null;
+  if (typeof app.clearPerGameConsumableSkillState === 'function') {
+    app.clearPerGameConsumableSkillState();
+  }
   if (app.isPvpLocal) {
     app.lastMsg = '';
     app.draw();
@@ -1682,6 +1685,9 @@ app.restoreDailyPuzzleInitial = function() {
   app.winningLineCells = null;
   app.lastOpponentMove = null;
   app.lastMsg = '每日残局';
+  if (typeof app.clearPerGameConsumableSkillState === 'function') {
+    app.clearPerGameConsumableSkillState();
+  }
   if (typeof app.refreshDailyPuzzleLastOpponentMove === 'function') {
     app.refreshDailyPuzzleLastOpponentMove();
   }
@@ -1724,6 +1730,9 @@ app.startDailyPuzzleFromApiData = function(d) {
   app.showResultOverlay = false;
   app.screen = 'game';
   app.lastMsg = '每日残局';
+  if (typeof app.clearPerGameConsumableSkillState === 'function') {
+    app.clearPerGameConsumableSkillState();
+  }
   app.draw();
   if (typeof app.scheduleDailyPuzzleBotIfNeeded === 'function') {
     app.scheduleDailyPuzzleBotIfNeeded();
@@ -1964,6 +1973,9 @@ app.pollRandomMatchPairedOnce = function() {
         app.gameOver = false;
         app.winner = null;
         app.lastMsg = '';
+        if (typeof app.clearPerGameConsumableSkillState === 'function') {
+          app.clearPerGameConsumableSkillState();
+        }
         app.startOnlineSocket();
         app.draw();
       },
@@ -2160,6 +2172,9 @@ app.startRandomMatch = function() {
           app.gameOver = false;
           app.winner = null;
           app.lastMsg = '';
+          if (typeof app.clearPerGameConsumableSkillState === 'function') {
+            app.clearPerGameConsumableSkillState();
+          }
           app.startOnlineSocket();
           app.draw();
           return;
@@ -2178,6 +2193,9 @@ app.startRandomMatch = function() {
           app.gameOver = false;
           app.winner = null;
           app.lastMsg = '';
+          if (typeof app.clearPerGameConsumableSkillState === 'function') {
+            app.clearPerGameConsumableSkillState();
+          }
           app.pollRandomMatchPairedOnce();
           app.randomMatchPairedPollTimer = setInterval(function () {
             app.pollRandomMatchPairedOnce();
@@ -2296,6 +2314,9 @@ app.startPvpLocal = function() {
   app.gameOver = false;
   app.winner = null;
   app.lastMsg = '';
+  if (typeof app.clearPerGameConsumableSkillState === 'function') {
+    app.clearPerGameConsumableSkillState();
+  }
   app.draw();
 }
 

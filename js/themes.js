@@ -374,6 +374,24 @@ var PIECE_SKIN_IDS = ['basic', 'tuan_moe', 'qingtao_libai'];
 /** 杂货铺装备种类：与后端 CosmeticCategory 对应（小写便于 JSON）；每类同时只穿戴一件 */
 var SHOP_CATEGORY_PIECE_SKIN = 'piece_skin';
 var SHOP_CATEGORY_THEME = 'theme';
+var SHOP_CATEGORY_CONSUMABLE = 'consumable';
+
+/** 杂货铺短剑：与后端 ConsumableService.DAGGER_REDEEM_COST_ACTIVITY_POINTS 一致 */
+var CONSUMABLE_DAGGER_COST_POINTS = 2;
+
+var consumableDaggerCountServerCache = 0;
+
+function setConsumableDaggerCountFromServer(n) {
+  if (typeof n === 'number' && !isNaN(n)) {
+    consumableDaggerCountServerCache = Math.max(0, Math.floor(n));
+  } else {
+    consumableDaggerCountServerCache = 0;
+  }
+}
+
+function getConsumableDaggerCount() {
+  return consumableDaggerCountServerCache;
+}
 
 /** 杂货铺列表（双列 4 行，每页 8 格） */
 var PIECE_SKINS_PER_PAGE = 8;
@@ -461,6 +479,9 @@ function getShopCategory(entry) {
   if (!entry || typeof entry !== 'object') {
     return SHOP_CATEGORY_PIECE_SKIN;
   }
+  if (entry.shopCategory === SHOP_CATEGORY_CONSUMABLE || entry.kind === 'consumable') {
+    return SHOP_CATEGORY_CONSUMABLE;
+  }
   if (entry.shopCategory === SHOP_CATEGORY_THEME || entry.kind === 'theme') {
     return SHOP_CATEGORY_THEME;
   }
@@ -513,6 +534,16 @@ function getPieceSkinCatalog() {
       label: '水墨',
       rowStatus: inkOk ? 'owned' : 'points',
       costPoints: inkOk ? 0 : THEME_SHOP_COST_POINTS
+    },
+    {
+      kind: 'consumable',
+      consumableKind: 'dagger',
+      shopCategory: SHOP_CATEGORY_CONSUMABLE,
+      id: 'dagger_skill',
+      locked: false,
+      label: '短剑',
+      rowStatus: 'points',
+      costPoints: CONSUMABLE_DAGGER_COST_POINTS
     }
   ];
 }
@@ -520,6 +551,9 @@ function getPieceSkinCatalog() {
 function getPieceSkinCatalogLabel(entry) {
   if (!entry) {
     return '';
+  }
+  if (entry.kind === 'consumable' && entry.id === 'dagger_skill') {
+    return '短剑';
   }
   if (entry.label) {
     return entry.label;
@@ -754,6 +788,10 @@ var themesExports = {
   PIECE_SKINS_PER_PAGE: PIECE_SKINS_PER_PAGE,
   SHOP_CATEGORY_PIECE_SKIN: SHOP_CATEGORY_PIECE_SKIN,
   SHOP_CATEGORY_THEME: SHOP_CATEGORY_THEME,
+  SHOP_CATEGORY_CONSUMABLE: SHOP_CATEGORY_CONSUMABLE,
+  CONSUMABLE_DAGGER_COST_POINTS: CONSUMABLE_DAGGER_COST_POINTS,
+  setConsumableDaggerCountFromServer: setConsumableDaggerCountFromServer,
+  getConsumableDaggerCount: getConsumableDaggerCount,
   getShopCategory: getShopCategory,
   getPieceSkinCatalog: getPieceSkinCatalog,
   getPieceSkinCatalogLabel: getPieceSkinCatalogLabel,

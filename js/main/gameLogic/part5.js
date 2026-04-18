@@ -162,6 +162,23 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
       app.drawPieceSkinModalThemeBoardPreview(themeImgCx, cyPv, pvw, pvh, thm);
     }
     app.ctx.restore();
+  } else if (entry && themes.getShopCategory(entry) === themes.SHOP_CATEGORY_CONSUMABLE) {
+    var dImg = app.shopConsumableDaggerPreviewImg;
+    if (dImg && dImg.width && dImg.height) {
+      var maxSz = pr * 4.6;
+      var scD = Math.min(maxSz / dImg.width, maxSz / dImg.height);
+      var dw = dImg.width * scD;
+      var dh = dImg.height * scD;
+      app.ctx.drawImage(
+        dImg,
+        app.snapPx(midX - dw * 0.5),
+        app.snapPx(cyPv - dh * 0.5),
+        dw,
+        dh
+      );
+    } else {
+      app.drawPieceSkinModalPlaceholderPieces(midX, cyPv, pr);
+    }
   } else {
   /** 未解锁也绘制真实棋子预览（贴图/渐变），便于「看见皮肤长什么样」；锁定态略降低不透明度 */
   var skinMeta = entry.id && themes.PIECE_SKINS[entry.id];
@@ -248,14 +265,27 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     var pointsSlotLeft = rx + cardPad;
     var pointsSlotRight = btnL - gapBeforeBtn;
     var pointsTextCx = (pointsSlotLeft + pointsSlotRight) / 2;
-    app.ctx.font = app.rpx(18) + 'px ' + app.PIECE_SKIN_FONT_UI;
-    app.ctx.fillStyle = U ? U.pointsCost : '#b08040';
+    var holdCt =
+      entry.kind === 'consumable' && typeof themes.getConsumableDaggerCount === 'function'
+        ? themes.getConsumableDaggerCount()
+        : null;
     app.ctx.textAlign = 'center';
     app.ctx.textBaseline = 'middle';
+    if (holdCt != null) {
+      app.ctx.font = app.rpx(16) + 'px ' + app.PIECE_SKIN_FONT_UI;
+      app.ctx.fillStyle = U && U.muted ? U.muted : '#8a7868';
+      app.ctx.fillText(
+        '持有' + holdCt + '个',
+        app.snapPx(pointsTextCx),
+        app.snapPx(rowMidY - app.rpx(11))
+      );
+    }
+    app.ctx.font = app.rpx(18) + 'px ' + app.PIECE_SKIN_FONT_UI;
+    app.ctx.fillStyle = U ? U.pointsCost : '#b08040';
     app.ctx.fillText(
       entry.costPoints + '积分',
       app.snapPx(pointsTextCx),
-      app.snapPx(rowMidY)
+      app.snapPx(holdCt != null ? rowMidY + app.rpx(10) : rowMidY)
     );
     var gBtn = app.ctx.createLinearGradient(btnL, btnTop, btnL, btnTop + btnH);
     if (U) {

@@ -462,26 +462,38 @@ app.computeBoardNameLabelLayout = function(layout) {
   var oppCx = r.bx + r.bw - pad - avR;
   var oppCy = r.by - outerGap - fontPx * 0.5;
   /**
-   * Q/W/E/R：独立于头像，横向居中。
+   * 仅 Q（短剑 / border）；W/E/R 不展示。短剑服务端库存为 0 时不展示技能条。
    * 对手条：标题/局时区下方（topBar 起算）；己方条：底栏「离开/悔棋…」上方（红框区域）。
    */
+  var daggerInv =
+    themes && typeof themes.getConsumableDaggerCount === 'function'
+      ? themes.getConsumableDaggerCount()
+      : 0;
+  var propKeys = daggerInv > 0 ? ['border'] : [];
+  var propSlots = daggerInv > 0 ? ['Q'] : [];
+  var numItems = propKeys.length;
   var itemGap = app.rpx(10);
   var itemSize = Math.max(44, Math.min(70, Math.round(avR * 0.92)));
-  var propPanelW = 4 * itemSize + 3 * itemGap;
-  var propPanelH = itemSize;
+  var propPanelW =
+    numItems === 0 ? 0 : numItems * itemSize + (numItems - 1) * itemGap;
+  var propPanelH = numItems === 0 ? 0 : itemSize;
   var propMargin = app.rpx(16);
   var maxPanelW = app.W - 2 * propMargin;
-  if (propPanelW > maxPanelW) {
-    itemSize = Math.max(36, Math.floor((maxPanelW - 3 * itemGap) / 4));
-    propPanelW = 4 * itemSize + 3 * itemGap;
+  if (numItems > 0 && propPanelW > maxPanelW) {
+    itemSize = Math.max(
+      36,
+      Math.floor((maxPanelW - (numItems - 1) * itemGap) / numItems)
+    );
+    propPanelW = numItems * itemSize + (numItems - 1) * itemGap;
     propPanelH = itemSize;
   }
-  var propKeys = ['border', 'shadow', 'blur', 'reset'];
-  var propSlots = ['Q', 'W', 'E', 'R'];
   function buildPropPanel(panelLeft, panelTop) {
+    if (numItems === 0) {
+      return null;
+    }
     var items = [];
     var pi;
-    for (pi = 0; pi < 4; pi++) {
+    for (pi = 0; pi < numItems; pi++) {
       items.push({
         key: propKeys[pi],
         slotLetter: propSlots[pi],
@@ -517,22 +529,26 @@ app.computeBoardNameLabelLayout = function(layout) {
   }
   var stripGap = app.rpx(10);
   var topBarReserve = lay.topBar != null ? lay.topBar : app.rpx(88);
-  /** 对手条：优先在标题/局时区下（与截图上区一致）；放不下时再贴棋盘顶缘上方 */
+  /** 对手条：优先在标题/局时区下（与截图上区一致）；放不下时再贴棋盘顶缘上方（仅在有技能格时占位） */
   var underHeader = topBarReserve + app.rpx(8);
   var aboveBoard = r.by - propPanelH - stripGap;
   var oppPropTop =
-    underHeader + propPanelH <= r.by - stripGap
+    numItems === 0
       ? underHeader
-      : Math.max(topBarReserve + app.rpx(4), aboveBoard);
+      : underHeader + propPanelH <= r.by - stripGap
+        ? underHeader
+        : Math.max(topBarReserve + app.rpx(4), aboveBoard);
   /** 己方条：底栏「离开/悔棋…」正上方；不与本人头像、底栏重叠 */
   var barTop = app.H - safeBottom - barH;
   var myPropTop = barTop - stripGap - propPanelH;
   var myAvBottom = myCy + avR + app.rpx(8);
-  if (myPropTop < myAvBottom) {
-    myPropTop = myAvBottom;
-  }
-  if (myPropTop + propPanelH > barTop - stripGap) {
-    myPropTop = Math.max(myAvBottom, barTop - stripGap - propPanelH);
+  if (numItems > 0) {
+    if (myPropTop < myAvBottom) {
+      myPropTop = myAvBottom;
+    }
+    if (myPropTop + propPanelH > barTop - stripGap) {
+      myPropTop = Math.max(myAvBottom, barTop - stripGap - propPanelH);
+    }
   }
   var propCenterLeft = (app.W - propPanelW) * 0.5;
   var myPropPanel = buildPropPanel(propCenterLeft, myPropTop);
@@ -853,10 +869,11 @@ app.drawBoardAvatarPropPanels = function(ctx, layout, th) {
     return;
   }
   var L = app.computeBoardNameLabelLayout(layout);
-  if (!L || !L.myPropPanel || !L.oppPropPanel) {
+  if (!L || !L.myPropPanel) {
     return;
   }
-  if (!L.hasMyAv && !L.hasOppAv) {
+  /** 仅绘制己方 Q/W/E/R，不显示对手技能栏 */
+  if (!L.hasMyAv) {
     return;
   }
   th = th || (typeof app.getUiTheme === 'function' ? app.getUiTheme() : {});
@@ -986,12 +1003,7 @@ app.drawBoardAvatarPropPanels = function(ctx, layout, th) {
     ctx.restore();
   }
 
-  if (L.hasMyAv) {
-    drawOnePanel(L.myPropPanel, 'my');
-  }
-  if (L.hasOppAv) {
-    drawOnePanel(L.oppPropPanel, 'opp');
-  }
+  drawOnePanel(L.myPropPanel, 'my');
 };
 
 app.hitAvatarPropPanel = function(clientX, clientY) {
@@ -1011,18 +1023,12 @@ app.hitAvatarPropPanel = function(clientX, clientY) {
     );
   }
   var i;
-  if (L.hasMyAv) {
-    for (i = 0; i < L.myPropPanel.items.length; i++) {
-      if (inRect(clientX, clientY, L.myPropPanel.items[i])) {
-        return { side: 'my', key: L.myPropPanel.items[i].key };
-      }
-    }
+  if (!L.hasMyAv) {
+    return null;
   }
-  if (L.hasOppAv) {
-    for (i = 0; i < L.oppPropPanel.items.length; i++) {
-      if (inRect(clientX, clientY, L.oppPropPanel.items[i])) {
-        return { side: 'opp', key: L.oppPropPanel.items[i].key };
-      }
+  for (i = 0; i < L.myPropPanel.items.length; i++) {
+    if (inRect(clientX, clientY, L.myPropPanel.items[i])) {
+      return { side: 'my', key: L.myPropPanel.items[i].key };
     }
   }
   return null;
@@ -1065,6 +1071,9 @@ app.flashAvatarPropKeyPress = function(side, key) {
     typeof app.isAvatarBoardSkillOnCooldown === 'function' &&
     app.isAvatarBoardSkillOnCooldown(side, key)
   ) {
+    return;
+  }
+  if (!started && side === 'my' && key === 'border' && app._consumableDaggerUseInFlight) {
     return;
   }
   var pulseName = side === 'my' ? 'avatarPropPressPulseMy' : 'avatarPropPressPulseOpp';
@@ -4098,7 +4107,20 @@ app.applyOnlineState = function(data) {
   if (data.matchRound !== undefined && data.matchRound !== null) {
     var mr = Number(data.matchRound);
     if (!isNaN(mr) && mr >= 1) {
+      var prevMr =
+        typeof app.onlineMatchRound === 'number' && !isNaN(app.onlineMatchRound)
+          ? app.onlineMatchRound
+          : 0;
       app.onlineMatchRound = mr;
+      if (
+        app.isPvpOnline &&
+        !app.onlineSpectatorMode &&
+        prevMr > 0 &&
+        mr > prevMr &&
+        typeof app.clearPerGameConsumableSkillState === 'function'
+      ) {
+        app.clearPerGameConsumableSkillState();
+      }
     }
   }
   if (data.winner === undefined || data.winner === null) {

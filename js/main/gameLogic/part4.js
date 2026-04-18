@@ -2051,6 +2051,26 @@ app.syncPieceSkinModalSelectionFromCurrent = function() {
   app.pieceSkinModalPage = Math.floor(pick / per);
 }
 
+app.ensureShopConsumableDaggerPreview = function() {
+  if (
+    app.shopConsumableDaggerPreviewImg &&
+    app.shopConsumableDaggerPreviewImg.width
+  ) {
+    return;
+  }
+  if (typeof app.ensureAvatarBoardSkillImage !== 'function') {
+    return;
+  }
+  app.ensureAvatarBoardSkillImage('images/skill/q-dagger.png', function(img) {
+    if (img && img.width) {
+      app.shopConsumableDaggerPreviewImg = img;
+    }
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+  });
+};
+
 app.openPieceSkinModal = function() {
   if (app.pieceSkinModalVisible) {
     return;
@@ -2059,6 +2079,9 @@ app.openPieceSkinModal = function() {
   app.stopPieceSkinModalAnim();
   app.syncPieceSkinModalSelectionFromCurrent();
   app.syncMeRatingIfAuthed(function () {
+    if (typeof app.ensureShopConsumableDaggerPreview === 'function') {
+      app.ensureShopConsumableDaggerPreview();
+    }
     app.pieceSkinModalVisible = true;
     app.pieceSkinModalAnim = 0;
     app.runPieceSkinModalOpenAnim();
@@ -2376,6 +2399,72 @@ app.redeemPieceSkinWithPoints = function() {
   ) {
     return;
   }
+  if (themes.getShopCategory(entry) === themes.SHOP_CATEGORY_CONSUMABLE) {
+    if (entry.consumableKind !== 'dagger' && entry.id !== 'dagger_skill') {
+      return;
+    }
+    if (!authApi.getSessionToken()) {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: '请先登录', icon: 'none' });
+      }
+      app.draw();
+      return;
+    }
+    if (app.pieceSkinRedeemInFlight) {
+      return;
+    }
+    app.pieceSkinRedeemInFlight = true;
+    wx.request(
+      Object.assign(roomApi.meConsumableRedeemOptions('dagger'), {
+        success: function(res) {
+          app.pieceSkinRedeemInFlight = false;
+          var d = res.data;
+          if (d && typeof d === 'string') {
+            try {
+              d = JSON.parse(d);
+            } catch (eParse) {
+              d = null;
+            }
+          }
+          if (res.statusCode === 401) {
+            if (typeof wx.showToast === 'function') {
+              wx.showToast({ title: '请先登录', icon: 'none' });
+            }
+            app.draw();
+            return;
+          }
+          if (res.statusCode === 200 && d) {
+            if (typeof app.mergeConsumableMutationToCache === 'function') {
+              app.mergeConsumableMutationToCache(d);
+            }
+            if (typeof wx.showToast === 'function') {
+              wx.showToast({ title: '兑换成功', icon: 'none' });
+            }
+            app.draw();
+            return;
+          }
+          var msg = '兑换失败';
+          if (res.statusCode === 409 && d && d.code === 'INSUFFICIENT_POINTS') {
+            msg = '积分不足';
+          } else if (res.statusCode === 400 && d && d.code === 'INVALID_KIND') {
+            msg = '无法兑换';
+          }
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: msg, icon: 'none' });
+          }
+          app.draw();
+        },
+        fail: function() {
+          app.pieceSkinRedeemInFlight = false;
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '网络错误', icon: 'none' });
+          }
+          app.draw();
+        }
+      })
+    );
+    return;
+  }
   if (!authApi.getSessionToken()) {
     if (typeof wx.showToast === 'function') {
       wx.showToast({ title: '请先登录', icon: 'none' });
@@ -2453,6 +2542,13 @@ app.applyPieceSkinWear = function() {
   var cat = themes.getPieceSkinCatalog();
   var entry = cat[app.pieceSkinModalPendingIdx];
   if (!entry) {
+    return;
+  }
+  if (themes.getShopCategory(entry) === themes.SHOP_CATEGORY_CONSUMABLE) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '对局内按 Q 使用短剑', icon: 'none' });
+    }
+    app.draw();
     return;
   }
   if (entry.rowStatus === 'points' && entry.costPoints && entry.costPoints > 0) {

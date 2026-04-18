@@ -259,6 +259,30 @@ function mePieceSkinRedeemOptions(skinId) {
   };
 }
 
+/** POST /api/me/consumables/redeem：团团积分兑换消耗品（body: { kind: dagger }） */
+function meConsumableRedeemOptions(kind) {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/consumables/redeem',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify({ kind: kind })
+  };
+}
+
+/** POST /api/me/consumables/use：对局内使用消耗品（body: { kind: dagger }） */
+function meConsumableUseOptions(kind) {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/consumables/use',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify({ kind: kind })
+  };
+}
+
 /** POST /api/me/piece-skin：当前佩戴棋子皮肤写入数据库（body: { pieceSkinId }） */
 function mePieceSkinSelectOptions(pieceSkinId) {
   return {
@@ -514,6 +538,8 @@ module.exports = {
   meGameHistoryOptions: meGameHistoryOptions,
   meCheckinOptions: meCheckinOptions,
   mePieceSkinRedeemOptions: mePieceSkinRedeemOptions,
+  meConsumableRedeemOptions: meConsumableRedeemOptions,
+  meConsumableUseOptions: meConsumableUseOptions,
   mePieceSkinSelectOptions: mePieceSkinSelectOptions,
   meEquipOptions: meEquipOptions,
   roomOpponentRatingOptions: roomOpponentRatingOptions,

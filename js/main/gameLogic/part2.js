@@ -342,6 +342,9 @@ app.startOnlineAsHost = function() {
       app.gameOver = false;
       app.winner = null;
       app.lastMsg = '等待白方加入…';
+      if (typeof app.clearPerGameConsumableSkillState === 'function') {
+        app.clearPerGameConsumableSkillState();
+      }
       app.startOnlineSocket();
       app.draw();
       if (typeof wx.shareAppMessage === 'function') {
@@ -425,6 +428,9 @@ app.startPuzzleFriendInvite = function() {
           app.gameOver = false;
           app.winner = null;
           app.lastMsg = '等待好友加入…';
+          if (typeof app.clearPerGameConsumableSkillState === 'function') {
+            app.clearPerGameConsumableSkillState();
+          }
           app.startOnlineSocket();
           app.draw();
           if (typeof wx.shareAppMessage === 'function') {
@@ -569,6 +575,9 @@ app.startDailyPuzzleFriendInvite = function() {
           app.gameOver = false;
           app.winner = null;
           app.lastMsg = '等待好友加入…';
+          if (typeof app.clearPerGameConsumableSkillState === 'function') {
+            app.clearPerGameConsumableSkillState();
+          }
           app.startOnlineSocket();
           app.draw();
           if (typeof wx.shareAppMessage === 'function') {
@@ -689,6 +698,9 @@ app.joinOnlineAsGuest = function(roomId) {
       app.gameOver = false;
       app.winner = null;
       app.lastMsg = '';
+      if (typeof app.clearPerGameConsumableSkillState === 'function') {
+        app.clearPerGameConsumableSkillState();
+      }
       app.startOnlineSocket();
       app.draw();
     },
@@ -2346,6 +2358,34 @@ app.syncCheckinStateFromServerPayload = function(d) {
     var thid = d.themeId.trim();
     themes.applyThemeIdFromServer(thid);
     app.themeId = themes.clampThemeIdToUnlocked(thid);
+  }
+  if (typeof d.consumableDaggerCount === 'number' && !isNaN(d.consumableDaggerCount)) {
+    if (typeof themes.setConsumableDaggerCountFromServer === 'function') {
+      themes.setConsumableDaggerCountFromServer(d.consumableDaggerCount);
+    }
+  }
+}
+
+/**
+ * POST /api/me/consumables/redeem|use 成功后合并积分与短剑库存。
+ * @param {object} d
+ */
+app.mergeConsumableMutationToCache = function(d) {
+  if (!d || typeof d !== 'object') {
+    return;
+  }
+  if (typeof d.activityPoints === 'number' && !isNaN(d.activityPoints)) {
+    var ap2 = Math.max(0, Math.floor(d.activityPoints));
+    if (app.checkinStateCache) {
+      app.checkinStateCache.tuanPoints = ap2;
+    }
+  }
+  if (
+    typeof d.consumableDaggerCount === 'number' &&
+    !isNaN(d.consumableDaggerCount) &&
+    typeof themes.setConsumableDaggerCountFromServer === 'function'
+  ) {
+    themes.setConsumableDaggerCountFromServer(d.consumableDaggerCount);
   }
 }
 

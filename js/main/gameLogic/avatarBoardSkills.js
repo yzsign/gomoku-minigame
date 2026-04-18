@@ -3,7 +3,7 @@
  * 在 gameLogic/index.js 中于 part1 之前 require，由 app 上的方法供绘制与触控调用。
  *
  * 新增技能步骤概要：
- * 1. 在 BY_PANEL_KEY 中增加一项，key 须与 computeBoardNameLabelLayout 里 propKeys 一致（border/shadow/blur/reset）。
+ * 1. 在 BY_PANEL_KEY 中增加一项；当前对局条仅展示 border（Q），与 computeBoardNameLabelLayout 一致。
  * 2. 配置 iconSrc、imageAngleOffsetRad、fly（时长、sizeMul、刺入点 toInsetAlongAvatar 等）、pierce、audio.src。
  * 3. 若与当前「直线飞向对手头像」不同，在 drawAvatarBoardSkillVfx 内按 def.id 或 def.fly.trajectory 分支扩展绘制/插值。
  * 4. 复杂轨迹可把位置计算抽到独立函数并在本文件内引用。
@@ -22,7 +22,7 @@ function smoothstep01(t) {
 /**
  * @typedef {object} AvatarBoardSkillDef
  * @property {string} id 唯一 id
- * @property {string} panelKey 与 computeBoardNameLabelLayout 中 propKeys 一致：border|shadow|blur|reset
+ * @property {string} panelKey 与 computeBoardNameLabelLayout 一致（当前仅 border/Q）
  * @property {string} [iconSrc] 槽内小图标；无则显示字母
  * @property {number} [imageAngleOffsetRad] 贴图「剑尖/朝前」相对飞行向量的旋转修正（与飞行共用）
  * @property {object} [fly] 仅己方点按触发、飞向对手时有效
@@ -47,8 +47,16 @@ function smoothstep01(t) {
  * @property {number} [cooldownMs] 使用成功后同一格冷却时间（毫秒）
  */
 
-module.exports = function avatarBoardSkills(app) {
+module.exports = function avatarBoardSkills(app, deps) {
+  deps = deps || {};
+  var roomApi = deps.roomApi;
+  var themes = deps.themes;
+  var authApi = deps.authApi;
   app._avatarBoardSkillCdUntilByKey = Object.create(null);
+
+  app.clearPerGameConsumableSkillState = function() {
+    app.avatarDaggerUsedThisGame = false;
+  };
 
   /** @type {Object.<string, AvatarBoardSkillDef>} */
   var BY_PANEL_KEY = {
@@ -313,7 +321,8 @@ module.exports = function avatarBoardSkills(app) {
   }
 
   /**
-   * 己方点击某格时触发；仅处理带 fly 的技能，且目前仅 side===my 飞向对手
+   * 己方点击某格时触发；仅处理带 fly 的技能，且目前仅 side===my 飞向对手。
+   * 短剑（border）须先 POST /api/me/consumables/use 成功后再播放；单局限一次。
    */
   app.startAvatarBoardSkillFromPanelKey = function(side, panelKey) {
     if (side !== 'my' || app.gameOver) {
@@ -324,73 +333,150 @@ module.exports = function avatarBoardSkills(app) {
       return;
     }
     if (def.cooldownMs != null && def.cooldownMs > 0) {
-      var until = app._avatarBoardSkillCdUntilByKey[panelKey];
-      if (until != null && Date.now() < until) {
+      var untilCd = app._avatarBoardSkillCdUntilByKey[panelKey];
+      if (untilCd != null && Date.now() < untilCd) {
         return false;
       }
     }
-    app.clearAvatarBoardSkillVfx();
-    var L = app.computeBoardNameLabelLayout(app.layout);
-    if (!L || !L.hasMyAv || !L.hasOppAv) {
-      return;
-    }
-    var dx = L.oppCx - L.myCx;
-    var dy = L.oppCy - L.myCy;
-    var dlen = Math.sqrt(dx * dx + dy * dy);
-    if (dlen < 1) {
-      return;
-    }
-    var ux = dx / dlen;
-    var uy = dy / dlen;
-    var avR = L.avR;
-    var fa = def.fly.fromAlongAvatar || { avRMul: 1, rpxExtra: 10 };
-    var off = Math.max(6, app.rpx(fa.rpxExtra != null ? fa.rpxExtra : 10));
-    var fromX = L.myCx + ux * (avR * (fa.avRMul != null ? fa.avRMul : 1) + off);
-    var fromY = L.myCy + uy * (avR * (fa.avRMul != null ? fa.avRMul : 1) + off);
-    var inset = def.fly.toInsetAlongAvatar != null ? def.fly.toInsetAlongAvatar : 0.42;
-    var toX = L.oppCx - ux * (avR * inset);
-    var toY = L.oppCy - uy * (avR * inset);
 
-    app.avatarBoardSkillVfx = {
-      skillId: def.id,
-      panelKey: panelKey,
-      startMs: Date.now(),
-      durationMs: def.fly.durationMs,
-      holdMs: def.fly.holdMs,
-      fromX: fromX,
-      fromY: fromY,
-      toX: toX,
-      toY: toY
-    };
-    /** 兼容旧绘制里读 qSwordAnim / qSwordImg */
-    app.qSwordAnim = app.avatarBoardSkillVfx;
-    playSkillAudio(def);
-    if (def.iconSrc) {
-      app.ensureAvatarBoardSkillImage(def.iconSrc, function(img) {
-        if (img) {
-          app.qSwordImg = img;
+    function executeAvatarBoardSkillFly() {
+      app.clearAvatarBoardSkillVfx();
+      var L = app.computeBoardNameLabelLayout(app.layout);
+      if (!L || !L.hasMyAv || !L.hasOppAv) {
+        return;
+      }
+      var dx = L.oppCx - L.myCx;
+      var dy = L.oppCy - L.myCy;
+      var dlen = Math.sqrt(dx * dx + dy * dy);
+      if (dlen < 1) {
+        return;
+      }
+      var ux = dx / dlen;
+      var uy = dy / dlen;
+      var avR = L.avR;
+      var fa = def.fly.fromAlongAvatar || { avRMul: 1, rpxExtra: 10 };
+      var off = Math.max(6, app.rpx(fa.rpxExtra != null ? fa.rpxExtra : 10));
+      var fromX = L.myCx + ux * (avR * (fa.avRMul != null ? fa.avRMul : 1) + off);
+      var fromY = L.myCy + uy * (avR * (fa.avRMul != null ? fa.avRMul : 1) + off);
+      var inset = def.fly.toInsetAlongAvatar != null ? def.fly.toInsetAlongAvatar : 0.42;
+      var toX = L.oppCx - ux * (avR * inset);
+      var toY = L.oppCy - uy * (avR * inset);
+
+      app.avatarBoardSkillVfx = {
+        skillId: def.id,
+        panelKey: panelKey,
+        startMs: Date.now(),
+        durationMs: def.fly.durationMs,
+        holdMs: def.fly.holdMs,
+        fromX: fromX,
+        fromY: fromY,
+        toX: toX,
+        toY: toY
+      };
+      /** 兼容旧绘制里读 qSwordAnim / qSwordImg */
+      app.qSwordAnim = app.avatarBoardSkillVfx;
+      playSkillAudio(def);
+      if (def.iconSrc) {
+        app.ensureAvatarBoardSkillImage(def.iconSrc, function(img) {
+          if (img) {
+            app.qSwordImg = img;
+          }
+        });
+        var cached = IMG_CACHE[cacheKey(def.iconSrc)];
+        if (cached) {
+          app.qSwordImg = cached;
         }
-      });
-      var cached = IMG_CACHE[cacheKey(def.iconSrc)];
-      if (cached) {
-        app.qSwordImg = cached;
+      }
+      app.ensureAvatarBoardSkillAnimTicker();
+      if (def.cooldownMs != null && def.cooldownMs > 0) {
+        app._avatarBoardSkillCdUntilByKey[panelKey] = Date.now() + def.cooldownMs;
+        app.ensureAvatarBoardSkillCooldownTicker();
+      }
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
+      if (
+        typeof app.sendOnlineAvatarSkill === 'function' &&
+        app.isPvpOnline &&
+        !app.onlineSpectatorMode
+      ) {
+        app.sendOnlineAvatarSkill(panelKey);
       }
     }
-    app.ensureAvatarBoardSkillAnimTicker();
-    if (def.cooldownMs != null && def.cooldownMs > 0) {
-      app._avatarBoardSkillCdUntilByKey[panelKey] = Date.now() + def.cooldownMs;
-      app.ensureAvatarBoardSkillCooldownTicker();
+
+    if (panelKey === 'border') {
+      if (app.avatarDaggerUsedThisGame) {
+        if (typeof wx !== 'undefined' && wx.showToast) {
+          wx.showToast({ title: '本局已使用过短剑', icon: 'none' });
+        }
+        return false;
+      }
+      var tok = authApi && authApi.getSessionToken && authApi.getSessionToken();
+      if (!tok) {
+        if (typeof wx !== 'undefined' && wx.showToast) {
+          wx.showToast({ title: '请先登录后使用短剑', icon: 'none' });
+        }
+        return false;
+      }
+      var cnt =
+        themes && typeof themes.getConsumableDaggerCount === 'function'
+          ? themes.getConsumableDaggerCount()
+          : 0;
+      if (cnt < 1) {
+        if (typeof wx !== 'undefined' && wx.showToast) {
+          wx.showToast({ title: '短剑不足，请在杂货铺兑换', icon: 'none' });
+        }
+        return false;
+      }
+      if (app._consumableDaggerUseInFlight) {
+        return false;
+      }
+      if (!roomApi || typeof roomApi.meConsumableUseOptions !== 'function') {
+        return false;
+      }
+      app._consumableDaggerUseInFlight = true;
+      wx.request(
+        Object.assign(roomApi.meConsumableUseOptions('dagger'), {
+          success: function(res) {
+            app._consumableDaggerUseInFlight = false;
+            var d = res.data;
+            if (d && typeof d === 'string') {
+              try {
+                d = JSON.parse(d);
+              } catch (eParse) {
+                d = null;
+              }
+            }
+            if (res.statusCode === 200 && d) {
+              if (typeof app.mergeConsumableMutationToCache === 'function') {
+                app.mergeConsumableMutationToCache(d);
+              }
+              app.avatarDaggerUsedThisGame = true;
+              executeAvatarBoardSkillFly();
+              return;
+            }
+            var msg = '无法使用短剑';
+            if (res.statusCode === 409 && d && d.code === 'NONE_LEFT') {
+              msg = '短剑数量不足';
+            } else if (res.statusCode === 401) {
+              msg = '请先登录';
+            }
+            if (typeof wx !== 'undefined' && wx.showToast) {
+              wx.showToast({ title: msg, icon: 'none' });
+            }
+          },
+          fail: function() {
+            app._consumableDaggerUseInFlight = false;
+            if (typeof wx !== 'undefined' && wx.showToast) {
+              wx.showToast({ title: '网络错误', icon: 'none' });
+            }
+          }
+        })
+      );
+      return false;
     }
-    if (typeof app.draw === 'function') {
-      app.draw();
-    }
-    if (
-      typeof app.sendOnlineAvatarSkill === 'function' &&
-      app.isPvpOnline &&
-      !app.onlineSpectatorMode
-    ) {
-      app.sendOnlineAvatarSkill(panelKey);
-    }
+
+    executeAvatarBoardSkillFly();
     return true;
   };
 
