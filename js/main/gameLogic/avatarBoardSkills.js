@@ -55,6 +55,123 @@ module.exports = function avatarBoardSkills(app, deps) {
   var authApi = deps.authApi;
   app._avatarBoardSkillCdUntilByKey = Object.create(null);
 
+  function easeOutCubic01(t) {
+    if (t <= 0) {
+      return 0;
+    }
+    if (t >= 1) {
+      return 1;
+    }
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  function loveBurstSeeded01(seed, i) {
+    var x = Math.sin(seed * 0.0017 + i * 19.9898) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
+  /** 迷你爱心碎片（局部坐标） */
+  function drawLoveHeartShard(ctx, s, fillA, strokeA) {
+    ctx.fillStyle = 'rgba(255, 75, 118, ' + fillA + ')';
+    ctx.strokeStyle = 'rgba(255, 200, 215, ' + strokeA + ')';
+    ctx.lineWidth = Math.max(0.55, s * 0.07);
+    ctx.beginPath();
+    ctx.moveTo(0, s * 0.2);
+    ctx.bezierCurveTo(-s * 0.42, -s * 0.1, -s * 0.24, -s * 0.42, 0, -s * 0.14);
+    ctx.bezierCurveTo(s * 0.24, -s * 0.42, s * 0.42, -s * 0.1, 0, s * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  /**
+   * 爱心撞击：头像中心高光 + 8～12 颗碎片（依赖 app.rpx，须在本闭包内定义）
+   */
+  function drawLoveImpactBurst(ctx, cx, cy, pierceElapsed, burstSeed) {
+    if (
+      typeof pierceElapsed !== 'number' ||
+      !isFinite(pierceElapsed) ||
+      pierceElapsed < 0 ||
+      pierceElapsed > 1200
+    ) {
+      return;
+    }
+    if (typeof cx !== 'number' || typeof cy !== 'number' || !isFinite(cx) || !isFinite(cy)) {
+      return;
+    }
+    var rpx =
+      typeof app.rpx === 'function'
+        ? function(n) {
+            return app.rpx(n);
+          }
+        : function(n) {
+            return n;
+          };
+    var seed = burstSeed != null ? burstSeed : 0;
+    /** 炸裂爱心整体视觉倍率（碎片尺寸、高光、飞散距离同步放大） */
+    var burstVisScale = 2;
+    var flashMs = 130;
+    if (pierceElapsed < flashMs) {
+      var fu = pierceElapsed / flashMs;
+      var flashA = 0.92 * (1 - fu) * (1 - fu);
+      if (flashA > 0.04) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        var fr = (rpx(4) + rpx(16) * (1 - fu * 0.85)) * burstVisScale;
+        var g = ctx.createRadialGradient(cx, cy, 0, cx, cy, fr);
+        g.addColorStop(0, 'rgba(255,255,255,' + (flashA * 1) + ')');
+        g.addColorStop(0.45, 'rgba(255,248,252,' + (flashA * 0.45) + ')');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(cx, cy, fr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    var n = 8 + Math.floor(loveBurstSeeded01(seed, 0) * 5);
+    var pi;
+    for (pi = 0; pi < n; pi++) {
+      var ang = loveBurstSeeded01(seed, pi + 1) * Math.PI * 2;
+      var speed =
+        rpx(36 + loveBurstSeeded01(seed, pi + 17) * 54) * burstVisScale;
+      var dur = 780 + loveBurstSeeded01(seed, pi + 31) * 340;
+      var t = pierceElapsed / dur;
+      if (t > 1 || t < 0) {
+        continue;
+      }
+      var e = easeOutCubic01(t);
+      var dist = speed * e;
+      var grav =
+        rpx(2.2 + loveBurstSeeded01(seed, pi + 47) * 5.5) *
+        burstVisScale *
+        t *
+        t *
+        7.5;
+      var px = cx + Math.cos(ang) * dist;
+      var py = cy + Math.sin(ang) * dist + grav;
+      var sc = 1 - 0.72 * easeOutCubic01(t);
+      var alpha = 1 - Math.pow(t, 0.62);
+      if (alpha < 0.03) {
+        continue;
+      }
+      var baseS = rpx(8 + loveBurstSeeded01(seed, pi + 61) * 11) * burstVisScale;
+      var s = baseS * sc;
+      var rot =
+        (loveBurstSeeded01(seed, pi + 73) - 0.5) *
+        2.8 *
+        easeOutCubic01(t) *
+        (pi % 2 === 0 ? 1 : -1);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(px, py);
+      ctx.rotate(rot);
+      drawLoveHeartShard(ctx, s, 0.96, 0.65);
+      ctx.restore();
+    }
+  }
+
   /** 新局时调用；短剑仅受服务端库存约束，无单局次数上限 */
   app.clearPerGameConsumableSkillState = function() {};
 
@@ -121,7 +238,7 @@ module.exports = function avatarBoardSkills(app, deps) {
       slotIcon: {
         scaleInSlot: 0.55
       },
-      cooldownMs: 2800
+      cooldownMs: 200
     }
   };
 
@@ -187,8 +304,13 @@ module.exports = function avatarBoardSkills(app, deps) {
       if (typeof onReady === 'function') {
         onReady(img);
       }
+      /** 避免在 app.draw 执行栈内同步再次 draw，导致 save/restore 与状态错乱或卡顿 */
       if (typeof app.draw === 'function') {
-        app.draw();
+        setTimeout(function() {
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+        }, 0);
       }
     };
     img.onerror = function() {
@@ -846,6 +968,10 @@ module.exports = function avatarBoardSkills(app, deps) {
     if (!img || !img.width || !img.height) {
       return;
     }
+    var labForLove =
+      def.id === 'love' && typeof app.computeBoardNameLabelLayout === 'function'
+        ? app.computeBoardNameLabelLayout(layout)
+        : null;
     var fly = def.fly;
     var now = Date.now();
     var flyDur = v.durationMs != null ? v.durationMs : fly.durationMs;
@@ -939,17 +1065,30 @@ module.exports = function avatarBoardSkills(app, deps) {
       shBlur *= 1 + 0.85 * Math.exp(-pierceElapsed / 110);
     }
 
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(bladeRot);
-    ctx.scale(hitPulse, hitPulse);
-    ctx.shadowColor = pierce.shadowColor || 'rgba(30, 26, 22, 0.42)';
-    ctx.shadowBlur = shBlur;
-    ctx.drawImage(img, -w * 0.5, -h * 0.5, w, h);
-    ctx.restore();
+    var lovePierceReplace = def.id === 'love' && inPierce;
+    if (!lovePierceReplace) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(bladeRot);
+      ctx.scale(hitPulse, hitPulse);
+      ctx.shadowColor = pierce.shadowColor || 'rgba(30, 26, 22, 0.42)';
+      ctx.shadowBlur = shBlur;
+      ctx.drawImage(img, -w * 0.5, -h * 0.5, w, h);
+      ctx.restore();
+    }
 
-    if (drawImpactBurstAfterBlade) {
+    if (drawImpactBurstAfterBlade && def.id !== 'love') {
       drawPierceImpactBurst(ctx, v.toX, v.toY, pierceElapsed, pierce);
+    }
+    if (lovePierceReplace) {
+      var burstCx = v.toX;
+      var burstCy = v.toY;
+      if (labForLove) {
+        var remoteLove = !!v.remoteFromOpponent;
+        burstCx = remoteLove ? labForLove.myCx : labForLove.oppCx;
+        burstCy = remoteLove ? labForLove.myCy : labForLove.oppCy;
+      }
+      drawLoveImpactBurst(ctx, burstCx, burstCy, pierceElapsed, v.startMs);
     }
   };
 

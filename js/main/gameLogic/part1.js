@@ -1072,8 +1072,13 @@ app.drawBoardAvatarPropPanels = function(ctx, layout, th) {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillStyle = 'rgba(255, 248, 240, 0.95)';
+          /** 不足 1s 的冷却须显示小数；ceil(cdRem/1000) 会把 200ms 显示成「1」造成误解 */
+          var cdLabel =
+            cdRem < 1000
+              ? (cdRem / 1000).toFixed(1)
+              : String(Math.ceil(cdRem / 1000));
           ctx.fillText(
-            String(Math.ceil(cdRem / 1000)),
+            cdLabel,
             itm.left + itm.w * 0.5,
             itm.top + itm.h * 0.52
           );
