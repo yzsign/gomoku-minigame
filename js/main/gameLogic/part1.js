@@ -909,6 +909,46 @@ app.drawBoardAvatarPropPanels = function(ctx, layout, th) {
   if (!app.shouldShowAvatarPropBar()) {
     return;
   }
+  /** 联机对局首次绘制技能栏前拉取 /api/me/rating，同步 consumableLoveCount / consumableDaggerCount，避免角标一直为 0 */
+  if (
+    app.isPvpOnline &&
+    authApi.getSessionToken &&
+    authApi.getSessionToken() &&
+    !app._consumableCountsSyncedThisGame &&
+    roomApi &&
+    typeof roomApi.meRatingOptions === 'function' &&
+    typeof app.syncCheckinStateFromServerPayload === 'function' &&
+    typeof wx !== 'undefined' &&
+    typeof wx.request === 'function'
+  ) {
+    app._consumableCountsSyncedThisGame = true;
+    wx.request(
+      Object.assign(roomApi.meRatingOptions(), {
+        success: function(res) {
+          if (res.statusCode !== 200 || !res.data) {
+            return;
+          }
+          var d = res.data;
+          if (d && typeof d === 'string') {
+            try {
+              d = JSON.parse(d);
+            } catch (eParse) {
+              d = null;
+            }
+          }
+          if (d) {
+            app.syncCheckinStateFromServerPayload(d);
+            if (typeof app.applyMyGenderFromRatingPayload === 'function') {
+              app.applyMyGenderFromRatingPayload(d);
+            }
+          }
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+        }
+      })
+    );
+  }
   var L = app.computeBoardNameLabelLayout(layout);
   if (!L || !L.myPropPanel) {
     return;

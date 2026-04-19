@@ -561,6 +561,10 @@ app.draw = function() {
   /** 每帧重置为逻辑坐标系，避免某次 save/restore 失衡导致变换累积（画面套叠缩小） */
   app.ctx.setTransform(app.DPR, 0, 0, app.DPR, 0, 0);
   resetCanvasShadowState(app.ctx);
+  /** 离开对局后允许下一局再拉一次 /api/me/rating 同步短剑/爱心库存 */
+  if (app.screen !== 'game') {
+    app._consumableCountsSyncedThisGame = false;
+  }
   if (app.screen !== 'home') {
     app.stopHomeMascotAnimLoop();
     app.checkinModalVisible = false;
@@ -657,10 +661,11 @@ app.draw = function() {
     );
   }
 
+  /** 先画头像再画 Q/W 技能格与库存角标，避免左下角头像叠在槽上盖住爱心/短剑数量 */
+  app.drawBoardNameLabels(app.ctx, app.layout, th);
   if (typeof app.drawBoardAvatarPropPanels === 'function') {
     app.drawBoardAvatarPropPanels(app.ctx, app.layout, th);
   }
-  app.drawBoardNameLabels(app.ctx, app.layout, th);
   if (typeof app.drawQSwordSkillEffect === 'function') {
     app.drawQSwordSkillEffect(app.ctx, app.layout);
   }
