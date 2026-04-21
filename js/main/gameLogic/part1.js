@@ -905,49 +905,63 @@ app.shouldShowAvatarPropBar = function() {
   return true;
 };
 
+/**
+ * 联机对局拉取 GET /api/me/rating，同步 consumableLoveCount / consumableDaggerCount 与 Q/W 装备（好友房与随机匹配一致）。
+ * 由 WebSocket onOpen 尽早触发，避免仅依赖头像道具栏首帧绘制时的竞态。
+ */
+app.syncConsumableBoardSkillsFromServerForOnlineGameIfNeeded = function() {
+  if (
+    !app.isPvpOnline ||
+    !authApi.getSessionToken ||
+    !authApi.getSessionToken() ||
+    app._consumableCountsSyncedThisGame ||
+    !roomApi ||
+    typeof roomApi.meRatingOptions !== 'function' ||
+    typeof app.syncCheckinStateFromServerPayload !== 'function' ||
+    typeof wx === 'undefined' ||
+    !wx.request
+  ) {
+    return;
+  }
+  app._consumableCountsSyncedThisGame = true;
+  wx.request(
+    Object.assign(roomApi.meRatingOptions(), {
+      success: function(res) {
+        if (res.statusCode !== 200 || !res.data) {
+          app._consumableCountsSyncedThisGame = false;
+          return;
+        }
+        var d = res.data;
+        if (d && typeof d === 'string') {
+          try {
+            d = JSON.parse(d);
+          } catch (eParse) {
+            d = null;
+          }
+        }
+        if (d) {
+          app.syncCheckinStateFromServerPayload(d);
+          if (typeof app.applyMyGenderFromRatingPayload === 'function') {
+            app.applyMyGenderFromRatingPayload(d);
+          }
+        }
+        if (typeof app.draw === 'function') {
+          app.draw();
+        }
+      },
+      fail: function() {
+        app._consumableCountsSyncedThisGame = false;
+      }
+    })
+  );
+};
+
 app.drawBoardAvatarPropPanels = function(ctx, layout, th) {
   if (!app.shouldShowAvatarPropBar()) {
     return;
   }
-  /** 联机对局首次绘制技能栏前拉取 /api/me/rating，同步 consumableLoveCount / consumableDaggerCount，避免角标一直为 0 */
-  if (
-    app.isPvpOnline &&
-    authApi.getSessionToken &&
-    authApi.getSessionToken() &&
-    !app._consumableCountsSyncedThisGame &&
-    roomApi &&
-    typeof roomApi.meRatingOptions === 'function' &&
-    typeof app.syncCheckinStateFromServerPayload === 'function' &&
-    typeof wx !== 'undefined' &&
-    typeof wx.request === 'function'
-  ) {
-    app._consumableCountsSyncedThisGame = true;
-    wx.request(
-      Object.assign(roomApi.meRatingOptions(), {
-        success: function(res) {
-          if (res.statusCode !== 200 || !res.data) {
-            return;
-          }
-          var d = res.data;
-          if (d && typeof d === 'string') {
-            try {
-              d = JSON.parse(d);
-            } catch (eParse) {
-              d = null;
-            }
-          }
-          if (d) {
-            app.syncCheckinStateFromServerPayload(d);
-            if (typeof app.applyMyGenderFromRatingPayload === 'function') {
-              app.applyMyGenderFromRatingPayload(d);
-            }
-          }
-          if (typeof app.draw === 'function') {
-            app.draw();
-          }
-        }
-      })
-    );
+  if (typeof app.syncConsumableBoardSkillsFromServerForOnlineGameIfNeeded === 'function') {
+    app.syncConsumableBoardSkillsFromServerForOnlineGameIfNeeded();
   }
   var L = app.computeBoardNameLabelLayout(layout);
   if (!L || !L.myPropPanel) {
@@ -2751,6 +2765,7 @@ app.shouldToastNoOpponentLadderForOnlineOppAvatar = function() {
 
 /**
  * 是否绘制/刷新联机读秒（局时条、头像环、setInterval）；残局房（好友创建或 STATE.puzzleRoom）一律关闭。
+ * 标准好友房：对方未进房、对局未开始时也不显示倒计时（与「等待好友加入」一致）。
  */
 app.shouldShowOnlineGameClockUi = function() {
   if (!app.isPvpOnline) {
@@ -2760,6 +2775,12 @@ app.shouldShowOnlineGameClockUi = function() {
     return false;
   }
   if (app.onlinePuzzleRoomFromWs) {
+    return false;
+  }
+  if (
+    typeof app.isOnlineFriendMatchNotStarted === 'function' &&
+    app.isOnlineFriendMatchNotStarted()
+  ) {
     return false;
   }
   return true;

@@ -252,6 +252,9 @@ app.startOnlineSocket = function() {
     app.onlineWsEverOpened = true;
     app.onlineReconnectAttempt = 0;
     app.clearOnlineReconnectTimer();
+    if (typeof app.syncConsumableBoardSkillsFromServerForOnlineGameIfNeeded === 'function') {
+      app.syncConsumableBoardSkillsFromServerForOnlineGameIfNeeded();
+    }
     app.draw();
   });
   app.socketTask.onMessage(function (res) {
