@@ -385,6 +385,39 @@ function gameReplayByIdOptions(gameId) {
   };
 }
 
+/** GET /api/me/replay-study — 当前用户最新复盘存档 */
+function meReplayStudyGetOptions() {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/replay-study',
+    method: 'GET',
+    header: withAuthHeaders({})
+  };
+}
+
+/**
+ * PUT /api/me/replay-study — 覆盖写入唯一复盘存档
+ * body: { moves, replayStep, board, sideToMove, sourceGameId?, blackPieceSkinId?, whitePieceSkinId? }
+ */
+function meReplayStudyPutOptions(bodyObj) {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/replay-study',
+    method: 'PUT',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify(bodyObj || {})
+  };
+}
+
+/** DELETE /api/me/replay-study — 清除当前用户复盘存档 */
+function meReplayStudyDeleteOptions() {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/replay-study',
+    method: 'DELETE',
+    header: withAuthHeaders({})
+  };
+}
+
 /** GET /api/rooms/chat/messages?roomId=&limit= 联机对局聊天记录 */
 function roomChatMessagesOptions(roomId, limit) {
   var lim =
@@ -557,6 +590,9 @@ module.exports = {
   gameSettleOptions: gameSettleOptions,
   gameReplayByRoomOptions: gameReplayByRoomOptions,
   gameReplayByIdOptions: gameReplayByIdOptions,
+  meReplayStudyGetOptions: meReplayStudyGetOptions,
+  meReplayStudyPutOptions: meReplayStudyPutOptions,
+  meReplayStudyDeleteOptions: meReplayStudyDeleteOptions,
   roomChatMessagesOptions: roomChatMessagesOptions,
   roomChatReportOptions: roomChatReportOptions,
   socialFriendStatusOptions: socialFriendStatusOptions,

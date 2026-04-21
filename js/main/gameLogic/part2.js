@@ -79,10 +79,11 @@ app.restoreAfterCancelledPuzzleFriendInvite = function() {
     app.dailyPuzzleSubmitting = false;
     app.dailyPuzzleResultKind = '';
     app.dailyPuzzleSubmitActivityPointsDelta = null;
+    app.dailyPuzzleLocalStudy = snap.dailyPuzzleLocalStudy === true;
     app.gameOver = false;
     app.winner = null;
     app.lastOpponentMove = null;
-    app.lastMsg = '每日残局';
+    app.lastMsg = snap.dailyPuzzleLocalStudy ? '对局复盘' : '每日残局';
     app.screen = 'game';
     if (typeof app.refreshDailyPuzzleLastOpponentMove === 'function') {
       app.refreshDailyPuzzleLastOpponentMove();
@@ -319,6 +320,8 @@ app.startOnlineAsHost = function() {
       return;
     }
     app.disconnectOnline();
+    app.isDailyPuzzle = false;
+    app.dailyPuzzleLocalStudy = false;
     wx.showLoading({ title: '创建房间…', mask: true });
     wx.request(
       Object.assign(roomApi.roomApiCreateOptions(), {
@@ -527,7 +530,8 @@ app.startDailyPuzzleFriendInvite = function() {
         : null,
       dailyPuzzleSideToMoveStart: app.dailyPuzzleSideToMoveStart,
       dailyPuzzleUserColor: app.dailyPuzzleUserColor,
-      dailyPuzzleBotGen: app.dailyPuzzleBotGen
+      dailyPuzzleBotGen: app.dailyPuzzleBotGen,
+      dailyPuzzleLocalStudy: app.dailyPuzzleLocalStudy === true
     };
     wx.showLoading({ title: '创建房间…', mask: true });
     var board = [];
@@ -554,6 +558,7 @@ app.startDailyPuzzleFriendInvite = function() {
           }
           var d = res.data;
           app.isDailyPuzzle = false;
+          app.dailyPuzzleLocalStudy = false;
           app.dailyPuzzleMeta = null;
           app.dailyPuzzleMoves = [];
           app.dailyPuzzleInitialBoard = null;
@@ -663,6 +668,7 @@ app.joinOnlineAsGuest = function(roomId) {
       }
       var d = res.data;
       app.isDailyPuzzle = false;
+      app.dailyPuzzleLocalStudy = false;
       app.dailyPuzzleMeta = null;
       app.dailyPuzzleMoves = [];
       app.dailyPuzzleInitialBoard = null;
@@ -2128,7 +2134,7 @@ app.getHomeLayout = function() {
   var mascotCy = ipTop + ipBlockH * 0.5;
   var mascotScale = app.rpx(140) / 92;
   var btnTopGap = app.rpx(48);
-  /** 人机 + 每日残局并排一行，避免第四颗全宽主按钮把 Dock/吉祥物顶出屏外 */
+  /** 人机 + 对局复盘入口并排一行，避免第四颗全宽主按钮把 Dock/吉祥物顶出屏外 */
   var btnPairGap = app.rpx(20);
   var halfBtnW = (btnW - btnPairGap) * 0.5;
   var yRandom = ipTop + ipBlockH + btnTopGap + btnH / 2;

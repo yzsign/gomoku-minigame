@@ -2483,6 +2483,8 @@ app.isPvpLocal = false;
 app.isPvpOnline = false;
 /** 每日残局：用户对「守关者」(AI)，提交完整手顺至 /api/me/daily-puzzle/submit */
 app.isDailyPuzzle = false;
+/** true：由棋谱回放「复盘」进入，胜负不提交 /api/me/daily-puzzle/submit */
+app.dailyPuzzleLocalStudy = false;
 app.dailyPuzzleMeta = null;
 app.dailyPuzzleMoves = [];
 app.dailyPuzzleInitialBoard = null;
@@ -2819,6 +2821,8 @@ app.replayAutoTimerId = null;
 /** 棋谱回放双方棋子皮肤（服务端 replay 或本局联机 STATE） */
 app.replayBlackPieceSkinId = null;
 app.replayWhitePieceSkinId = null;
+/** 当前棋谱来源 games.id（存档复盘时可写入服务端 user_replay_study） */
+app.replaySourceGameId = null;
 /** 棋谱回放底栏药丸宽度（与 drawButton 一致；相邻箭头按钮中心距=此值则边缘相贴） */
 app.REPLAY_CTRL_PILL_W = 82;
 /**

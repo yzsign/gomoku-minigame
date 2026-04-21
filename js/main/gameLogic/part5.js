@@ -2014,7 +2014,7 @@ app.hitHomeButton = function(clientX, clientY) {
     return null;
   }
   /**
-   * 不再用 mainBottom 截断：第四颗「每日残局」在部分机型上会低于 mainBottom，
+   * 不再用 mainBottom 截断：第四颗「对局复盘」在部分机型上会低于 mainBottom，
    * 导致整页主按钮无法命中。以下以底部 Dock 上沿为界，与 Dock 重叠时由触摸顺序保证主按钮优先。
    */
   if (
@@ -4801,7 +4801,9 @@ if (typeof wx.onTouchEnd === 'function') {
             return;
           }
           if (pb === 'daily') {
-            app.requestStartDailyPuzzle();
+            if (typeof app.openGameReviewEntry === 'function') {
+              app.openGameReviewEntry();
+            }
             return;
           }
         }

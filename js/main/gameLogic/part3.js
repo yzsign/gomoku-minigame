@@ -1665,6 +1665,7 @@ app.startPve = function(humanColor) {
   app.isPvpLocal = false;
   app.isRandomMatch = false;
   app.isDailyPuzzle = false;
+  app.dailyPuzzleLocalStudy = false;
   app.pveHumanColor = humanColor === undefined ? app.BLACK : humanColor;
   app.screen = 'game';
   app.resetGame();
@@ -1692,7 +1693,7 @@ app.restoreDailyPuzzleInitial = function() {
   app.clearWinRevealTimer();
   app.winningLineCells = null;
   app.lastOpponentMove = null;
-  app.lastMsg = '每日残局';
+  app.lastMsg = app.dailyPuzzleLocalStudy ? '对局复盘' : '每日残局';
   if (typeof app.clearPerGameConsumableSkillState === 'function') {
     app.clearPerGameConsumableSkillState();
   }
@@ -1711,6 +1712,7 @@ app.startDailyPuzzleFromApiData = function(d) {
   app.isPvpOnline = false;
   app.isRandomMatch = false;
   app.isDailyPuzzle = true;
+  app.dailyPuzzleLocalStudy = false;
   app.dailyPuzzleMeta = {
     puzzleDate: d.puzzleDate,
     puzzleId: d.puzzleId,
@@ -1742,6 +1744,47 @@ app.startDailyPuzzleFromApiData = function(d) {
     app.clearPerGameConsumableSkillState();
   }
   app.draw();
+  if (typeof app.scheduleDailyPuzzleBotIfNeeded === 'function') {
+    app.scheduleDailyPuzzleBotIfNeeded();
+  }
+};
+
+/**
+ * 从棋谱当前步盘面进入单机残局练习（与每日残局同源 UI / 人机，不调用每日判题接口）。
+ */
+app.startLocalReplayStudyPuzzle = function(boardMatrix, sideToMove) {
+  app.disconnectOnline();
+  app.isPvpLocal = false;
+  app.isPvpOnline = false;
+  app.isRandomMatch = false;
+  app.isDailyPuzzle = true;
+  app.dailyPuzzleLocalStudy = true;
+  app.dailyPuzzleMeta = { title: '对局复盘', localStudy: true };
+  app.dailyPuzzleMoves = [];
+  app.dailyPuzzleSubmitting = false;
+  app.dailyPuzzleResultKind = '';
+  app.dailyPuzzleSubmitActivityPointsDelta = null;
+  app.board = app.copyBoardFromServer(boardMatrix);
+  app.dailyPuzzleInitialBoard = app.copyBoardFromServer(boardMatrix);
+  app.dailyPuzzleSideToMoveStart =
+    sideToMove === app.WHITE ? app.WHITE : app.BLACK;
+  app.current = app.dailyPuzzleSideToMoveStart;
+  app.dailyPuzzleUserColor = app.dailyPuzzleSideToMoveStart;
+  app.dailyPuzzleBotGen++;
+  app.lastOpponentMove = null;
+  app.gameOver = false;
+  app.winner = null;
+  app.showResultOverlay = false;
+  app.onlineResultOverlaySticky = false;
+  app.screen = 'game';
+  app.lastMsg = '对局复盘';
+  if (typeof app.clearPerGameConsumableSkillState === 'function') {
+    app.clearPerGameConsumableSkillState();
+  }
+  app.draw();
+  if (typeof app.refreshDailyPuzzleLastOpponentMove === 'function') {
+    app.refreshDailyPuzzleLastOpponentMove();
+  }
   if (typeof app.scheduleDailyPuzzleBotIfNeeded === 'function') {
     app.scheduleDailyPuzzleBotIfNeeded();
   }
@@ -1794,6 +1837,18 @@ app.requestStartDailyPuzzle = function() {
  * 终局或满盘时提交；wasWin 表示最后一步是否构成五连。
  */
 app.submitDailyPuzzleMovesAndHandle = function(r, c, lastColor, wasWin) {
+  if (app.dailyPuzzleLocalStudy) {
+    if (wasWin) {
+      app.dailyPuzzleResultKind = 'replay_study_solved';
+      app.finishGameWithWin(r, c, lastColor);
+    } else {
+      app.dailyPuzzleResultKind = 'replay_study_draw';
+      app.gameOver = true;
+      app.winner = null;
+      app.openResult();
+    }
+    return;
+  }
   if (app.dailyPuzzleSubmitting) {
     return;
   }
@@ -1898,6 +1953,10 @@ app.submitDailyPuzzleMovesAndHandle = function(r, c, lastColor, wasWin) {
 };
 
 app.requestDailyPuzzleHint = function() {
+  if (app.dailyPuzzleLocalStudy) {
+    wx.showToast({ title: '复盘练习无提示', icon: 'none' });
+    return;
+  }
   if (!authApi.getSessionToken()) {
     wx.showToast({ title: '请先登录', icon: 'none' });
     return;
@@ -2127,6 +2186,8 @@ app.startRandomMatch = function() {
       return;
     }
     app.disconnectOnline();
+    app.isDailyPuzzle = false;
+    app.dailyPuzzleLocalStudy = false;
     app.matchingDots = 0;
     app.screen = 'matching';
     app.matchingAnimTimer = setInterval(function () {
@@ -2288,6 +2349,7 @@ app.backToHome = function() {
   app.isRandomMatch = false;
   app.isPvpLocal = false;
   app.isDailyPuzzle = false;
+  app.dailyPuzzleLocalStudy = false;
   app.dailyPuzzleMeta = null;
   app.dailyPuzzleMoves = [];
   app.dailyPuzzleInitialBoard = null;
@@ -2313,6 +2375,7 @@ app.startPvpLocal = function() {
   app.disconnectOnline();
   app.isRandomMatch = false;
   app.isDailyPuzzle = false;
+  app.dailyPuzzleLocalStudy = false;
   app.isPvpLocal = true;
   /** 同桌：下方「我」与上方「对方」固定执黑/执白（与棋局手顺一致） */
   app.pveHumanColor = Math.random() < 0.5 ? app.BLACK : app.WHITE;
@@ -3106,6 +3169,18 @@ function resultOverlayTitlePack(app) {
       main = '挑战失败';
       sub = '电脑获胜';
       titleColor = rs.lose.title;
+      break;
+    case 'replay_study_solved':
+      mood = 'win';
+      main = '胜利';
+      sub = '复盘练习 · 连成五子';
+      titleColor = rs.win.title;
+      break;
+    case 'replay_study_draw':
+      mood = 'draw';
+      main = '和局';
+      sub = '复盘练习';
+      titleColor = rs.draw.title;
       break;
     default:
       titleColor = app.getUiTheme().title;

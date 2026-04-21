@@ -86,11 +86,16 @@ app.clearReplayControlPress = function() {
   app.replayTouchIdentifier = null;
 }
 
-app.enterReplayScreen = function(movesArr, blackPieceSkinId, whitePieceSkinId) {
+app.enterReplayScreen = function(movesArr, blackPieceSkinId, whitePieceSkinId, sourceGameId) {
   app.stopReplayAuto();
   app.clearReplayControlPress();
   app.replayMoves = movesArr || [];
   app.replayStep = 0;
+  var gid =
+    sourceGameId != null && sourceGameId !== ''
+      ? Number(sourceGameId)
+      : NaN;
+  app.replaySourceGameId = !isNaN(gid) && gid > 0 ? gid : null;
   if (arguments.length >= 2) {
     app.applyReplayPieceSkinsFromOptional(blackPieceSkinId, whitePieceSkinId);
   } else {
@@ -110,17 +115,23 @@ app.exitReplayScreen = function() {
   app.clearReplayControlPress();
   app.replayBlackPieceSkinId = null;
   app.replayWhitePieceSkinId = null;
+  app.replaySourceGameId = null;
   app.screen = 'game';
   app.showResultOverlay = true;
   app.draw();
 }
 
-app.openHistoryReplayOverlay = function(movesArr, blackPieceSkinId, whitePieceSkinId) {
+app.openHistoryReplayOverlay = function(movesArr, blackPieceSkinId, whitePieceSkinId, sourceGameId) {
   app.stopReplayAuto();
   app.clearReplayControlPress();
   app.stopHistoryMomentum();
   app.replayMoves = movesArr || [];
   app.replayStep = 0;
+  var gidO =
+    sourceGameId != null && sourceGameId !== ''
+      ? Number(sourceGameId)
+      : NaN;
+  app.replaySourceGameId = !isNaN(gidO) && gidO > 0 ? gidO : null;
   if (arguments.length >= 2) {
     app.applyReplayPieceSkinsFromOptional(blackPieceSkinId, whitePieceSkinId);
   } else {
@@ -136,6 +147,7 @@ app.closeHistoryReplayOverlay = function() {
   app.clearReplayControlPress();
   app.replayBlackPieceSkinId = null;
   app.replayWhitePieceSkinId = null;
+  app.replaySourceGameId = null;
   app.historyReplayOverlayVisible = false;
   app.draw();
 }
@@ -153,6 +165,10 @@ app.onReplayControlHit = function(rc) {
     } else {
       app.exitReplayScreen();
     }
+    return;
+  }
+  if (rc === 'study') {
+    app.enterReplayStudyFromCurrentStep();
     return;
   }
   if (rc === 'prev' && app.replayStep > 0) {
@@ -201,10 +217,13 @@ app.tryReplayByRoomFallback = function() {
         success: function (res) {
           wx.hideLoading();
           if (res.statusCode === 200 && res.data && res.data.moves) {
+            var gidR =
+              res.data.gameId != null ? Number(res.data.gameId) : NaN;
             app.enterReplayScreen(
               res.data.moves,
               res.data.blackPieceSkinId,
-              res.data.whitePieceSkinId
+              res.data.whitePieceSkinId,
+              !isNaN(gidR) && gidR > 0 ? gidR : null
             );
           } else {
             wx.showToast({ title: '暂无棋谱', icon: 'none' });
@@ -226,7 +245,7 @@ app.openReplayFromResult = function() {
     for (di = 0; di < app.dailyPuzzleMoves.length; di++) {
       dm.push(app.dailyPuzzleMoves[di]);
     }
-    app.enterReplayScreen(dm, null, null);
+    app.enterReplayScreen(dm, null, null, null);
     return;
   }
   if (app.onlineMoveHistory.length > 0) {
@@ -238,7 +257,8 @@ app.openReplayFromResult = function() {
     app.enterReplayScreen(
       copy,
       app.onlineBlackPieceSkinId,
-      app.onlineWhitePieceSkinId
+      app.onlineWhitePieceSkinId,
+      null
     );
     return;
   }
@@ -249,10 +269,19 @@ app.openReplayFromResult = function() {
         success: function (res) {
           wx.hideLoading();
           if (res.statusCode === 200 && res.data) {
+            var gidF =
+              res.data.gameId != null ? Number(res.data.gameId) : NaN;
+            var gidUse =
+              !isNaN(gidF) && gidF > 0
+                ? gidF
+                : app.lastSettledGameId != null
+                  ? Number(app.lastSettledGameId)
+                  : null;
             app.enterReplayScreen(
               res.data.moves || [],
               res.data.blackPieceSkinId,
-              res.data.whitePieceSkinId
+              res.data.whitePieceSkinId,
+              gidUse
             );
           } else {
             app.tryReplayByRoomFallback();
@@ -293,10 +322,128 @@ app.getReplayNavNextCx = function() {
   return app.W / 2 + w / 2;
 };
 
+app.replaySideToMoveAfterStep = function(step) {
+  var moves = app.replayMoves || [];
+  var st = step | 0;
+  if (st < moves.length && moves[st]) {
+    return moves[st].color;
+  }
+  if (moves.length === 0) {
+    return app.BLACK;
+  }
+  var last = moves[moves.length - 1];
+  return typeof app.oppositeColor === 'function'
+    ? app.oppositeColor(last.color)
+    : last.color === app.BLACK
+      ? app.WHITE
+      : app.BLACK;
+};
+
+app.enterReplayStudyFromCurrentStep = function() {
+  if (!app.replayMoves || app.replayMoves.length === 0) {
+    if (typeof wx !== 'undefined' && wx.showToast) {
+      wx.showToast({ title: '暂无棋谱', icon: 'none' });
+    }
+    return;
+  }
+  var board = app.buildBoardFromMoves(app.replayMoves, app.replayStep);
+  var sideToMove = app.replaySideToMoveAfterStep(app.replayStep);
+  var stepN = app.replayStep;
+  var fb = app.replayBlackPieceSkinId;
+  var fw = app.replayWhitePieceSkinId;
+  var gid = app.replaySourceGameId;
+  var movesPayload = [];
+  var mi;
+  for (mi = 0; mi < app.replayMoves.length; mi++) {
+    var m = app.replayMoves[mi];
+    movesPayload.push({ r: m.r, c: m.c, color: m.color });
+  }
+  var boardPayload = [];
+  var br;
+  var bc;
+  for (br = 0; br < app.SIZE; br++) {
+    boardPayload[br] = board[br].slice();
+  }
+
+  function proceedToStudy() {
+    app.stopReplayAuto();
+    app.clearReplayControlPress();
+    if (app.historyReplayOverlayVisible) {
+      app.closeHistoryReplayOverlay();
+    } else if (app.screen === 'replay') {
+      app.replayBlackPieceSkinId = null;
+      app.replayWhitePieceSkinId = null;
+      app.replaySourceGameId = null;
+      app.screen = 'game';
+    }
+    if (typeof app.startLocalReplayStudyPuzzle === 'function') {
+      app.startLocalReplayStudyPuzzle(board, sideToMove);
+    }
+  }
+
+  if (!authApi.getSessionToken || !authApi.getSessionToken()) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '未登录，仅本地练习', icon: 'none' });
+    }
+    proceedToStudy();
+    return;
+  }
+
+  var putBody = {
+    moves: movesPayload,
+    replayStep: stepN,
+    board: boardPayload,
+    sideToMove: sideToMove,
+    blackPieceSkinId: fb,
+    whitePieceSkinId: fw
+  };
+  if (gid != null && gid > 0) {
+    putBody.sourceGameId = gid;
+  }
+
+  wx.request(
+    Object.assign(roomApi.meReplayStudyPutOptions(putBody), {
+      success: function(res) {
+        if (res.statusCode !== 200 && res.statusCode !== 204) {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({
+              title: '云端存档失败 ' + (res.statusCode || ''),
+              icon: 'none'
+            });
+          }
+        }
+        proceedToStudy();
+      },
+      fail: function() {
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '网络错误，仅本地练习', icon: 'none' });
+        }
+        proceedToStudy();
+      }
+    })
+  );
+};
+
+app.getReplayStudyButtonY = function() {
+  var subY = app.getReplaySubtitleY();
+  var btnY = app.getReplayControlsButtonY();
+  return (subY + btnY) / 2;
+};
+
 app.hitReplayControl = function(clientX, clientY) {
   var btnY = app.getReplayControlsButtonY();
   var halfW = 46;
   var halfH = 24;
+  var subY = app.getReplaySubtitleY();
+  var studyY = (subY + btnY) / 2;
+  if (
+    app.replayMoves &&
+    app.replayMoves.length > 0 &&
+    Math.abs(clientX - app.W / 2) <= 72 &&
+    Math.abs(clientY - studyY) <= 22
+  ) {
+    return 'study';
+  }
   var list = [
     { id: 'close', x: app.W * 0.18 },
     { id: 'prev', x: app.getReplayNavPrevCx() },
@@ -367,6 +514,9 @@ app.drawReplayBoardLayer = function() {
     15,
     th.status
   );
+  var studyY = app.getReplayStudyButtonY();
+  var studyOn = total > 0;
+  app.drawReplayToolbarButton('复盘', app.W / 2, studyY, studyOn, 'study');
   app.drawReplayToolbarButton('关闭', app.W * 0.18, btnY, true, 'close');
   app.drawReplayStepIconButton(
     app.getReplayNavPrevCx(),
@@ -662,7 +812,7 @@ app.drawHomeContentBelowPieceSkinModal = function() {
     hl.yPvePair,
     hl.halfBtnW,
     hl.btnH,
-    '每日残局',
+    '对局复盘',
     'daily',
     th,
     app.homePressedButton === 'daily'
@@ -1132,10 +1282,13 @@ app.openHistoryReplayForRecord = function(rec) {
           } catch (eH) {}
         }
         if (res.statusCode === 200 && res.data && res.data.moves) {
+          var gidH =
+            res.data.gameId != null ? Number(res.data.gameId) : gidN;
           app.openHistoryReplayOverlay(
             res.data.moves,
             res.data.blackPieceSkinId,
-            res.data.whitePieceSkinId
+            res.data.whitePieceSkinId,
+            !isNaN(gidH) && gidH > 0 ? gidH : gidN
           );
         } else {
           if (typeof wx.showToast === 'function') {
@@ -1342,6 +1495,104 @@ app.openHistoryScreen = function() {
     );
   });
 }
+
+/**
+ * 首页「对局复盘」：读取当前用户在服务端唯一的最新复盘存档（与每日残局表/接口无关）。
+ */
+app.openGameReviewEntry = function() {
+  authApi.ensureSession(function(sessOk) {
+    if (!sessOk || !authApi.getSessionToken()) {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: '请先登录', icon: 'none' });
+      }
+      return;
+    }
+    if (typeof wx.showLoading === 'function') {
+      wx.showLoading({ title: '加载…', mask: true });
+    }
+    wx.request(
+      Object.assign(roomApi.meReplayStudyGetOptions(), {
+        complete: function() {
+          if (typeof wx.hideLoading === 'function') {
+            try {
+              wx.hideLoading();
+            } catch (eL) {}
+          }
+        },
+        success: function(res) {
+          var d = res.data;
+          if (res.statusCode === 401) {
+            if (typeof wx.showToast === 'function') {
+              wx.showToast({ title: '请先登录', icon: 'none' });
+            }
+            return;
+          }
+          if (res.statusCode !== 200 || !d) {
+            if (typeof wx.showToast === 'function') {
+              wx.showToast({ title: '加载失败', icon: 'none' });
+            }
+            return;
+          }
+          if (!d.hasData) {
+            if (typeof wx.showToast === 'function') {
+              wx.showToast({ title: '暂无复盘存档，请从战绩选谱', icon: 'none' });
+            }
+            app.openHistoryScreen();
+            return;
+          }
+          if (typeof wx.showActionSheet !== 'function') {
+            if (typeof app.startLocalReplayStudyPuzzle === 'function') {
+              app.startLocalReplayStudyPuzzle(d.board, d.sideToMove);
+            }
+            return;
+          }
+          wx.showActionSheet({
+            itemList: ['继续上次复盘', '从战绩选择棋谱', '清除复盘存档'],
+            success: function(sr) {
+              if (sr.tapIndex === 0) {
+                if (typeof app.startLocalReplayStudyPuzzle === 'function') {
+                  app.startLocalReplayStudyPuzzle(d.board, d.sideToMove);
+                }
+              } else if (sr.tapIndex === 1) {
+                app.openHistoryScreen();
+              } else if (sr.tapIndex === 2) {
+                wx.request(
+                  Object.assign(roomApi.meReplayStudyDeleteOptions(), {
+                    success: function(resDel) {
+                      if (
+                        resDel.statusCode === 204 ||
+                        resDel.statusCode === 200
+                      ) {
+                        if (typeof wx.showToast === 'function') {
+                          wx.showToast({ title: '已清除', icon: 'none' });
+                        }
+                      } else if (typeof wx.showToast === 'function') {
+                        wx.showToast({
+                          title: '清除失败',
+                          icon: 'none'
+                        });
+                      }
+                    },
+                    fail: function() {
+                      if (typeof wx.showToast === 'function') {
+                        wx.showToast({ title: '网络错误', icon: 'none' });
+                      }
+                    }
+                  })
+                );
+              }
+            }
+          });
+        },
+        fail: function() {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '网络错误', icon: 'none' });
+          }
+        }
+      })
+    );
+  });
+};
 
 /**
  * 我的战绩：羊皮纸叠层、统计卡、筛选胶囊、对局列表（随当前界面风格）
