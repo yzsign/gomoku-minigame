@@ -579,6 +579,18 @@ app.draw = function() {
     if (typeof app.drawAdminPuzzleScreen === 'function') {
       app.drawAdminPuzzleScreen();
     }
+    if (typeof app.drawFriendListGlobalChrome === 'function') {
+      app.drawFriendListGlobalChrome();
+    }
+    return;
+  }
+  if (app.screen === 'review_hub') {
+    if (typeof app.drawReviewHubScreen === 'function') {
+      app.drawReviewHubScreen();
+    }
+    if (typeof app.drawFriendListGlobalChrome === 'function') {
+      app.drawFriendListGlobalChrome();
+    }
     return;
   }
   if (app.screen === 'history') {
@@ -586,18 +598,30 @@ app.draw = function() {
     if (app.historyReplayOverlayVisible) {
       app.drawHistoryReplayOverlay();
     }
+    if (typeof app.drawFriendListGlobalChrome === 'function') {
+      app.drawFriendListGlobalChrome();
+    }
     return;
   }
   if (app.screen === 'pve_color') {
     app.drawPveColorSelect();
+    if (typeof app.drawFriendListGlobalChrome === 'function') {
+      app.drawFriendListGlobalChrome();
+    }
     return;
   }
   if (app.screen === 'matching') {
     app.drawMatching();
+    if (typeof app.drawFriendListGlobalChrome === 'function') {
+      app.drawFriendListGlobalChrome();
+    }
     return;
   }
   if (app.screen === 'replay') {
     app.drawReplay();
+    if (typeof app.drawFriendListGlobalChrome === 'function') {
+      app.drawFriendListGlobalChrome();
+    }
     return;
   }
 
@@ -947,6 +971,9 @@ app.draw = function() {
   }
 
   app.drawRatingCardOverlay(th);
+  if (typeof app.drawFriendListGlobalChrome === 'function') {
+    app.drawFriendListGlobalChrome();
+  }
 }
 
 /**
@@ -962,7 +989,7 @@ app.getGameActionBarLayout = function() {
       : app.rpx(128);
   var x0 = pad;
   var y0 = btnY - barH / 2;
-  /** 人机：2 列；每日残局 / 残局好友房旁观：4 列（重置 + 邀请）；标准联机：5 列（含聊天）；其余联机：4 列 */
+  /** 人机：2 列；每日残局：4 列（重置+邀请）；对局复盘：3 列（无邀请）；残局好友房旁观：4 列；标准联机：5 列；其余联机：4 列 */
   var colCount;
   if (
     app.isPvpOnline &&
@@ -973,7 +1000,8 @@ app.getGameActionBarLayout = function() {
   } else if (app.isPvpOnline || app.isPvpLocal) {
     colCount = 4;
   } else if (app.isDailyPuzzle) {
-    colCount = 4;
+    /** 对局复盘（本地练习）：三键即可，不含邀请好友 */
+    colCount = app.dailyPuzzleLocalStudy === true ? 3 : 4;
   } else {
     colCount = 2;
   }
@@ -1473,10 +1501,16 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
   var drawOk = app.isDrawButtonActive();
   var resignOk = app.isResignButtonActive();
   var pveBarOnly = L.colCount === 2;
-  var dailyBar =
+  var dailyFourColBar =
     typeof app.isDailyStyleGameActionBar === 'function' &&
     app.isDailyStyleGameActionBar() &&
     L.colCount === 4;
+  var localReplayStudyBar =
+    app.isDailyPuzzle &&
+    !app.isPvpOnline &&
+    app.dailyPuzzleLocalStudy === true &&
+    L.colCount === 3;
+  var dailyBar = dailyFourColBar || localReplayStudyBar;
   var cols = [
     {
       img: app.gameBarHomeImg,
@@ -1495,14 +1529,16 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
       kind: 'reset',
       enabled: true
     });
-    cols.push({
-      img: app.gameBarInviteImg,
-      kind: 'invite',
-      enabled:
-        typeof app.isPuzzleFriendInviteEnabled === 'function'
-          ? app.isPuzzleFriendInviteEnabled()
-          : true
-    });
+    if (dailyFourColBar) {
+      cols.push({
+        img: app.gameBarInviteImg,
+        kind: 'invite',
+        enabled:
+          typeof app.isPuzzleFriendInviteEnabled === 'function'
+            ? app.isPuzzleFriendInviteEnabled()
+            : true
+      });
+    }
   } else if (!pveBarOnly) {
     cols.push(
       {
@@ -1532,8 +1568,10 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
     drawLabel != null && String(drawLabel).trim() !== ''
       ? String(drawLabel)
       : '和棋';
-  var gameBarLabels = dailyBar
-    ? ['离开', undoCaption, '重置', '邀请']
+  var gameBarLabels = localReplayStudyBar
+    ? ['离开', undoCaption, '重置']
+    : dailyFourColBar
+      ? ['离开', undoCaption, '重置', '邀请']
     : pveBarOnly
       ? ['离开', undoCaption]
       : L.colCount === 5
@@ -2109,11 +2147,17 @@ app.hitGameButton = function(clientX, clientY) {
   var dailyStyleBar =
     typeof app.isDailyStyleGameActionBar === 'function' &&
     app.isDailyStyleGameActionBar();
+  var localReplayStudyBar =
+    app.isDailyPuzzle &&
+    !app.isPvpOnline &&
+    app.dailyPuzzleLocalStudy === true &&
+    L.colCount === 3;
+  var dailyFourColBar = dailyStyleBar && L.colCount === 4;
   if (col === 2) {
-    return dailyStyleBar ? 'reset' : 'draw';
+    return dailyFourColBar || localReplayStudyBar ? 'reset' : 'draw';
   }
   if (col === 3) {
-    if (dailyStyleBar) {
+    if (dailyFourColBar) {
       if (
         typeof app.isPuzzleFriendInviteEnabled === 'function' &&
         !app.isPuzzleFriendInviteEnabled()
@@ -3688,6 +3732,10 @@ wx.onTouchStart(function (e) {
   app.lastTouchDownY = y;
 
   if (app.screen === 'admin_puzzle') {
+    if (typeof app.onHomeFriendListTouchStart === 'function' &&
+        app.onHomeFriendListTouchStart(x, y, e)) {
+      return;
+    }
     if (
       e.touches &&
       e.touches[0] &&
@@ -3698,6 +3746,17 @@ wx.onTouchStart(function (e) {
         e.touches[0].clientY,
         e.touches[0].identifier
       );
+    }
+    return;
+  }
+
+  if (app.screen === 'review_hub') {
+    if (typeof app.onHomeFriendListTouchStart === 'function' &&
+        app.onHomeFriendListTouchStart(x, y, e)) {
+      return;
+    }
+    if (typeof app.handleReviewHubTouchStart === 'function') {
+      app.handleReviewHubTouchStart(x, y);
     }
     return;
   }
@@ -3755,6 +3814,10 @@ wx.onTouchStart(function (e) {
         app.draw();
         return;
       }
+      return;
+    }
+    if (typeof app.onHomeFriendListTouchStart === 'function' &&
+        app.onHomeFriendListTouchStart(x, y, e)) {
       return;
     }
     if (app.historyReplayOverlayVisible) {
@@ -4046,13 +4109,16 @@ wx.onTouchStart(function (e) {
     return;
   }
 
-  if (app.screen === 'home') {
-    if (
-      typeof app.onHomeFriendListTouchStart === 'function' &&
-      app.onHomeFriendListTouchStart(x, y, e)
-    ) {
-      return;
-    }
+  if (
+    (app.screen === 'home' ||
+      app.screen === 'game' ||
+      app.screen === 'matching' ||
+      app.screen === 'pve_color' ||
+      app.screen === 'replay') &&
+    typeof app.onHomeFriendListTouchStart === 'function' &&
+    app.onHomeFriendListTouchStart(x, y, e)
+  ) {
+    return;
   }
 
   if (app.screen === 'home' && app.homeDrawerOpen) {
@@ -4502,16 +4568,15 @@ wx.onTouchStart(function (e) {
 if (typeof wx.onTouchMove === 'function') {
   wx.onTouchMove(function (e) {
     if (
-      app.screen === 'admin_puzzle' &&
-      typeof app.handleAdminPuzzleTouchMove === 'function' &&
-      app.handleAdminPuzzleTouchMove(e)
+      typeof app.onHomeFriendListTouchMove === 'function' &&
+      app.onHomeFriendListTouchMove(e)
     ) {
       return;
     }
     if (
-      app.screen === 'home' &&
-      typeof app.onHomeFriendListTouchMove === 'function' &&
-      app.onHomeFriendListTouchMove(e)
+      app.screen === 'admin_puzzle' &&
+      typeof app.handleAdminPuzzleTouchMove === 'function' &&
+      app.handleAdminPuzzleTouchMove(e)
     ) {
       return;
     }
@@ -4587,6 +4652,13 @@ if (typeof wx.onTouchMove === 'function') {
 if (typeof wx.onTouchEnd === 'function') {
   wx.onTouchEnd(function (e) {
     var t = e.changedTouches && e.changedTouches[0];
+    if (
+      t &&
+      typeof app.onHomeFriendListTouchEnd === 'function' &&
+      app.onHomeFriendListTouchEnd(t.clientX, t.clientY)
+    ) {
+      return;
+    }
     if (app.screen === 'admin_puzzle' && t) {
       if (typeof app.handleAdminPuzzleTouchEnd === 'function') {
         app.handleAdminPuzzleTouchEnd(
@@ -4595,14 +4667,6 @@ if (typeof wx.onTouchEnd === 'function') {
           t.identifier
         );
       }
-      return;
-    }
-    if (
-      app.screen === 'home' &&
-      t &&
-      typeof app.onHomeFriendListTouchEnd === 'function' &&
-      app.onHomeFriendListTouchEnd(t.clientX, t.clientY)
-    ) {
       return;
     }
     if (app.ratingCardAddFriendArmed && e.changedTouches) {

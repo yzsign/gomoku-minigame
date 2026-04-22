@@ -54,6 +54,28 @@ module.exports = function avatarBoardSkills(app, deps) {
   var themes = deps.themes;
   var authApi = deps.authApi;
   app._avatarBoardSkillCdUntilByKey = Object.create(null);
+  /** 与 clear 时一致，避免未定义在极端环境下被枚举为异常 */
+  app.avatarBoardSkillVfxIncoming = null;
+  app.avatarBoardSkillVfxOutgoing = null;
+
+  /**
+   * 仅有贴图未就绪时：矢量心形 + 外环描边。正常情况下炸裂碎片直接 draw w-love.png。投影始终用 shadow。
+   * @type {{ fill: number[], edge: number[], shadow: number[] }}
+   */
+  var LOVE_PROP_ART_RGB = {
+    fill: [239, 51, 64],
+    edge: [196, 34, 44],
+    shadow: [148, 40, 48, 0.38]
+  };
+
+  function lovePropRgba(rgb, a) {
+    return 'rgba(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ',' + a + ')';
+  }
+
+  function lovePropShadowColor() {
+    var s = LOVE_PROP_ART_RGB.shadow;
+    return 'rgba(' + s[0] + ',' + s[1] + ',' + s[2] + ',' + s[3] + ')';
+  }
 
   function easeOutCubic01(t) {
     if (t <= 0) {
@@ -70,10 +92,10 @@ module.exports = function avatarBoardSkills(app, deps) {
     return x - Math.floor(x);
   }
 
-  /** 迷你爱心碎片（局部坐标） */
+  /** 迷你爱心碎片（局部坐标，色表同道具图主色） */
   function drawLoveHeartShard(ctx, s, fillA, strokeA) {
-    ctx.fillStyle = 'rgba(255, 75, 118, ' + fillA + ')';
-    ctx.strokeStyle = 'rgba(255, 200, 215, ' + strokeA + ')';
+    ctx.fillStyle = lovePropRgba(LOVE_PROP_ART_RGB.fill, fillA);
+    ctx.strokeStyle = lovePropRgba(LOVE_PROP_ART_RGB.edge, strokeA);
     ctx.lineWidth = Math.max(0.55, s * 0.07);
     ctx.beginPath();
     ctx.moveTo(0, s * 0.2);
@@ -85,14 +107,14 @@ module.exports = function avatarBoardSkills(app, deps) {
   }
 
   /**
-   * 爱心撞击：头像中心高光 + 8～12 颗碎片（依赖 app.rpx，须在本闭包内定义）
+   * 爱心撞击：外扩环 + 10～15 颗碎片。碎片优先用 w-love 贴图绘制，与槽位道具色一致；无图时回退矢量心形 + LOVE_PROP_ART_RGB。
    */
-  function drawLoveImpactBurst(ctx, cx, cy, pierceElapsed, burstSeed) {
+  function drawLoveImpactBurst(ctx, cx, cy, pierceElapsed, burstSeed, loveIconImg) {
     if (
       typeof pierceElapsed !== 'number' ||
       !isFinite(pierceElapsed) ||
       pierceElapsed < 0 ||
-      pierceElapsed > 1200
+      pierceElapsed > 2600
     ) {
       return;
     }
@@ -108,66 +130,93 @@ module.exports = function avatarBoardSkills(app, deps) {
             return n;
           };
     var seed = burstSeed != null ? burstSeed : 0;
-    /** 炸裂爱心整体视觉倍率（碎片尺寸、高光、飞散距离同步放大） */
-    var burstVisScale = 2;
-    var flashMs = 130;
-    if (pierceElapsed < flashMs) {
-      var fu = pierceElapsed / flashMs;
-      var flashA = 0.92 * (1 - fu) * (1 - fu);
-      if (flashA > 0.04) {
+    /** 炸裂爱心整体视觉倍率（环、碎片尺寸、飞散最大距离同比例放大） */
+    var burstVisScale = 2.85;
+
+    /** 外扩双环（道具同色，节奏与碎片一致放慢、外圈更大） */
+    var shockMs = 520;
+    if (pierceElapsed < shockMs) {
+      var wu = pierceElapsed / shockMs;
+      var ringE = 1 - Math.pow(1 - wu, 1.4);
+      var ringR = (rpx(10) + rpx(52) * ringE) * burstVisScale;
+      var ringA = 0.45 * (1 - wu) * (1 - wu);
+      if (ringA > 0.03) {
         ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        var fr = (rpx(4) + rpx(16) * (1 - fu * 0.85)) * burstVisScale;
-        var g = ctx.createRadialGradient(cx, cy, 0, cx, cy, fr);
-        g.addColorStop(0, 'rgba(255,255,255,' + (flashA * 1) + ')');
-        g.addColorStop(0.45, 'rgba(255,248,252,' + (flashA * 0.45) + ')');
-        g.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.fillStyle = g;
+        ctx.globalAlpha = Math.min(1, ringA * 1.1);
+        ctx.strokeStyle = lovePropRgba(
+          LOVE_PROP_ART_RGB.fill,
+          0.5 + 0.32 * (1 - wu)
+        );
+        ctx.lineWidth = Math.max(1, rpx(1.6) * (1 - wu * 0.6));
         ctx.beginPath();
-        ctx.arc(cx, cy, fr, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+        ctx.stroke();
+        var ring2R = ringR * 0.62;
+        ctx.globalAlpha = ringA * 0.4;
+        ctx.lineWidth = Math.max(0.8, rpx(1.1));
+        ctx.strokeStyle = lovePropRgba(
+          LOVE_PROP_ART_RGB.edge,
+          0.38 * (1 - wu) + 0.12
+        );
+        ctx.beginPath();
+        ctx.arc(cx, cy, ring2R, 0, Math.PI * 2);
+        ctx.stroke();
         ctx.restore();
       }
     }
 
-    var n = 8 + Math.floor(loveBurstSeeded01(seed, 0) * 5);
+    var n = 10 + Math.floor(loveBurstSeeded01(seed, 0) * 5);
     var pi;
     for (pi = 0; pi < n; pi++) {
       var ang = loveBurstSeeded01(seed, pi + 1) * Math.PI * 2;
       var speed =
-        rpx(36 + loveBurstSeeded01(seed, pi + 17) * 54) * burstVisScale;
-      var dur = 780 + loveBurstSeeded01(seed, pi + 31) * 340;
-      var t = pierceElapsed / dur;
+        rpx(58 + loveBurstSeeded01(seed, pi + 17) * 88) * burstVisScale;
+      var dur = 1080 + loveBurstSeeded01(seed, pi + 31) * 450;
+      var delay = Math.floor(loveBurstSeeded01(seed, pi + 90) * 45);
+      var age = pierceElapsed - delay;
+      if (age < 0) {
+        continue;
+      }
+      var t = age / dur;
       if (t > 1 || t < 0) {
         continue;
       }
-      var e = easeOutCubic01(t);
+      var e = 1 - Math.pow(1 - t, 1.75);
       var dist = speed * e;
       var grav =
-        rpx(2.2 + loveBurstSeeded01(seed, pi + 47) * 5.5) *
+        rpx(1.5 + loveBurstSeeded01(seed, pi + 47) * 4) *
         burstVisScale *
         t *
         t *
-        7.5;
+        5.2;
       var px = cx + Math.cos(ang) * dist;
       var py = cy + Math.sin(ang) * dist + grav;
-      var sc = 1 - 0.72 * easeOutCubic01(t);
-      var alpha = 1 - Math.pow(t, 0.62);
+      var scLife = 1 - 0.76 * easeOutCubic01(t);
+      var pop = t < 0.18 ? smoothstep01(t / 0.18) : 1;
+      var sc = scLife * (0.22 + 0.78 * pop);
+      var alpha = (1 - Math.pow(t, 0.45)) * Math.min(1, age / 36);
       if (alpha < 0.03) {
         continue;
       }
-      var baseS = rpx(8 + loveBurstSeeded01(seed, pi + 61) * 11) * burstVisScale;
+      var baseS = rpx(7.5 + loveBurstSeeded01(seed, pi + 61) * 12) * burstVisScale;
       var s = baseS * sc;
       var rot =
         (loveBurstSeeded01(seed, pi + 73) - 0.5) *
-        2.8 *
+        2.9 *
         easeOutCubic01(t) *
         (pi % 2 === 0 ? 1 : -1);
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.translate(px, py);
       ctx.rotate(rot);
-      drawLoveHeartShard(ctx, s, 0.96, 0.65);
+      if (loveIconImg && loveIconImg.width > 0 && loveIconImg.height > 0) {
+        var iwr = loveIconImg.width / loveIconImg.height;
+        var sh = s;
+        var sw = s * iwr;
+        ctx.drawImage(loveIconImg, -sw * 0.5, -sh * 0.5, sw, sh);
+      } else {
+        drawLoveHeartShard(ctx, s, 0.96, 0.65);
+      }
       ctx.restore();
     }
   }
@@ -219,14 +268,14 @@ module.exports = function avatarBoardSkills(app, deps) {
         sizeMul: 0.52,
         baseWidthRpx: 96,
         durationMs: 520,
-        holdMs: 1650,
+        holdMs: 2200,
         fromAlongAvatar: { avRMul: 1.05, rpxExtra: 12 },
         toInsetAlongAvatar: 0.38
       },
       pierce: {
         hitPulseAmplitude: 0.11,
         shadowBlurRpx: 14,
-        shadowColor: 'rgba(180, 40, 70, 0.38)',
+        shadowColor: lovePropShadowColor(),
         embedRpx: 12,
         impactBurstMs: 340,
         oppShakeRpx: 4,
@@ -371,6 +420,8 @@ module.exports = function avatarBoardSkills(app, deps) {
   };
 
   app.clearAvatarBoardSkillVfx = function() {
+    app.avatarBoardSkillVfxIncoming = null;
+    app.avatarBoardSkillVfxOutgoing = null;
     app.avatarBoardSkillVfx = null;
     app.qSwordAnim = null;
     if (app._avatarBoardSkillTmr) {
@@ -381,6 +432,13 @@ module.exports = function avatarBoardSkills(app, deps) {
     }
     app._qSwordTmr = null;
   };
+
+  /** 同步给仍读单字段的旧逻辑；优先己方飞出 */
+  function syncAvatarBoardSkillVfxAlias() {
+    app.avatarBoardSkillVfx =
+      app.avatarBoardSkillVfxOutgoing || app.avatarBoardSkillVfxIncoming || null;
+    app.qSwordAnim = app.avatarBoardSkillVfx;
+  }
 
   app.clearQSwordSkillAnim = app.clearAvatarBoardSkillVfx;
 
@@ -498,7 +556,6 @@ module.exports = function avatarBoardSkills(app, deps) {
     }
 
     function executeAvatarBoardSkillFly() {
-      app.clearAvatarBoardSkillVfx();
       var L = app.computeBoardNameLabelLayout(app.layout);
       if (!L || !L.hasMyAv || !L.hasOppAv) {
         return;
@@ -520,7 +577,7 @@ module.exports = function avatarBoardSkills(app, deps) {
       var toX = L.oppCx - ux * (avR * inset);
       var toY = L.oppCy - uy * (avR * inset);
 
-      app.avatarBoardSkillVfx = {
+      app.avatarBoardSkillVfxOutgoing = {
         skillId: def.id,
         panelKey: panelKey,
         startMs: Date.now(),
@@ -531,8 +588,7 @@ module.exports = function avatarBoardSkills(app, deps) {
         toX: toX,
         toY: toY
       };
-      /** 兼容旧绘制里读 qSwordAnim / qSwordImg */
-      app.qSwordAnim = app.avatarBoardSkillVfx;
+      syncAvatarBoardSkillVfxAlias();
       playSkillAudio(def);
       if (def.iconSrc) {
         app.ensureAvatarBoardSkillImage(def.iconSrc, function(img) {
@@ -704,7 +760,6 @@ module.exports = function avatarBoardSkills(app, deps) {
     if (!def || !def.fly) {
       return;
     }
-    app.clearAvatarBoardSkillVfx();
     var L = app.computeBoardNameLabelLayout(app.layout);
     if (!L || !L.hasMyAv || !L.hasOppAv) {
       return;
@@ -726,7 +781,7 @@ module.exports = function avatarBoardSkills(app, deps) {
     var toX = L.myCx + ux * (avR * inset);
     var toY = L.myCy + uy * (avR * inset);
 
-    app.avatarBoardSkillVfx = {
+    app.avatarBoardSkillVfxIncoming = {
       skillId: def.id,
       panelKey: panelKey,
       startMs: Date.now(),
@@ -738,7 +793,7 @@ module.exports = function avatarBoardSkills(app, deps) {
       toY: toY,
       remoteFromOpponent: true
     };
-    app.qSwordAnim = app.avatarBoardSkillVfx;
+    syncAvatarBoardSkillVfxAlias();
     playSkillAudio(def);
     if (def.iconSrc) {
       app.ensureAvatarBoardSkillImage(def.iconSrc, function(img) {
@@ -772,27 +827,64 @@ module.exports = function avatarBoardSkills(app, deps) {
     app.startAvatarBoardSkillFromPanelKey('my', 'border');
   };
 
+  function avatarBoardSkillVfxDurationFor(a) {
+    if (!a) {
+      return { fd: 400, hd: 1000 };
+    }
+    var def = app.getAvatarBoardSkillDef(a.panelKey);
+    var fly = def && def.fly ? def.fly.durationMs : 400;
+    var hold = def && def.fly ? def.fly.holdMs : 1000;
+    return {
+      fd: a.durationMs != null ? a.durationMs : fly,
+      hd: a.holdMs != null ? a.holdMs : hold
+    };
+  }
+
+  function pruneExpiredAvatarBoardSkillVfxSlots() {
+    var d;
+    d = avatarBoardSkillVfxDurationFor(app.avatarBoardSkillVfxOutgoing);
+    if (
+      app.avatarBoardSkillVfxOutgoing &&
+      Date.now() - app.avatarBoardSkillVfxOutgoing.startMs > d.fd + d.hd + 30
+    ) {
+      app.avatarBoardSkillVfxOutgoing = null;
+    }
+    d = avatarBoardSkillVfxDurationFor(app.avatarBoardSkillVfxIncoming);
+    if (
+      app.avatarBoardSkillVfxIncoming &&
+      Date.now() - app.avatarBoardSkillVfxIncoming.startMs > d.fd + d.hd + 30
+    ) {
+      app.avatarBoardSkillVfxIncoming = null;
+    }
+    syncAvatarBoardSkillVfxAlias();
+  }
+
   app.ensureAvatarBoardSkillAnimTicker = function() {
     if (app._avatarBoardSkillTmr) {
       return;
     }
     app._avatarBoardSkillTmr = setInterval(function() {
-      if (app.screen !== 'game' || !app.avatarBoardSkillVfx) {
+      if (app.screen !== 'game') {
         if (typeof app.clearAvatarBoardSkillVfx === 'function') {
           app.clearAvatarBoardSkillVfx();
         }
         return;
       }
-      var a = app.avatarBoardSkillVfx;
-      var def = app.getAvatarBoardSkillDef(a.panelKey);
-      var fly = def && def.fly ? def.fly.durationMs : 400;
-      var hold = def && def.fly ? def.fly.holdMs : 1000;
-      var fd = a.durationMs != null ? a.durationMs : fly;
-      var hd = a.holdMs != null ? a.holdMs : hold;
-      if (Date.now() - a.startMs > fd + hd + 30) {
+      if (!app.avatarBoardSkillVfxOutgoing && !app.avatarBoardSkillVfxIncoming) {
         if (typeof app.clearAvatarBoardSkillVfx === 'function') {
           app.clearAvatarBoardSkillVfx();
         }
+        return;
+      }
+      pruneExpiredAvatarBoardSkillVfxSlots();
+      if (!app.avatarBoardSkillVfxOutgoing && !app.avatarBoardSkillVfxIncoming) {
+        if (app._avatarBoardSkillTmr) {
+          try {
+            clearInterval(app._avatarBoardSkillTmr);
+          } catch (ePr) {}
+          app._avatarBoardSkillTmr = null;
+        }
+        app._qSwordTmr = null;
         if (typeof app.draw === 'function') {
           app.draw();
         }
@@ -820,12 +912,14 @@ module.exports = function avatarBoardSkills(app, deps) {
   };
 
   /**
-   * 道具飞向的「受击」头像圈表现：本地释放时抖对手；联机对方释放时抖本人。
-   * @returns {null|{forSide:'opp'|'my',dx:number,dy:number,scale:number,cx:number,cy:number,avR:number,extraRing:{alpha:number,glow:number,lineRpx:number,padRpx:number}}}
+   * 单路道具的受击头像圈（本地飞出 → 对手；联机对端飞出 → 本人）。
+   * @returns {null|{forSide:'opp'|'my',dx:number,dy:number,scale:number,cx:number,cy:number,avR:number,extraRing:{...}}}
    */
-  app.getAvatarBoardSkillStrikeAvatarFrameFx = function(layout) {
-    var v = app.avatarBoardSkillVfx;
-    if (!v || typeof app.computeBoardNameLabelLayout !== 'function') {
+  function getStrikeAvatarFrameFxForVfxState(v, layout) {
+    if (!v) {
+      return null;
+    }
+    if (typeof app.computeBoardNameLabelLayout !== 'function') {
       return null;
     }
     var def = app.getAvatarBoardSkillDef(v.panelKey);
@@ -844,6 +938,7 @@ module.exports = function avatarBoardSkills(app, deps) {
     } else if (!L.hasOppAv) {
       return null;
     }
+    var isLove = def.id === 'love';
     var pc = def.pierce || {};
     var flyDur = v.durationMs != null ? v.durationMs : def.fly.durationMs;
     var holdMs = v.holdMs != null ? v.holdMs : def.fly.holdMs;
@@ -857,48 +952,96 @@ module.exports = function avatarBoardSkills(app, deps) {
     var shakeR = pc.oppShakeRpx != null ? pc.oppShakeRpx : 5;
     var scaleAmp = pc.oppScaleThump != null ? pc.oppScaleThump : 0.08;
     var burstMax = pc.impactBurstMs != null ? pc.impactBurstMs : 280;
+    var ringBase = { tint: isLove ? 'love' : 'dagger' };
 
     if (elapsed <= flyDur) {
       var u = elapsed / flyDur;
       if (u < 0.8) {
         return null;
       }
-      var a = (u - 0.8) / 0.2;
-      var ease = a * a;
+      var a2 = (u - 0.8) / 0.2;
+      var ease = a2 * a2;
+      var er = {
+        alpha: 0.12 + 0.2 * ease,
+        glow: 0.22 * ease,
+        lineRpx: 1.4 + 1.8 * ease,
+        padRpx: 0.6 + 1.4 * ease
+      };
+      if (isLove) {
+        Object.assign(er, ringBase, {
+          alpha: 0.1 + 0.16 * ease,
+          glow: 0.28 * ease,
+          lineRpx: 1.2 + 1.5 * ease,
+          padRpx: 0.8 + 1.6 * ease
+        });
+      } else {
+        Object.assign(er, ringBase);
+      }
       return {
         forSide: remote ? 'my' : 'opp',
         dx: 0,
         dy: 0,
-        scale: 1 + 0.032 * ease,
+        scale: 1 + (isLove ? 0.028 : 0.032) * ease,
         cx: cx,
         cy: cy,
         avR: avR,
-        extraRing: {
-          alpha: 0.12 + 0.2 * ease,
-          glow: 0.22 * ease,
-          lineRpx: 1.4 + 1.8 * ease,
-          padRpx: 0.6 + 1.4 * ease
-        }
+        extraRing: er
       };
     }
 
     var pierceElapsed = elapsed - flyDur;
-    var amp = app.rpx(shakeR);
-    var decay = Math.exp(-pierceElapsed / 205);
-    var dx =
-      amp *
-      decay *
-      (Math.sin(pierceElapsed * 0.102) + 0.32 * Math.sin(pierceElapsed * 0.187));
-    var dy =
-      amp *
-      decay *
-      (Math.cos(pierceElapsed * 0.115) * 0.82 +
-        0.38 * Math.sin(pierceElapsed * 0.068));
     var thump = Math.exp(-pierceElapsed / 82);
-    var scale = 1 + scaleAmp * thump + 0.03 * decay * Math.sin(pierceElapsed * 0.032);
     var hitPhase = Math.min(1, pierceElapsed / burstMax);
-    var ringAlpha = 0.38 * decay + 0.4 * (1 - hitPhase) * (1 - hitPhase);
-    var padR = 1.2 + 2.8 * (1 - hitPhase) + 1.1 * thump;
+    var padR;
+    var ringAlpha;
+    var extraRing;
+    var dx;
+    var dy;
+    var scale;
+
+    if (isLove) {
+      /** 爱心：不位移、双峰会心跳式缩放 + 品红外圈，区别于短剑高频抖动 */
+      dx = 0;
+      dy = 0;
+      var sa = scaleAmp;
+      var bump0 = Math.exp(-pierceElapsed / 95) * sa * 1.05;
+      var bump1 = Math.exp(-Math.max(0, pierceElapsed - 200) / 128) * sa * 0.72;
+      var softBreath = 0.01 * Math.exp(-pierceElapsed / 420) * Math.sin(pierceElapsed * 0.01);
+      scale = 1 + bump0 + bump1 + softBreath;
+      var rDecay = Math.exp(-pierceElapsed / 240);
+      ringAlpha = 0.42 * (1 - hitPhase) * (1 - hitPhase) * rDecay + 0.15 * thump;
+      ringAlpha = Math.min(0.9, ringAlpha);
+      padR = 1.4 + 2.2 * (1 - hitPhase) + 0.9 * thump;
+      extraRing = {
+        alpha: ringAlpha,
+        glow: 0.48 * thump + 0.15 * (1 - hitPhase),
+        lineRpx: 2 + 1.6 * thump,
+        padRpx: padR,
+        tint: 'love'
+      };
+    } else {
+      var amp = app.rpx(shakeR);
+      var decay = Math.exp(-pierceElapsed / 205);
+      dx =
+        amp *
+        decay *
+        (Math.sin(pierceElapsed * 0.102) + 0.32 * Math.sin(pierceElapsed * 0.187));
+      dy =
+        amp *
+        decay *
+        (Math.cos(pierceElapsed * 0.115) * 0.82 +
+          0.38 * Math.sin(pierceElapsed * 0.068));
+      scale = 1 + scaleAmp * thump + 0.03 * decay * Math.sin(pierceElapsed * 0.032);
+      var ringA2 = 0.38 * decay + 0.4 * (1 - hitPhase) * (1 - hitPhase);
+      padR = 1.2 + 2.8 * (1 - hitPhase) + 1.1 * thump;
+      extraRing = {
+        alpha: Math.min(0.95, ringA2),
+        glow: 0.55 * thump + 0.2 * (1 - hitPhase),
+        lineRpx: 2.2 + 2.4 * thump,
+        padRpx: padR,
+        tint: 'dagger'
+      };
+    }
     return {
       forSide: remote ? 'my' : 'opp',
       dx: dx,
@@ -907,13 +1050,42 @@ module.exports = function avatarBoardSkills(app, deps) {
       cx: cx,
       cy: cy,
       avR: avR,
-      extraRing: {
-        alpha: Math.min(0.95, ringAlpha),
-        glow: 0.55 * thump + 0.2 * (1 - hitPhase),
-        lineRpx: 2.2 + 2.4 * thump,
-        padRpx: padR
-      }
+      extraRing: extraRing
     };
+  }
+
+  /**
+   * 受击表现：与对手同时发道具时两路互不影响，返回 my / opp 各一份。
+   * @returns {{ my: * , opp: * } | null} my=本人受击(对端来)；opp=对手受击(我方出)
+   */
+  app.getAvatarBoardSkillStrikeAvatarFrameFx = function(layout) {
+    try {
+      var fIn = getStrikeAvatarFrameFxForVfxState(
+        app.avatarBoardSkillVfxIncoming,
+        layout
+      );
+      var fOut = getStrikeAvatarFrameFxForVfxState(
+        app.avatarBoardSkillVfxOutgoing,
+        layout
+      );
+      if (!fIn && !fOut) {
+        return null;
+      }
+      var o = { my: null, opp: null };
+      if (fIn && fIn.forSide === 'my') {
+        o.my = fIn;
+      } else if (fIn && fIn.forSide === 'opp') {
+        o.opp = fIn;
+      }
+      if (fOut && fOut.forSide === 'my') {
+        o.my = fOut;
+      } else if (fOut && fOut.forSide === 'opp') {
+        o.opp = fOut;
+      }
+      return o;
+    } catch (eFx) {
+      return null;
+    }
   };
 
   function drawPierceImpactBurst(ctx, cx, cy, pierceElapsed, pierceCfg) {
@@ -954,8 +1126,7 @@ module.exports = function avatarBoardSkills(app, deps) {
     ctx.restore();
   }
 
-  app.drawAvatarBoardSkillVfx = function(ctx, layout) {
-    var v = app.avatarBoardSkillVfx;
+  function drawOneAvatarBoardSkillVfx(ctx, layout, v) {
     if (!v) {
       return;
     }
@@ -1088,7 +1259,16 @@ module.exports = function avatarBoardSkills(app, deps) {
         burstCx = remoteLove ? labForLove.myCx : labForLove.oppCx;
         burstCy = remoteLove ? labForLove.myCy : labForLove.oppCy;
       }
-      drawLoveImpactBurst(ctx, burstCx, burstCy, pierceElapsed, v.startMs);
+      drawLoveImpactBurst(ctx, burstCx, burstCy, pierceElapsed, v.startMs, img);
+    }
+  }
+
+  app.drawAvatarBoardSkillVfx = function(ctx, layout) {
+    if (app.avatarBoardSkillVfxIncoming) {
+      drawOneAvatarBoardSkillVfx(ctx, layout, app.avatarBoardSkillVfxIncoming);
+    }
+    if (app.avatarBoardSkillVfxOutgoing) {
+      drawOneAvatarBoardSkillVfx(ctx, layout, app.avatarBoardSkillVfxOutgoing);
     }
   };
 

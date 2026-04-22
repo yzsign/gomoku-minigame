@@ -679,20 +679,44 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
   }
   th = th || (typeof app.getUiTheme === 'function' ? app.getUiTheme() : {});
   ctx.save();
-  var strikeAvatarFx =
-    typeof app.getAvatarBoardSkillStrikeAvatarFrameFx === 'function'
-      ? app.getAvatarBoardSkillStrikeAvatarFrameFx(layout)
-      : null;
-  /** 对手：棋盘右上角外侧；无网络图时用服务端性别或「与本人相反」默认 */
-  if (L.hasOppAv) {
-    var oppSkillFx =
-      strikeAvatarFx && strikeAvatarFx.forSide === 'opp' ? strikeAvatarFx : null;
+  var strikePair = null;
+  var oppSkillFx = null;
+  var myStrikeFx = null;
+  try {
+    if (typeof app.getAvatarBoardSkillStrikeAvatarFrameFx === 'function') {
+      try {
+        strikePair = app.getAvatarBoardSkillStrikeAvatarFrameFx(layout);
+      } catch (eStrike) {
+        strikePair = null;
+      }
+    }
+    if (
+      strikePair &&
+      typeof strikePair.forSide === 'string' &&
+      !('my' in strikePair) &&
+      !('opp' in strikePair)
+    ) {
+      var leg0 = strikePair;
+      strikePair = {
+        my: leg0.forSide === 'my' ? leg0 : null,
+        opp: leg0.forSide === 'opp' ? leg0 : null
+      };
+    }
+    oppSkillFx = strikePair && strikePair.opp ? strikePair.opp : null;
+    myStrikeFx = strikePair && strikePair.my ? strikePair.my : null;
+    /** 对手：棋盘右上角外侧；无网络图时用服务端性别或「与本人相反」默认 */
+    if (L.hasOppAv) {
     ctx.save();
     if (oppSkillFx) {
-      ctx.translate(oppSkillFx.dx, oppSkillFx.dy);
-      ctx.translate(oppSkillFx.cx, oppSkillFx.cy);
-      ctx.scale(oppSkillFx.scale, oppSkillFx.scale);
-      ctx.translate(-oppSkillFx.cx, -oppSkillFx.cy);
+      var oxs = oppSkillFx.scale;
+      if (typeof oxs === 'number' && isFinite(oxs) && oxs > 0.001) {
+        ctx.translate(oppSkillFx.dx, oppSkillFx.dy);
+        ctx.translate(oppSkillFx.cx, oppSkillFx.cy);
+        ctx.scale(oxs, oxs);
+        ctx.translate(-oppSkillFx.cx, -oppSkillFx.cy);
+      } else {
+        ctx.translate(oppSkillFx.dx, oppSkillFx.dy);
+      }
     }
     if (
       L.oppImg === defaultAvatars.getGuardianBotAvatarImage() &&
@@ -748,10 +772,13 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
       var ringPad = app.rpx(or.padRpx != null ? or.padRpx : 2);
       var ringLw = Math.max(1.1, app.rpx(or.lineRpx != null ? or.lineRpx : 2.2));
       var sc = oppSkillFx.scale > 0.001 ? oppSkillFx.scale : 1;
+      var gMul = or.glow != null ? or.glow : 0;
+      var loveRingOpp = or.tint === 'love';
       ctx.save();
-      ctx.shadowColor =
-        'rgba(255, 165, 85, ' + (0.42 * (or.glow != null ? or.glow : 0)) + ')';
-      ctx.shadowBlur = app.rpx(11) * (or.glow != null ? or.glow : 0);
+      ctx.shadowColor = loveRingOpp
+        ? 'rgba(255, 90, 130, ' + 0.38 * gMul + ')'
+        : 'rgba(255, 165, 85, ' + 0.42 * gMul + ')';
+      ctx.shadowBlur = app.rpx(11) * gMul;
       ctx.beginPath();
       ctx.arc(
         L.oppCx,
@@ -760,7 +787,9 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
         0,
         Math.PI * 2
       );
-      ctx.strokeStyle = 'rgba(255, 210, 155, ' + or.alpha + ')';
+      ctx.strokeStyle = loveRingOpp
+        ? 'rgba(255, 160, 185, ' + or.alpha + ')'
+        : 'rgba(255, 210, 155, ' + or.alpha + ')';
       ctx.lineWidth = ringLw / sc;
       ctx.stroke();
       ctx.restore();
@@ -769,14 +798,17 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
   }
   /** 我：棋盘左下角外侧；无网络图时用服务端 users.gender 对应默认 */
   if (L.hasMyAv) {
-    var myStrikeFx =
-      strikeAvatarFx && strikeAvatarFx.forSide === 'my' ? strikeAvatarFx : null;
     ctx.save();
     if (myStrikeFx) {
-      ctx.translate(myStrikeFx.dx, myStrikeFx.dy);
-      ctx.translate(myStrikeFx.cx, myStrikeFx.cy);
-      ctx.scale(myStrikeFx.scale, myStrikeFx.scale);
-      ctx.translate(-myStrikeFx.cx, -myStrikeFx.cy);
+      var mxs = myStrikeFx.scale;
+      if (typeof mxs === 'number' && isFinite(mxs) && mxs > 0.001) {
+        ctx.translate(myStrikeFx.dx, myStrikeFx.dy);
+        ctx.translate(myStrikeFx.cx, myStrikeFx.cy);
+        ctx.scale(mxs, mxs);
+        ctx.translate(-myStrikeFx.cx, -myStrikeFx.cy);
+      } else {
+        ctx.translate(myStrikeFx.dx, myStrikeFx.dy);
+      }
     }
     defaultAvatars.drawCircleAvatar(
       ctx,
@@ -815,20 +847,28 @@ app.drawBoardNameLabels = function(ctx, layout, th) {
       var myRingPad = app.rpx(mr.padRpx != null ? mr.padRpx : 2);
       var myRingLw = Math.max(1.1, app.rpx(mr.lineRpx != null ? mr.lineRpx : 2.2));
       var mySc = myStrikeFx.scale > 0.001 ? myStrikeFx.scale : 1;
+      var myGMul = mr.glow != null ? mr.glow : 0;
+      var loveRingMy = mr.tint === 'love';
       ctx.save();
-      ctx.shadowColor =
-        'rgba(255, 165, 85, ' + (0.42 * (mr.glow != null ? mr.glow : 0)) + ')';
-      ctx.shadowBlur = app.rpx(11) * (mr.glow != null ? mr.glow : 0);
+      ctx.shadowColor = loveRingMy
+        ? 'rgba(255, 90, 130, ' + 0.38 * myGMul + ')'
+        : 'rgba(255, 165, 85, ' + 0.42 * myGMul + ')';
+      ctx.shadowBlur = app.rpx(11) * myGMul;
       ctx.beginPath();
       ctx.arc(L.myCx, L.myCy, L.avR + myRingPad, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(255, 210, 155, ' + mr.alpha + ')';
+      ctx.strokeStyle = loveRingMy
+        ? 'rgba(255, 160, 185, ' + mr.alpha + ')'
+        : 'rgba(255, 210, 155, ' + mr.alpha + ')';
       ctx.lineWidth = myRingLw / mySc;
       ctx.stroke();
       ctx.restore();
     }
     ctx.restore();
   }
-  ctx.restore();
+  } catch (eDrawNames) {
+  } finally {
+    ctx.restore();
+  }
 };
 
 /**
@@ -2415,8 +2455,10 @@ app.snapPx = function(x) {
 
 /* ---------- 界面与对局状态 ---------- */
 
-/** 'home' | 'pve_color' | 'matching' | 'game' | 'history' | 'replay' | 'admin_puzzle' */
+/** 'home' | 'pve_color' | 'matching' | 'game' | 'history' | 'replay' | 'review_hub' | 'admin_puzzle' */
 app.screen = 'home';
+/** 对局复盘入口页：GET /api/me/replay-study 的响应体（含 hasData） */
+app.reviewHubData = null;
 
 /** openid 管理员：侧栏「残局管理」入口（由 /api/me/admin-status 设置） */
 app.userIsAdmin = false;
@@ -2698,7 +2740,7 @@ app.onlinePuzzleFriendBotStoneColor = function() {
  */
 app.isPuzzleFriendInviteEnabled = function() {
   if (app.isDailyPuzzle && !app.isPvpOnline) {
-    return true;
+    return app.dailyPuzzleLocalStudy !== true;
   }
   if (
     app.isPvpOnline &&
@@ -2807,8 +2849,7 @@ app.onlineMoveHistory = [];
 app.lastSettledGameId = null;
 /**
  * 最近一次 settle 返回的天梯分与团团积分字段（动画用）；离开房间时清空。
- * { blackEloAfter, whiteEloAfter, blackEloDelta, whiteEloDelta,
- *   blackActivityPointsAfter, whiteActivityPointsAfter, blackActivityPointsDelta, whiteActivityPointsDelta }
+ * 含 black/白 双方列；若有 callerEloAfter、callerEloDelta、callerPlaysBlack 则与 JWT 用户一致（防执子色错配）。
  */
 app.lastSettleRating = null;
 /** 结算页仅自己可见：团团积分增加飘字；{ startMs, delta } */

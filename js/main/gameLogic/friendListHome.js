@@ -670,11 +670,7 @@ module.exports = function registerFriendListHome(app, deps) {
   }
 
   function ensureFriendFabUnreadPulse() {
-    if (
-      !friendDmHasAnyUnread() ||
-      app.homeFriendListOpen ||
-      app.screen !== 'home'
-    ) {
+    if (!friendDmHasAnyUnread() || app.homeFriendListOpen) {
       stopFriendFabUnreadPulse();
       return;
     }
@@ -682,11 +678,7 @@ module.exports = function registerFriendListHome(app, deps) {
       return;
     }
     function tick() {
-      if (
-        !friendDmHasAnyUnread() ||
-        app.homeFriendListOpen ||
-        app.screen !== 'home'
-      ) {
+      if (!friendDmHasAnyUnread() || app.homeFriendListOpen) {
         stopFriendFabUnreadPulse();
         return;
       }
@@ -699,11 +691,7 @@ module.exports = function registerFriendListHome(app, deps) {
         friendFabUnreadPulseLastDrawMs = nowPulse;
         app.draw();
       }
-      if (
-        !friendDmHasAnyUnread() ||
-        app.homeFriendListOpen ||
-        app.screen !== 'home'
-      ) {
+      if (!friendDmHasAnyUnread() || app.homeFriendListOpen) {
         stopFriendFabUnreadPulse();
         return;
       }
@@ -3122,5 +3110,19 @@ module.exports = function registerFriendListHome(app, deps) {
     }
 
     app.ctx.restore();
+  };
+
+  /**
+   * 非首页全屏：在对应 screen 已绘制完毕后叠画好友入口悬浮球与侧栏（与首页同一套状态与交互）。
+   */
+  app.drawFriendListGlobalChrome = function () {
+    var th =
+      typeof app.getUiTheme === 'function' ? app.getUiTheme() : null;
+    if (typeof app.drawHomeFriendListFab === 'function') {
+      app.drawHomeFriendListFab(th);
+    }
+    if (typeof app.drawHomeFriendListOverlay === 'function') {
+      app.drawHomeFriendListOverlay(th);
+    }
   };
 };

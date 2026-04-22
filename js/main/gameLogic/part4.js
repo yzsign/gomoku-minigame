@@ -306,11 +306,6 @@ app.getReplayControlsButtonY = function() {
   return app.layout.bottomY - app.rpx(112) - app.rpx(40);
 };
 
-/** 「棋谱回放 · n/m」与底栏药丸（高约 36）中心的间距，须足够大以免字与按钮重叠 */
-app.getReplaySubtitleY = function() {
-  return app.getReplayControlsButtonY() - app.rpx(76);
-};
-
 /** 上一步 / 下一步：以屏宽中心对称，中心距=药丸宽，两钮边缘相贴无间隙 */
 app.getReplayNavPrevCx = function() {
   var w = app.REPLAY_CTRL_PILL_W || 82;
@@ -424,18 +419,18 @@ app.enterReplayStudyFromCurrentStep = function() {
   );
 };
 
+/**
+ * 「复盘」药丸中心 Y：与底栏四键拉开间距（药丸高约 36）。
+ */
 app.getReplayStudyButtonY = function() {
-  var subY = app.getReplaySubtitleY();
-  var btnY = app.getReplayControlsButtonY();
-  return (subY + btnY) / 2;
+  return app.getReplayControlsButtonY() - 54;
 };
 
 app.hitReplayControl = function(clientX, clientY) {
   var btnY = app.getReplayControlsButtonY();
   var halfW = 46;
   var halfH = 24;
-  var subY = app.getReplaySubtitleY();
-  var studyY = (subY + btnY) / 2;
+  var studyY = app.getReplayStudyButtonY();
   if (
     app.replayMoves &&
     app.replayMoves.length > 0 &&
@@ -505,15 +500,6 @@ app.drawReplayBoardLayer = function() {
   app.ctx.restore();
   var total = app.replayMoves.length;
   var btnY = app.getReplayControlsButtonY();
-  var subY = app.getReplaySubtitleY();
-  render.drawText(
-    app.ctx,
-    '棋谱回放 · ' + app.replayStep + ' / ' + total,
-    app.W / 2,
-    subY,
-    15,
-    th.status
-  );
   var studyY = app.getReplayStudyButtonY();
   var studyOn = total > 0;
   app.drawReplayToolbarButton('复盘', app.W / 2, studyY, studyOn, 'study');
@@ -1497,7 +1483,7 @@ app.openHistoryScreen = function() {
 }
 
 /**
- * 首页「对局复盘」：读取当前用户在服务端唯一的最新复盘存档（与每日残局表/接口无关）。
+ * 首页「对局复盘」：拉取云端存档后进入独立全屏页 {@link #drawReviewHubScreen}。
  */
 app.openGameReviewEntry = function() {
   authApi.ensureSession(function(sessOk) {
@@ -1533,56 +1519,9 @@ app.openGameReviewEntry = function() {
             }
             return;
           }
-          if (!d.hasData) {
-            if (typeof wx.showToast === 'function') {
-              wx.showToast({ title: '暂无复盘存档，请从战绩选谱', icon: 'none' });
-            }
-            app.openHistoryScreen();
-            return;
-          }
-          if (typeof wx.showActionSheet !== 'function') {
-            if (typeof app.startLocalReplayStudyPuzzle === 'function') {
-              app.startLocalReplayStudyPuzzle(d.board, d.sideToMove);
-            }
-            return;
-          }
-          wx.showActionSheet({
-            itemList: ['继续上次复盘', '从战绩选择棋谱', '清除复盘存档'],
-            success: function(sr) {
-              if (sr.tapIndex === 0) {
-                if (typeof app.startLocalReplayStudyPuzzle === 'function') {
-                  app.startLocalReplayStudyPuzzle(d.board, d.sideToMove);
-                }
-              } else if (sr.tapIndex === 1) {
-                app.openHistoryScreen();
-              } else if (sr.tapIndex === 2) {
-                wx.request(
-                  Object.assign(roomApi.meReplayStudyDeleteOptions(), {
-                    success: function(resDel) {
-                      if (
-                        resDel.statusCode === 204 ||
-                        resDel.statusCode === 200
-                      ) {
-                        if (typeof wx.showToast === 'function') {
-                          wx.showToast({ title: '已清除', icon: 'none' });
-                        }
-                      } else if (typeof wx.showToast === 'function') {
-                        wx.showToast({
-                          title: '清除失败',
-                          icon: 'none'
-                        });
-                      }
-                    },
-                    fail: function() {
-                      if (typeof wx.showToast === 'function') {
-                        wx.showToast({ title: '网络错误', icon: 'none' });
-                      }
-                    }
-                  })
-                );
-              }
-            }
-          });
+          app.reviewHubData = d;
+          app.screen = 'review_hub';
+          app.draw();
         },
         fail: function() {
           if (typeof wx.showToast === 'function') {
@@ -1592,6 +1531,174 @@ app.openGameReviewEntry = function() {
       })
     );
   });
+};
+
+/**
+ * 与 {@link #getPveColorLayout} 同一套纵向比例：标题 0.18、副标题 0.26、主卡片 0.40 / 0.52、返回 0.66；
+ * 三颗主按钮时第三颗与第二颗间距同黑白间距，返回略下移以免与卡片重叠。
+ */
+app.getReviewHubLayout = function() {
+  var cl = app.getPveColorLayout();
+  var hasData = !!(app.reviewHubData && app.reviewHubData.hasData);
+  var step = cl.yWhite - cl.yBlack;
+  var yThird = cl.yWhite + step;
+  return {
+    btnW: cl.btnW,
+    btnH: cl.btnH,
+    cx: cl.cx,
+    hasData: hasData,
+    yContinue: hasData ? cl.yBlack : null,
+    yHistory: hasData ? cl.yWhite : cl.yBlack,
+    yClear: hasData ? yThird : null,
+    backY: hasData ? app.H * 0.72 : cl.backY
+  };
+};
+
+app.hitReviewHubButton = function(clientX, clientY) {
+  var L = app.getReviewHubLayout();
+  var bw = L.btnW / 2 + 12;
+  var bh = L.btnH / 2 + 12;
+  if (
+    Math.abs(clientX - L.cx) <= 90 &&
+    Math.abs(clientY - L.backY) <= 24
+  ) {
+    return 'back';
+  }
+  if (L.hasData && L.yContinue != null) {
+    if (
+      Math.abs(clientX - L.cx) <= bw &&
+      Math.abs(clientY - L.yContinue) <= bh
+    ) {
+      return 'continue';
+    }
+  }
+  if (Math.abs(clientX - L.cx) <= bw && Math.abs(clientY - L.yHistory) <= bh) {
+    return 'history';
+  }
+  if (L.hasData && L.yClear != null) {
+    if (
+      Math.abs(clientX - L.cx) <= bw &&
+      Math.abs(clientY - L.yClear) <= bh
+    ) {
+      return 'clear';
+    }
+  }
+  return null;
+};
+
+app.handleReviewHubTouchStart = function(clientX, clientY) {
+  var h = app.hitReviewHubButton(clientX, clientY);
+  if (h === 'back') {
+    app.reviewHubData = null;
+    app.screen = 'home';
+    app.draw();
+    return;
+  }
+  if (h === 'continue' && app.reviewHubData && app.reviewHubData.hasData) {
+    var dCont = app.reviewHubData;
+    app.reviewHubData = null;
+    app.screen = 'home';
+    if (typeof app.startLocalReplayStudyPuzzle === 'function') {
+      app.startLocalReplayStudyPuzzle(dCont.board, dCont.sideToMove);
+    }
+    return;
+  }
+  if (h === 'history') {
+    app.reviewHubData = null;
+    app.openHistoryScreen();
+    return;
+  }
+  if (h === 'clear' && app.reviewHubData && app.reviewHubData.hasData) {
+    wx.request(
+      Object.assign(roomApi.meReplayStudyDeleteOptions(), {
+        success: function(resDel) {
+          if (resDel.statusCode === 204 || resDel.statusCode === 200) {
+            if (typeof wx.showToast === 'function') {
+              wx.showToast({ title: '已清除', icon: 'none' });
+            }
+            if (app.reviewHubData) {
+              app.reviewHubData.hasData = false;
+            }
+            app.draw();
+          } else if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '清除失败', icon: 'none' });
+          }
+        },
+        fail: function() {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '网络错误', icon: 'none' });
+          }
+        }
+      })
+    );
+  }
+};
+
+app.drawReviewHubScreen = function() {
+  app.fillAmbientBackground();
+
+  var L = app.getReviewHubLayout();
+  var th = app.getCurrentTheme();
+  var cards = th.homeCards || ['#5a7a8c', '#8b6b7a'];
+  var card0 = cards[0];
+  var card1 = cards.length > 1 ? cards[1] : card0;
+
+  app.ctx.save();
+  app.ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
+  app.ctx.shadowBlur = 10;
+  app.ctx.shadowOffsetY = 2;
+  render.drawText(app.ctx, '对局复盘', app.W / 2, app.H * 0.18, 30, th.title);
+  app.ctx.restore();
+
+  var subMsg = L.hasData
+    ? '已保存最近一次从棋谱载入的练习局面'
+    : '暂无云端存档，可从战绩载入棋谱';
+  render.drawText(app.ctx, subMsg, app.W / 2, app.H * 0.26, 15, th.subtitle);
+
+  if (L.hasData && L.yContinue != null) {
+    app.drawMacaronCard(
+      '继续上次复盘',
+      L.cx,
+      L.yContinue,
+      L.btnW,
+      L.btnH,
+      card0,
+      false,
+      'bear'
+    );
+  }
+  app.drawMacaronCard(
+    '从战绩选择棋谱',
+    L.cx,
+    L.yHistory,
+    L.btnW,
+    L.btnH,
+    L.hasData ? card1 : card0,
+    false,
+    L.hasData ? 'heart' : 'bear'
+  );
+  if (L.hasData && L.yClear != null) {
+    var clearFill =
+      cards.length > 2 ? cards[2] : 'rgba(120, 110, 100, 0.92)';
+    app.drawMacaronCard(
+      '清除云端复盘存档',
+      L.cx,
+      L.yClear,
+      L.btnW,
+      L.btnH,
+      clearFill,
+      false,
+      null
+    );
+  }
+
+  app.ctx.font =
+    '15px "PingFang SC","Hiragino Sans GB",sans-serif';
+  app.ctx.fillStyle = th.muted;
+  app.ctx.textAlign = 'center';
+  app.ctx.textBaseline = 'middle';
+  app.ctx.fillText('返回', app.snapPx(L.cx), app.snapPx(L.backY));
+  app.drawThemeChrome(th);
 };
 
 /**
@@ -2249,13 +2356,8 @@ app.drawMacaronCard = function(
     'bold 18px "PingFang SC","Hiragino Sans GB",sans-serif';
   app.ctx.fillStyle = '#ffffff';
   app.ctx.textBaseline = 'middle';
-  if (doodleKind) {
-    app.ctx.textAlign = 'left';
-    app.ctx.fillText(label, app.snapPx(x0 + 18), app.snapPx(cy));
-  } else {
-    app.ctx.textAlign = 'center';
-    app.ctx.fillText(label, app.snapPx(cx), app.snapPx(cy));
-  }
+  app.ctx.textAlign = 'center';
+  app.ctx.fillText(label, app.snapPx(cx), app.snapPx(cy));
   if (doodleKind) {
     doodles.drawCardCornerDoodle(app.ctx, doodleKind, cx, cy, bw, bh);
   }

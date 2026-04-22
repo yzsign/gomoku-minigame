@@ -293,8 +293,8 @@ var PIECE_SKINS = {
      * 贴图在圆内有留白时，0.98 会环在角色外造成缝隙，需明显小于 1。
      */
     opponentLastMoveMarker: {
-      ringRadiusMul: 0.79,
-      lineWidthPr: 0.088,
+      ringRadiusMul: 0.792,
+      lineWidthPr: 0.082,
       blackStroke: '#6ec8ff',
       whiteStroke: '#0f7ae8',
       shadowBlack: 'rgba(90, 170, 255, 0.55)',
@@ -306,8 +306,8 @@ var PIECE_SKINS = {
     winningLineHighlight: {
       glowOuterMul: 1.18,
       glowGradientInnerMul: 0.76,
-      ringPrimaryMul: 0.86,
-      ringSecondaryMul: 0.8,
+      ringPrimaryMul: 0.862,
+      ringSecondaryMul: 0.802,
       primaryLineWidthPr: 0.092,
       secondaryLineWidthPr: 0.05,
       primaryShadowBlurPr: 0.2
@@ -345,15 +345,15 @@ var PIECE_SKINS = {
      * 质心：裁切圆内加权质心（与棋盘贴图可见区域一致）。
      */
     opponentLastMoveMarker: {
-      ringRadiusMul: 0.87,
+      ringRadiusMul: 0.873,
       /** 质心相对交点有位移，环过大时会画出棋子圆外；黑子偏移更大故上限略低 */
-      ringRadiusMulBlack: 0.868,
-      ringRadiusMulWhite: 0.888,
+      ringRadiusMulBlack: 0.871,
+      ringRadiusMulWhite: 0.891,
       markerCenterOffsetXMulBlack: -0.010695,
       markerCenterOffsetYMulBlack: -0.045484,
       markerCenterOffsetXMulWhite: -0.001757,
       markerCenterOffsetYMulWhite: -0.038548,
-      lineWidthPr: 0.055,
+      lineWidthPr: 0.052,
       blackStroke: '#6ec8ff',
       whiteStroke: '#0f7ae8',
       shadowBlack: 'rgba(90, 170, 255, 0.42)',
@@ -364,8 +364,8 @@ var PIECE_SKINS = {
     winningLineHighlight: {
       glowOuterMul: 1.12,
       glowGradientInnerMul: 0.72,
-      ringPrimaryMul: 0.868,
-      ringSecondaryMul: 0.805,
+      ringPrimaryMul: 0.871,
+      ringSecondaryMul: 0.808,
       primaryLineWidthPr: 0.092,
       secondaryLineWidthPr: 0.05,
       primaryShadowBlurPr: 0.2

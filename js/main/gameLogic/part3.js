@@ -2421,10 +2421,12 @@ app.maybeRequestOnlineGameSettle = function(matchRoundOverride) {
       mrUse = por;
     }
   }
+  /** 须与 gomoku 黑白整数一致；勿用 app.winner===app.BLACK，JSON/WS 偶发字符串时 === 会误判为白胜。 */
+  var wStone = app.normalizeOnlineStoneInt(app.winner, null);
   var outcome;
-  if (app.winner === null) {
+  if (wStone === null || (wStone !== app.BLACK && wStone !== app.WHITE)) {
     outcome = 'DRAW';
-  } else if (app.winner === app.BLACK) {
+  } else if (wStone === app.BLACK) {
     outcome = 'BLACK_WIN';
   } else {
     outcome = 'WHITE_WIN';
@@ -2554,19 +2556,45 @@ app.maybeRequestOnlineGameSettle = function(matchRoundOverride) {
                 ? wApD
                 : 0;
             }
+            var cEloAfter = numField(d, 'callerEloAfter', 'caller_elo_after');
+            var cEloDelt = numField(d, 'callerEloDelta', 'caller_elo_delta');
+            var cApD = numField(
+              d,
+              'callerActivityPointsDelta',
+              'caller_activity_points_delta'
+            );
+            if (isFinite(cEloAfter)) {
+              app.lastSettleRating.callerEloAfter = Math.round(cEloAfter);
+            }
+            if (isFinite(cEloDelt)) {
+              app.lastSettleRating.callerEloDelta = cEloDelt;
+            }
+            if (d.callerPlaysBlack === true || d.callerPlaysBlack === false) {
+              app.lastSettleRating.callerPlaysBlack = d.callerPlaysBlack;
+            } else if (d.caller_plays_black === true || d.caller_plays_black === false) {
+              app.lastSettleRating.callerPlaysBlack = d.caller_plays_black;
+            }
             if (app.isPvpOnline) {
-              var mineAfter =
-                app.pvpOnlineYourColor === app.BLACK
-                  ? app.lastSettleRating.blackEloAfter
-                  : app.lastSettleRating.whiteEloAfter;
-              app.homeRatingEloCache = mineAfter;
-              var mineApD = NaN;
-              if (isFinite(bApD) && isFinite(wApD)) {
-                mineApD =
-                  app.pvpOnlineYourColor === app.BLACK ? bApD : wApD;
+              if (isFinite(cEloAfter)) {
+                app.homeRatingEloCache = Math.round(cEloAfter);
+              } else {
+                var mineAfter =
+                  app.pvpOnlineYourColor === app.BLACK
+                    ? app.lastSettleRating.blackEloAfter
+                    : app.lastSettleRating.whiteEloAfter;
+                app.homeRatingEloCache = mineAfter;
               }
-              if (isFinite(mineApD) && mineApD > 0) {
-                app.startResultTuanPointsAnim(mineApD);
+              if (isFinite(cApD) && cApD > 0) {
+                app.startResultTuanPointsAnim(cApD);
+              } else {
+                var mineApD2 = NaN;
+                if (isFinite(bApD) && isFinite(wApD)) {
+                  mineApD2 =
+                    app.pvpOnlineYourColor === app.BLACK ? bApD : wApD;
+                }
+                if (isFinite(mineApD2) && mineApD2 > 0) {
+                  app.startResultTuanPointsAnim(mineApD2);
+                }
               }
             }
             app.draw();
@@ -3467,14 +3495,38 @@ app.drawResultOverlay = function() {
   ctx.textBaseline = 'middle';
   ctx.fillText('VS', app.snapPx(app.W * 0.5), app.snapPx(ly.vsTextY));
 
-  function eloLine(forBlack) {
+  function eloLine(forBlack, onlineWhich) {
     if (app.isDailyPuzzle) {
       return { elo: '--', delta: '', dNeg: false, dZero: true };
     }
     var sr = app.lastSettleRating;
     if (sr) {
-      var e = forBlack ? sr.blackEloAfter : sr.whiteEloAfter;
-      var d = forBlack ? sr.blackEloDelta : sr.whiteEloDelta;
+      var e;
+      var d;
+      if (
+        app.isPvpOnline &&
+        onlineWhich === 'me' &&
+        typeof sr.callerEloAfter === 'number' &&
+        isFinite(sr.callerEloAfter)
+      ) {
+        e = sr.callerEloAfter;
+        d = typeof sr.callerEloDelta === 'number' && isFinite(sr.callerEloDelta)
+          ? sr.callerEloDelta
+          : 0;
+      } else if (
+        app.isPvpOnline &&
+        onlineWhich === 'opp' &&
+        typeof sr.callerPlaysBlack === 'boolean'
+      ) {
+        var oppBlack = !sr.callerPlaysBlack;
+        e = oppBlack ? sr.blackEloAfter : sr.whiteEloAfter;
+        d = typeof sr.blackEloDelta === 'number' && typeof sr.whiteEloDelta === 'number'
+          ? (oppBlack ? sr.blackEloDelta : sr.whiteEloDelta)
+          : 0;
+      } else {
+        e = forBlack ? sr.blackEloAfter : sr.whiteEloAfter;
+        d = forBlack ? sr.blackEloDelta : sr.whiteEloDelta;
+      }
       var elo = String(e);
       var deltaStr = '';
       var dNeg = false;
@@ -3531,8 +3583,8 @@ app.drawResultOverlay = function() {
   var lw;
   if (app.isPvpOnline) {
     var meBlack = Number(app.pvpOnlineYourColor) === gomoku.BLACK;
-    lb = eloLine(meBlack);
-    lw = eloLine(!meBlack);
+    lb = eloLine(meBlack, 'me');
+    lw = eloLine(!meBlack, 'opp');
   } else {
     var msElo = app.getMyAssignedStoneColor();
     if (msElo === gomoku.BLACK || msElo === gomoku.WHITE) {

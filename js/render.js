@@ -1055,19 +1055,28 @@ function drawOpponentLastMoveMarker(ctx, layout, theme, r, c, stoneColor, pieceT
   var cx = snapLogical(cx0 + off.dx);
   var cy = snapLogical(cy0 + off.dy);
   var m = pieceTheme && pieceTheme.opponentLastMoveMarker;
-  var ringMulBase =
-    m && typeof m.ringRadiusMul === 'number' ? m.ringRadiusMul : 0.9;
-  var ringMul =
-    stoneColor === gomoku.BLACK
-      ? m && typeof m.ringRadiusMulBlack === 'number'
-        ? m.ringRadiusMulBlack
-        : ringMulBase
-      : m && typeof m.ringRadiusMulWhite === 'number'
-        ? m.ringRadiusMulWhite
-        : ringMulBase;
-  var ringR = pr * ringMul;
-  var lwPr = m && typeof m.lineWidthPr === 'number' ? m.lineWidthPr : 0.14;
+  /** 线宽先算，便于「无贴图圆子」环半径按 pr 与 lw 贴在填色外沿（旧固定 0.9 会让环缩在子内） */
+  var lwPr = m && typeof m.lineWidthPr === 'number' ? m.lineWidthPr : 0.11;
   var lw = Math.max(2, pr * lwPr, cell * 0.065);
+  var ringMulBase =
+    m && typeof m.ringRadiusMul === 'number' ? m.ringRadiusMul : null;
+  var ringMul;
+  if (stoneColor === gomoku.BLACK) {
+    ringMul =
+      m && typeof m.ringRadiusMulBlack === 'number'
+        ? m.ringRadiusMulBlack
+        : ringMulBase != null
+          ? ringMulBase
+          : 1 + lw / (2 * pr);
+  } else {
+    ringMul =
+      m && typeof m.ringRadiusMulWhite === 'number'
+        ? m.ringRadiusMulWhite
+        : ringMulBase != null
+          ? ringMulBase
+          : 1 + lw / (2 * pr);
+  }
+  var ringR = pr * ringMul;
   var strokeBlack = m && m.blackStroke ? m.blackStroke : '#7fd4ff';
   var strokeWhite = m && m.whiteStroke ? m.whiteStroke : '#1a7eea';
   var shBlack = m && m.shadowBlack ? m.shadowBlack : 'rgba(100, 190, 255, 0.5)';
