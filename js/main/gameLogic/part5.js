@@ -293,13 +293,6 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     );
   }
 
-  app.ctx.strokeStyle = U ? U.statusSep : 'rgba(92, 75, 58, 0.1)';
-  app.ctx.lineWidth = app.rpx(1);
-  app.ctx.beginPath();
-  app.ctx.moveTo(app.snapPx(rx + cardPad), app.snapPx(statusBandTop));
-  app.ctx.lineTo(app.snapPx(rx + rw - cardPad), app.snapPx(statusBandTop));
-  app.ctx.stroke();
-
   if (isPointsRedeem) {
     var rowMidY = innerBottom - app.rpx(20);
     var btnH = app.rpx(26);
@@ -311,7 +304,8 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
     var pointsSlotRight = btnL - gapBeforeBtn;
     var pointsTextCx = (pointsSlotLeft + pointsSlotRight) / 2;
     var holdCt = null;
-    if (entry.kind === 'consumable') {
+    /** 与 getShopCategory 一致：仅 kind 时短剑/爱心不统计持有（缺「持有」行），勿只用 entry.kind */
+    if (themes.getShopCategory(entry) === themes.SHOP_CATEGORY_CONSUMABLE) {
       if (entry.consumableKind === 'dagger' || entry.id === 'dagger_skill') {
         holdCt =
           typeof themes.getConsumableDaggerCount === 'function'
@@ -324,24 +318,38 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
             : null;
       }
     }
-    app.ctx.textAlign = 'center';
-    app.ctx.textBaseline = 'middle';
+    /** 上：小字、主题 muted 深灰；下：加粗、积分主色。save/restore 避免承接卡面标题等 fillStyle */
+    var holdTextColor =
+      th && th.muted
+        ? th.muted
+        : U && U.muted
+          ? U.muted
+          : '#5c4d42';
+    var costTextColor = U ? U.pointsCost : '#b08040';
     if (holdCt != null) {
+      app.ctx.save();
+      app.ctx.textAlign = 'center';
+      app.ctx.textBaseline = 'middle';
       app.ctx.font = app.rpx(16) + 'px ' + app.PIECE_SKIN_FONT_UI;
-      app.ctx.fillStyle = U && U.muted ? U.muted : '#8a7868';
+      app.ctx.fillStyle = holdTextColor;
       app.ctx.fillText(
         '持有' + holdCt + '个',
         app.snapPx(pointsTextCx),
         app.snapPx(rowMidY - app.rpx(11))
       );
+      app.ctx.restore();
     }
-    app.ctx.font = app.rpx(18) + 'px ' + app.PIECE_SKIN_FONT_UI;
-    app.ctx.fillStyle = U ? U.pointsCost : '#b08040';
+    app.ctx.save();
+    app.ctx.textAlign = 'center';
+    app.ctx.textBaseline = 'middle';
+    app.ctx.font = '600 ' + app.rpx(19) + 'px ' + app.PIECE_SKIN_FONT_UI;
+    app.ctx.fillStyle = costTextColor;
     app.ctx.fillText(
       entry.costPoints + '积分',
       app.snapPx(pointsTextCx),
       app.snapPx(holdCt != null ? rowMidY + app.rpx(10) : rowMidY)
     );
+    app.ctx.restore();
     var gBtn = app.ctx.createLinearGradient(btnL, btnTop, btnL, btnTop + btnH);
     if (U) {
       gBtn.addColorStop(0, U.redeemBtnG0);
