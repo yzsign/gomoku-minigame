@@ -541,6 +541,9 @@ module.exports = function avatarBoardSkills(app, deps) {
    * 短剑（border）须先 POST /api/me/consumables/use 成功后再播放；次数仅受库存限制。
    */
   app.startAvatarBoardSkillFromPanelKey = function(side, panelKey) {
+    if (app.onlineSpectatorMode) {
+      return false;
+    }
     if (side !== 'my' || app.gameOver) {
       return;
     }

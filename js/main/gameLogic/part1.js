@@ -160,6 +160,25 @@ app.getMyDisplayName = function() {
     ) {
       /* fall through to下方昵称与「我」 */
     } else {
+      if (app.onlinePuzzleFriendRoom) {
+        return '旁观';
+      }
+      /** PvP 好友观战：下方为所点好友，昵称来自 STATE black/white* */
+      if (app.onlineFriendWatchPeerUserId != null) {
+        var peerG = Number(app.onlineFriendWatchPeerUserId);
+        if (
+          app.onlineStateBlackUserId != null &&
+          peerG === Number(app.onlineStateBlackUserId)
+        ) {
+          return (app.onlineStateBlackNickname && String(app.onlineStateBlackNickname).trim()) || '黑方';
+        }
+        if (
+          app.onlineStateWhiteUserId != null &&
+          peerG === Number(app.onlineStateWhiteUserId)
+        ) {
+          return (app.onlineStateWhiteNickname && String(app.onlineStateWhiteNickname).trim()) || '白方';
+        }
+      }
       return '旁观';
     }
   }
@@ -188,6 +207,28 @@ app.getOpponentDisplayName = function() {
     !app.hasPuzzleFriendHumanGuest()
   ) {
     return '电脑';
+  }
+  if (
+    app.isPvpOnline &&
+    app.onlineSpectatorMode &&
+    !app.onlinePuzzleFriendRoom &&
+    app.onlineFriendWatchPeerUserId != null
+  ) {
+    var peerH = Number(app.onlineFriendWatchPeerUserId);
+    if (
+      app.onlineStateBlackUserId != null &&
+      peerH === Number(app.onlineStateBlackUserId) &&
+      app.onlineStateWhiteUserId != null
+    ) {
+      return (app.onlineStateWhiteNickname && String(app.onlineStateWhiteNickname).trim()) || '白方';
+    }
+    if (
+      app.onlineStateWhiteUserId != null &&
+      peerH === Number(app.onlineStateWhiteUserId) &&
+      app.onlineStateBlackUserId != null
+    ) {
+      return (app.onlineStateBlackNickname && String(app.onlineStateBlackNickname).trim()) || '黑方';
+    }
   }
   if (
     app.isPvpOnline &&
@@ -393,10 +434,40 @@ app.computeBoardNameLabelLayout = function(layout) {
   var myImg = app.getMyAvatarImageForUi();
   var oppImg;
   /**
-   * 残局好友房房主旁观、好友尚未入座：与每日残局一致，右上为守关形象，
-   * 勿走联机「对手」默认图或 opponent 接口（易把人机账号当成真人对手）。
+   * 好友观战（非残局房）：下为所点好友、上为其对手，头像与昵称来自 STATE black/white*，勿用本机与 opponent-rating。
    */
   if (
+    app.isPvpOnline &&
+    app.onlineSpectatorMode &&
+    !app.onlinePuzzleFriendRoom
+  ) {
+    myImg = null;
+    oppImg = null;
+    var peerL = app.onlineFriendWatchPeerUserId;
+    var bU = app.onlineStateBlackUserId;
+    var wU = app.onlineStateWhiteUserId;
+    if (bU != null) {
+      if (peerL != null && wU != null && Number(peerL) === Number(bU)) {
+        myImg = app.onlineWatchSeatBlackImg;
+        oppImg = app.onlineWatchSeatWhiteImg;
+      } else if (peerL != null && wU != null && Number(peerL) === Number(wU)) {
+        myImg = app.onlineWatchSeatWhiteImg;
+        oppImg = app.onlineWatchSeatBlackImg;
+      } else {
+        myImg = app.onlineWatchSeatBlackImg;
+        oppImg = app.onlineWatchSeatWhiteImg;
+      }
+    } else {
+      myImg = app.onlineWatchSeatBlackImg;
+      oppImg = app.onlineWatchSeatWhiteImg;
+    }
+    if (!oppImg) {
+      oppImg = defaultAvatars.getOpponentAvatarImage();
+    }
+    if (!myImg) {
+      myImg = defaultAvatars.getMyAvatarImage();
+    }
+  } else if (
     app.isPvpOnline &&
     app.onlineSpectatorMode &&
     app.onlinePuzzleFriendRoom &&
@@ -493,6 +564,10 @@ app.computeBoardNameLabelLayout = function(layout) {
     typeof app.isVersusAiOpponentGame === 'function' &&
     app.isVersusAiOpponentGame()
   ) {
+    daggerEquipped = false;
+    loveEquipped = false;
+  }
+  if (app.onlineSpectatorMode) {
     daggerEquipped = false;
     loveEquipped = false;
   }
@@ -925,6 +1000,9 @@ app.getPropBarUiColors = function(th) {
 
 app.shouldShowAvatarPropBar = function() {
   if (app.screen !== 'game' || app.gameOver) {
+    return false;
+  }
+  if (app.onlineSpectatorMode) {
     return false;
   }
   if (app.showResultOverlay && (app.gameOver || app.onlineResultOverlaySticky)) {
@@ -2615,6 +2693,16 @@ app.onlineClockTickTimer = null;
  */
 app.onlineBlackPieceSkinId = null;
 app.onlineWhitePieceSkinId = null;
+/** 从好友列表观战 PvP 时：被观战好友的 userId（与 STATE 黑/白比对接口） */
+app.onlineFriendWatchPeerUserId = null;
+app.onlineStateBlackUserId = null;
+app.onlineStateWhiteUserId = null;
+app.onlineStateBlackNickname = '';
+app.onlineStateWhiteNickname = '';
+app.onlineWatchSeatBlackImg = null;
+app.onlineWatchSeatWhiteImg = null;
+app._watchBlackAvatarUrlCached = '';
+app._watchWhiteAvatarUrlCached = '';
 
 /** 联机聊天（标准对战底栏第 5 键；WS type CHAT / CHAT_SEND） */
 app.onlineChatMessages = [];
@@ -3212,6 +3300,15 @@ app.disconnectOnline = function() {
   app.randomMatchHostCancelToken = '';
   app.onlineBlackPieceSkinId = null;
   app.onlineWhitePieceSkinId = null;
+  app.onlineFriendWatchPeerUserId = null;
+  app.onlineStateBlackUserId = null;
+  app.onlineStateWhiteUserId = null;
+  app.onlineStateBlackNickname = '';
+  app.onlineStateWhiteNickname = '';
+  app.onlineWatchSeatBlackImg = null;
+  app.onlineWatchSeatWhiteImg = null;
+  app._watchBlackAvatarUrlCached = '';
+  app._watchWhiteAvatarUrlCached = '';
   app.onlineChatMessages = [];
   app.onlineChatOpen = false;
   app.onlineChatEmojiOpen = false;
@@ -3306,6 +3403,74 @@ app.loadOnlineOpponentAvatar = function(url) {
   img.src = src;
 }
 
+/**
+ * 将 WS STATE 中 black/white 的 userId、昵称、头像 URL 同步到观战用缓存并加载网络图。
+ */
+app.syncOnlineWatchSeatFromStateData = function(data) {
+  if (!data) {
+    return;
+  }
+  function numOrUndef(v) {
+    if (v === undefined || v === null || v === '') {
+      return null;
+    }
+    var n = Number(v);
+    return isNaN(n) ? null : n;
+  }
+  var bId = numOrUndef(data.blackUserId);
+  var wId = numOrUndef(data.whiteUserId);
+  app.onlineStateBlackUserId = bId;
+  app.onlineStateWhiteUserId = wId;
+  app.onlineStateBlackNickname =
+    typeof data.blackNickname === 'string' ? data.blackNickname : '';
+  app.onlineStateWhiteNickname =
+    typeof data.whiteNickname === 'string' ? data.whiteNickname : '';
+  var bUrl = typeof data.blackAvatarUrl === 'string' ? data.blackAvatarUrl : '';
+  var wUrl = typeof data.whiteAvatarUrl === 'string' ? data.whiteAvatarUrl : '';
+  if (bUrl !== app._watchBlackAvatarUrlCached) {
+    app._watchBlackAvatarUrlCached = bUrl;
+    app.onlineWatchSeatBlackImg = null;
+    if (bUrl && String(bUrl).replace(/^\s+|\s+$/g, '')) {
+      app.loadNetworkAvatarIntoProp(String(bUrl).trim(), 'onlineWatchSeatBlackImg');
+    }
+  }
+  if (wUrl !== app._watchWhiteAvatarUrlCached) {
+    app._watchWhiteAvatarUrlCached = wUrl;
+    app.onlineWatchSeatWhiteImg = null;
+    if (wUrl && String(wUrl).replace(/^\s+|\s+$/g, '')) {
+      app.loadNetworkAvatarIntoProp(String(wUrl).trim(), 'onlineWatchSeatWhiteImg');
+    }
+  }
+}
+
+/** 与 loadOnlineOpponentAvatar 相同，但写入 app 上指定属性名（观战双头像）。 */
+app.loadNetworkAvatarIntoProp = function(url, appPropName) {
+  if (!url || typeof wx === 'undefined' || !wx.createImage) {
+    if (appPropName && app) {
+      app[appPropName] = null;
+    }
+    return;
+  }
+  var src = String(url);
+  if (src.indexOf('local:') === 0) {
+    src = src.slice('local:'.length);
+  }
+  var img = wx.createImage();
+  img.onload = function() {
+    app[appPropName] = img;
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+  };
+  img.onerror = function() {
+    app[appPropName] = null;
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+  };
+  img.src = src;
+}
+
 app.applyOnlineOpponentProfilePayload = function(d) {
   if (!d) {
     return;
@@ -3339,6 +3504,10 @@ app.applyOnlineOpponentProfilePayload = function(d) {
 /** 双方已入座后拉取对手公开资料，使棋盘头像与对端资料一致 */
 app.tryFetchOnlineOpponentProfile = function() {
   if (!app.isPvpOnline || !app.onlineRoomId || !authApi.getSessionToken()) {
+    return;
+  }
+  /** 好友 PvP 观战：黑/白资料来自 STATE，GET opponent-rating 会 403 */
+  if (app.onlineSpectatorMode && !app.onlinePuzzleFriendRoom) {
     return;
   }
   if (typeof app.isMyOnlineOpponentBot === 'function' && app.isMyOnlineOpponentBot()) {
@@ -4737,6 +4906,9 @@ app.applyOnlineState = function(data) {
     }
     app.clearWinRevealTimer();
     app.winningLineCells = null;
+  }
+  if (typeof app.syncOnlineWatchSeatFromStateData === 'function') {
+    app.syncOnlineWatchSeatFromStateData(data);
   }
   app.tryFetchOnlineOpponentProfile();
   if (typeof app.scheduleOnlinePuzzleClientBotIfNeeded === 'function') {

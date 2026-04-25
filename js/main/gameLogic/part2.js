@@ -701,6 +701,7 @@ app.startOnlineFriendWatchFromPeer = function (peerUserId) {
           app.dailyPuzzleBotGen = (app.dailyPuzzleBotGen || 0) + 1;
           app.showResultOverlay = false;
           app.onlineResultOverlaySticky = false;
+          app.onlineFriendWatchPeerUserId = Number(peerUserId);
           app.onlineRoomId = d.roomId;
           var wTok = d.watchToken != null ? d.watchToken : d.watch_token;
           app.onlineToken = wTok;
