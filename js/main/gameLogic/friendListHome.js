@@ -170,15 +170,122 @@ module.exports = function registerFriendListHome(app, deps) {
     return null;
   }
 
-  function clampFabCenter(cx, cy, r) {
+  /**
+   * 悬浮球限制在「状态栏/刘海以下 ~ 底栏/安全区底沿以上」主内容区（与对局/首页等划线区一致）。
+   */
+  function getFabContentClampBounds(r) {
     var m = app.rpx(8);
     var minX = r + m;
     var maxX = app.W - r - m;
-    var minY = r + m;
-    var maxY = app.H - r - m;
+    var inset =
+      typeof app.getGameScreenInsetTop === 'function'
+        ? app.getGameScreenInsetTop()
+        : Math.max(
+            app.sys.statusBarHeight || 24,
+            app.sys.safeArea && app.sys.safeArea.top != null
+              ? app.sys.safeArea.top
+              : 0
+          );
+    var safeBottomY =
+      app.sys && app.sys.safeArea && app.sys.safeArea.bottom != null
+        ? app.sys.safeArea.bottom
+        : app.H;
+    var minYInset = inset + r + m;
+    var maxYSafe = safeBottomY - r - m;
+
+    function fin(minY, maxY) {
+      if (maxY < minY) {
+        var mid = (minY + maxY) * 0.5;
+        minY = mid;
+        maxY = mid;
+      }
+      return { minX: minX, maxX: maxX, minY: minY, maxY: maxY };
+    }
+
+    if (
+      app.screen === 'home' &&
+      typeof app.getHomeLayout === 'function' &&
+      typeof app.getHomeNavBarLayout === 'function'
+    ) {
+      var hl = app.getHomeLayout();
+      var nav = app.getHomeNavBarLayout();
+      if (
+        hl &&
+        nav &&
+        typeof hl.bottomNavTop === 'number' &&
+        typeof nav.navBottom === 'number'
+      ) {
+        return fin(nav.navBottom + r + m, hl.bottomNavTop - r - m);
+      }
+    }
+
+    if (
+      (app.screen === 'game' || app.screen === 'admin_puzzle') &&
+      app.layout &&
+      typeof app.getGameActionBarLayout === 'function'
+    ) {
+      try {
+        var gab = app.getGameActionBarLayout();
+        if (gab && typeof gab.y0 === 'number') {
+          return fin(minYInset, gab.y0 - r - m);
+        }
+      } catch (eG) {}
+    }
+
+    if (app.screen === 'replay' && app.layout) {
+      if (typeof app.getReplayControlsButtonY === 'function') {
+        var yReplay = app.getReplayControlsButtonY();
+        return fin(minYInset, yReplay - 24 - r - m);
+      }
+    }
+
+    if (app.screen === 'history' && app.historyReplayOverlayVisible && app.layout) {
+      if (typeof app.getReplayControlsButtonY === 'function') {
+        var yHRO = app.getReplayControlsButtonY();
+        return fin(minYInset, yHRO - 24 - r - m);
+      }
+    }
+
+    if (app.screen === 'history' && typeof app.getHistoryPageLayout === 'function') {
+      var hL = app.getHistoryPageLayout();
+      if (
+        hL &&
+        typeof hL.listBottom === 'number' &&
+        typeof hL.insetTop === 'number'
+      ) {
+        return fin(hL.insetTop + r + m, hL.listBottom - r - m);
+      }
+    }
+
+    if (app.screen === 'matching' && typeof app.getMatchingPageLayout === 'function') {
+      var mL = app.getMatchingPageLayout();
+      if (mL && typeof mL.cancelCy === 'number') {
+        return fin(minYInset, mL.cancelCy - app.rpx(32) - r - m);
+      }
+    }
+
+    if (app.screen === 'review_hub' && typeof app.getReviewHubLayout === 'function') {
+      var rL = app.getReviewHubLayout();
+      if (rL && typeof rL.backY === 'number') {
+        return fin(minYInset, rL.backY - 24 - r - m);
+      }
+    }
+
+    if (app.screen === 'pve_color' && typeof app.getPveColorLayout === 'function') {
+      var pL = app.getPveColorLayout();
+      if (pL && typeof pL.backY === 'number') {
+        return fin(minYInset, pL.backY - 24 - r - m);
+      }
+    }
+
+    return fin(minYInset, maxYSafe);
+  }
+
+  function clampFabCenter(cx, cy, r) {
+    var b = getFabContentClampBounds(r);
     return {
-      cx: Math.min(maxX, Math.max(minX, cx)),
-      cy: Math.min(maxY, Math.max(minY, cy))
+      cx: Math.min(b.maxX, Math.max(b.minX, cx)),
+      cy: Math.min(b.maxY, Math.max(b.minY, cy))
     };
   }
 
@@ -611,6 +718,27 @@ module.exports = function registerFriendListHome(app, deps) {
     return false;
   }
 
+  /**
+   * 是否处于未结束对局且棋手挂在 Gomoku 房间 WS（与 online 正交）；接口字段 inGame / in_game。
+   */
+  function friendRowInGame(fr) {
+    if (!fr) {
+      return false;
+    }
+    var v = fr.inGame;
+    if (v == null && fr.in_game != null) {
+      v = fr.in_game;
+    }
+    if (v === true || v === 1) {
+      return true;
+    }
+    if (typeof v === 'string') {
+      var s = v.replace(/^\s+|\s+$/g, '').toLowerCase();
+      return s === 'true' || s === '1' || s === 'yes';
+    }
+    return false;
+  }
+
   /** 兼容缓存/旧字段，保证列表行与未读 map、头像缓存共用 peerUserId；并规范 online 为布尔值 */
   function normalizeFriendListRowsInPlace(list) {
     if (!list || !list.length) {
@@ -630,6 +758,7 @@ module.exports = function registerFriendListHome(app, deps) {
         }
       }
       r.online = friendRowIsOnline(r);
+      r.inGame = friendRowInGame(r);
     }
   }
 
@@ -2992,6 +3121,8 @@ module.exports = function registerFriendListHome(app, deps) {
         var acy = yRow + L.rowH * 0.5;
         var hasDmUnread = friendDmPeerHasUnread(fr.peerUserId);
         var frOnline = friendRowIsOnline(fr);
+        var frInGame = friendRowInGame(fr);
+        var dimAvatar = !frOnline && !frInGame;
         var img =
           fr.peerUserId && app._friendAvImgs['k' + fr.peerUserId];
         if (img && img.complete && img.width && !img._failed) {
@@ -3010,7 +3141,7 @@ module.exports = function registerFriendListHome(app, deps) {
           var ay0 = app.snapPx(acy - avR);
           var asz = app.snapPx(sz);
           var usedGrayFilter = false;
-          if (!frOnline && typeof app.ctx.filter !== 'undefined') {
+          if (dimAvatar && typeof app.ctx.filter !== 'undefined') {
             try {
               app.ctx.filter = 'grayscale(1)';
               usedGrayFilter = true;
@@ -3021,7 +3152,7 @@ module.exports = function registerFriendListHome(app, deps) {
             try {
               app.ctx.filter = 'none';
             } catch (eGray2) {}
-          } else if (!frOnline) {
+          } else if (dimAvatar) {
             app.ctx.globalCompositeOperation = 'source-atop';
             app.ctx.fillStyle = 'rgba(175, 178, 188, 0.48)';
             app.ctx.fillRect(ax0, ay0, asz, asz);
@@ -3029,7 +3160,7 @@ module.exports = function registerFriendListHome(app, deps) {
           }
           app.ctx.restore();
         } else {
-          app.ctx.fillStyle = !frOnline
+          app.ctx.fillStyle = dimAvatar
             ? '#C4BEB4'
             : FL && FL.avatarFallback
               ? FL.avatarFallback
@@ -3043,7 +3174,7 @@ module.exports = function registerFriendListHome(app, deps) {
             Math.PI * 2
           );
           app.ctx.fill();
-          app.ctx.fillStyle = !frOnline
+          app.ctx.fillStyle = dimAvatar
             ? '#8A8580'
             : FL && FL.avatarChar
               ? FL.avatarChar
@@ -3081,7 +3212,9 @@ module.exports = function registerFriendListHome(app, deps) {
           'px "PingFang SC","Hiragino Sans GB",sans-serif';
         var nameStr = String(fr.displayName || fr.nickname || '');
         var nameX = acx + avR + app.rpx(12);
-        var nameY = yRow + L.rowH * 0.5;
+        var nameY = frInGame
+          ? yRow + L.rowH * 0.36
+          : yRow + L.rowH * 0.5;
         var nameMaxPx = Math.max(
           app.rpx(48),
           L.w - app.rpx(16) - (nameX - panelX) - app.rpx(6)
@@ -3104,6 +3237,18 @@ module.exports = function registerFriendListHome(app, deps) {
           app.snapPx(nameX),
           app.snapPx(nameY)
         );
+        if (frInGame) {
+          app.ctx.fillStyle = FL && FL.friendInGame ? FL.friendInGame : '#15803d';
+          app.ctx.font =
+            '500 ' +
+            app.rpx(21) +
+            'px "PingFang SC","Hiragino Sans GB",sans-serif';
+          app.ctx.fillText(
+            '游戏中',
+            app.snapPx(nameX),
+            app.snapPx(yRow + L.rowH * 0.7)
+          );
+        }
       }
     }
     app.ctx.restore();
