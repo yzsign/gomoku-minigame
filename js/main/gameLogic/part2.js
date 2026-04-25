@@ -375,7 +375,7 @@ app.startOnlineAsHost = function() {
 }
 
 /**
- * 残局管理页：按当前编辑盘面创建好友房，房主旁观，好友执白加入。
+ * 残局管理页：按当前编辑盘面创建好友房，房主观战，好友执白加入。
  */
 app.startPuzzleFriendInvite = function() {
   if (!app.adminDraftBoard) {
@@ -419,7 +419,7 @@ app.startPuzzleFriendInvite = function() {
           var d = res.data;
           app.exitAdminPuzzleScreen();
           app.onlineRoomId = d.roomId;
-          /** 须用 spectatorToken 连 WS：服务端仅该 token 视为旁观；用 blackToken 会当作黑方棋手，STATE.spectator=false 会清掉旁观态与残局底栏 */
+          /** 须用 spectatorToken 连 WS：服务端仅该 token 视为观战；用 blackToken 会当作黑方棋手，STATE.spectator=false 会清掉观战态与残局底栏 */
           app.onlineToken = d.spectatorToken || d.blackToken;
           app.onlineSpectatorMode = true;
           app.onlinePuzzleFriendRoom = true;
@@ -467,7 +467,7 @@ app.startPuzzleFriendInvite = function() {
 };
 
 /**
- * 每日残局：按当前盘面与「下一手」创建好友房；房主仅旁观（spectator token），好友执白与人机对局；
+ * 每日残局：按当前盘面与「下一手」创建好友房；房主仅观战（spectator token），好友执白与人机对局；
  * 好友进房后服务端重置棋盘并启用黑/白人机。
  */
 app.startDailyPuzzleFriendInvite = function() {
@@ -568,7 +568,7 @@ app.startDailyPuzzleFriendInvite = function() {
           app.showResultOverlay = false;
           app.onlineResultOverlaySticky = false;
           app.onlineRoomId = d.roomId;
-          /** 须用 spectatorToken 连 WS，否则房主被当作黑方棋手，STATE 会覆盖旁观态（见 admin 邀请同源注释） */
+          /** 须用 spectatorToken 连 WS，否则房主被当作黑方棋手，STATE 会覆盖观战态（见 admin 邀请同源注释） */
           app.onlineToken = d.spectatorToken || d.blackToken;
           app.onlineSpectatorMode = true;
           app.onlinePuzzleFriendRoom = true;
@@ -616,7 +616,7 @@ app.startDailyPuzzleFriendInvite = function() {
 };
 
 /**
- * 从好友列表进入观战：HTTP 取 watchToken 后，与残局房房主旁观类似连 WS，但 onlinePuzzleFriendRoom 为 false。
+ * 从好友列表进入观战：HTTP 取 watchToken 后，与残局房房主观战类似连 WS，但 onlinePuzzleFriendRoom 为 false。
  */
 app.startOnlineFriendWatchFromPeer = function (peerUserId) {
   if (peerUserId == null || peerUserId === '') {
@@ -958,7 +958,7 @@ app.computeLayout = function() {
    * 观战按钮：顶栏下沿再下 20（750 稿）处，屏幕左侧；下拉面板的左缘与按钮左缘对齐。
    */
   var marginL = toPx(20);
-  var sbW = toPx(108);
+  var sbW = toPx(148);
   var sbH = toPx(26);
   var safeL =
     app.sys && app.sys.safeArea && typeof app.sys.safeArea.left === 'number'

@@ -952,7 +952,7 @@ app.drawAdminPuzzleScreen = function() {
   app.ctx.stroke();
   render.drawText(
     app.ctx,
-    '邀请好友下残局（我执旁观）',
+    '邀请好友下残局（我执观战）',
     L.pad + L.fullW * 0.5,
     L.yInvite + L.btnH * 0.5,
     app.rpx(26),

@@ -890,10 +890,26 @@ app.drawSpectatorPopover = function (ctx) {
           showName += '…';
         }
         ctx.fillText(showName, nameX, acy);
+        var subStr =
+          typeof app.resolveFriendRowTitleName === 'function'
+            ? app.resolveFriendRowTitleName(fr)
+            : '';
         ctx.textAlign = 'right';
-        ctx.fillStyle = colMuted;
-        ctx.font = fsTime + 'px ' + fontStack;
-        ctx.fillText('旁观中', x0 + w0 - padX, acy);
+        var colTitleSub =
+          FL0 && FL0.spectatorListRowTitle
+            ? FL0.spectatorListRowTitle
+            : '#0d47a1';
+        ctx.fillStyle = colTitleSub;
+        ctx.font = '600 ' + fsTime + 'px ' + fontStack;
+        var showSub = subStr || '—';
+        var maxT = w0 - nameX - padX;
+        if (ctx.measureText(showSub).width > maxT) {
+          while (showSub.length > 1 && ctx.measureText(showSub + '…').width > maxT) {
+            showSub = showSub.slice(0, -1);
+          }
+          showSub += '…';
+        }
+        ctx.fillText(showSub, x0 + w0 - padX, acy);
       }
     }
   }
@@ -1073,7 +1089,7 @@ app.draw = function() {
     app.drawOnlineGameClockAboveBoard(app.ctx, th, app.layout);
   }
 
-  /** 顶栏下沿 + 设计间距，左上角「观战：N 人」按钮（可点出独立观战列表面板，不打开侧栏好友列表） */
+  /** 顶栏下沿 + 设计间距，左上角「观战人数：N」按钮（可点出独立观战列表面板，不打开侧栏好友列表） */
   if (
     app.isPvpOnline &&
     app.layout &&
@@ -1088,9 +1104,9 @@ app.draw = function() {
       var bw = app.layout.spectatorBadgeW || app.rpx(76);
       var bh = app.layout.spectatorBadgeH || app.rpx(26);
       var count = Math.max(0, app.spectatorCount || 0);
-      var p1 = '观战：';
+      var p1 = '观战人数：';
       var p2 = String(count);
-      var p3 = '人';
+      var p3 = '';
 
       var g0 =
         FL && FL.watchPillG0
@@ -1183,8 +1199,10 @@ app.draw = function() {
       app.ctx.fillText(p1, startX, ty);
       app.ctx.fillStyle = countC;
       app.ctx.fillText(p2, startX + m1.width, ty);
-      app.ctx.fillStyle = labelMute;
-      app.ctx.fillText(p3, startX + m1.width + m2.width, ty);
+      if (p3) {
+        app.ctx.fillStyle = labelMute;
+        app.ctx.fillText(p3, startX + m1.width + m2.width, ty);
+      }
       app.ctx.restore();
     } catch (e) {
       console.error('Spectator badge draw failed:', e);
@@ -1213,7 +1231,7 @@ app.draw = function() {
         status = '对局结束';
       } else {
         status =
-          '旁观中 · 当前轮到' +
+          '观战中 · 当前轮到' +
           (app.current === app.BLACK ? '黑' : '白') +
           '方';
       }
@@ -1459,7 +1477,7 @@ app.getGameActionBarLayout = function() {
       : app.rpx(128);
   var x0 = pad;
   var y0 = btnY - barH / 2;
-  /** 人机：2 列；每日残局：4 列（重置+邀请）；对局复盘：3 列（无邀请）；残局好友房旁观：4 列；标准联机：5 列；其余联机：4 列 */
+  /** 人机：2 列；每日残局：4 列（重置+邀请）；对局复盘：3 列（无邀请）；残局好友房观战：4 列；标准联机：5 列；其余联机：4 列 */
   var colCount;
   if (
     app.isPvpOnline &&
@@ -5203,7 +5221,7 @@ if (typeof wx.onTouchEnd === 'function') {
     }
 
     /**
-     * 对局内「观战：N 人」徽章：独立下拉列表（不打开侧栏好友列表）
+     * 对局内「观战人数：N」徽章：独立下拉列表（不打开侧栏好友列表）
      */
     if (
       t &&

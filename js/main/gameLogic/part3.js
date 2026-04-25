@@ -2971,7 +2971,7 @@ function drawResultOverlayTuanPointsAnim(app, ctx, th, ly) {
  * resultKind 未写入时（如历史路径只拉了 showResultOverlay），按终局状态推断，避免标题落在默认「对局结束」。
  */
 /**
- * 残局好友房：受邀执棋一方是否取胜（旁观/好友共用，依赖 STATE 人机标记）。
+ * 残局好友房：受邀执棋一方是否取胜（房主观战/好友共用，依赖 STATE 人机标记）。
  * @returns {boolean|null} true 好友胜，false 好友负，null 非残局房或无法判断
  */
 function onlinePuzzleFriendWon(app) {
@@ -3154,18 +3154,18 @@ function resultOverlayTitlePack(app) {
         if (pfw === true) {
           mood = 'win';
           main = '挑战成功';
-          sub = winColorSub + ' · 旁观对局';
+          sub = winColorSub + ' · 观战对局';
           titleColor = rs.win.title;
         } else if (pfw === false) {
           mood = 'lose';
           main = '挑战失败';
-          sub = winColorSub + ' · 旁观对局';
+          sub = winColorSub + ' · 观战对局';
           titleColor = rs.lose.title;
         } else {
           mood = 'draw';
           main =
             app.winner === gomoku.WHITE ? '白棋获胜' : '黑棋获胜';
-          sub = '旁观对局';
+          sub = '观战对局';
           titleColor = rs.draw.title;
         }
       } else {
@@ -3176,7 +3176,7 @@ function resultOverlayTitlePack(app) {
             : app.winner === gomoku.WHITE
               ? '白棋获胜'
               : '黑棋获胜';
-        sub = '旁观对局';
+        sub = '观战对局';
         titleColor = rs.draw.title;
       }
       break;

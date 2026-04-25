@@ -151,7 +151,7 @@ app.getMyDisplayName = function() {
   if (app.isPvpOnline && app.onlineSpectatorMode) {
     /**
      * 残局好友房等好友进房：与每日残局一致，左侧仍展示「我」与本人头像；
-     * 勿显示「旁观」，否则用户会感觉头像/身份被联机页替换。
+     * 勿显示「观战」，否则用户会感觉头像/身份被联机页替换。
      */
     if (
       app.onlinePuzzleFriendRoom &&
@@ -161,7 +161,7 @@ app.getMyDisplayName = function() {
       /* fall through to下方昵称与「我」 */
     } else {
       if (app.onlinePuzzleFriendRoom) {
-        return '旁观';
+        return '观战';
       }
       /** PvP 好友观战：下方为所点好友，昵称来自 STATE black/white* */
       if (app.onlineFriendWatchPeerUserId != null) {
@@ -179,7 +179,7 @@ app.getMyDisplayName = function() {
           return (app.onlineStateWhiteNickname && String(app.onlineStateWhiteNickname).trim()) || '白方';
         }
       }
-      return '旁观';
+      return '观战';
     }
   }
   if (app.myDisplayNameCache !== null) {
@@ -317,7 +317,7 @@ app.getOpponentAssignedStoneColor = function() {
 };
 
 /**
- * 联机：当前用户「棋盘对面」是否为电脑（非旁观）；用于头像、资料、文案等。
+ * 联机：当前用户「棋盘对面」是否为电脑（非观战身份）；用于头像、资料、文案等。
  * 随机匹配场景下固定为 false，界面与拉取资料与真人对局一致（底层仍可用 onlineOpponentIsBot / STATE 判断走子）。
  */
 app.isMyOnlineOpponentBot = function() {
@@ -1390,7 +1390,7 @@ app.clearOnlineChatAvatarBubbleState = function() {
 };
 
 /**
- * 收到 WS CHAT 后在发送方 / 接收方头像旁展示短时气泡（非旁观模式）
+ * 收到 WS CHAT 后在发送方 / 接收方头像旁展示短时气泡（非观战模式）
  */
 app.applyOnlineChatAvatarBubble = function(data) {
   if (!app.isPvpOnline || app.onlineSpectatorMode) {
@@ -2445,33 +2445,39 @@ app.friendListHomeUiFromTheme = function(th) {
           : 'rgba(200, 188, 172, 0.45)',
     /** 行内「游戏中」与战绩胜色、online 点同源 */
     friendInGame: winTitle,
-    /** 观战 pill：与 Tab 药丸同级，轻向绿 / 暖底 */
-    watchPillG0:
+    /** 行内「观战中」：略偏青/蓝，与下棋区分 */
+    friendSpectating:
       id === 'mint'
-        ? 'rgba(255, 255, 255, 0.99)'
+        ? '#00838f'
         : id === 'ink'
-          ? 'rgba(255, 252, 250, 0.98)'
-          : 'rgba(255, 253, 250, 0.99)',
-    watchPillG1:
+          ? '#5d6e76'
+          : '#1565c0',
+    /**
+     * 行内「观战」药丸：与侧栏内搜索区卡片（杂货铺 S.card*）同底，主色字 + 极淡顶光，与 Tab 条气质一致。
+     */
+    watchPillG0: S ? S.cardG0 : 'rgba(255, 255, 255, 0.99)',
+    watchPillG1: S ? S.cardG1 : 'rgba(245, 241, 235, 0.96)',
+    watchPillStroke: S
+      ? S.stroke
+      : id === 'mint'
+        ? 'rgba(46, 117, 134, 0.32)'
+        : id === 'ink'
+          ? 'rgba(74, 66, 58, 0.34)'
+          : 'rgba(200, 188, 172, 0.78)',
+    watchPillText: th.btnPrimary != null ? th.btnPrimary : winTitle,
+    watchPillInnerTop:
       id === 'mint'
-        ? 'rgba(224, 246, 241, 0.97)'
+        ? 'rgba(255, 255, 255, 0.42)'
         : id === 'ink'
-          ? 'rgba(236, 230, 222, 0.97)'
-          : 'rgba(232, 244, 234, 0.97)',
-    watchPillStroke:
-      id === 'mint'
-        ? 'rgba(0, 120, 118, 0.25)'
-        : id === 'ink'
-          ? 'rgba(120, 95, 78, 0.3)'
-          : 'rgba(46, 125, 50, 0.24)',
-    watchPillText: winTitle,
+          ? 'rgba(255, 252, 250, 0.38)'
+          : 'rgba(255, 255, 255, 0.45)',
     watchPillShade:
       id === 'mint'
-        ? 'rgba(0, 64, 62, 0.05)'
+        ? 'rgba(12, 52, 64, 0.08)'
         : id === 'ink'
-          ? 'rgba(28, 22, 16, 0.07)'
-          : 'rgba(20, 70, 32, 0.06)',
-    /** 棋盘右上角旁观 X 人徽章（小巧独立，与 clock pill 风格一致） */
+          ? 'rgba(20, 16, 12, 0.1)'
+          : 'rgba(60, 48, 38, 0.08)',
+    /** 棋盘右上角观战人数徽章（小巧独立，与 clock pill 风格一致） */
     spectatorBadgeBg:
       id === 'mint'
         ? 'rgba(255, 255, 255, 0.96)'
@@ -2479,9 +2485,9 @@ app.friendListHomeUiFromTheme = function(th) {
           ? 'rgba(255, 252, 250, 0.96)'
           : 'rgba(255, 253, 250, 0.96)',
     spectatorBadgeText: winTitle,
-    spectatorListTitle: '旁观列表',
+    spectatorListTitle: '观战列表',
     /**
-     * 旁观列表面板专用：偏冷青绿渐变，与暖色 parchment「好友列表」侧栏一眼区分。
+     * 观战列表面板专用：偏冷青绿渐变，与暖色 parchment「好友列表」侧栏一眼区分。
      */
     spectatorPanelG0:
       id === 'mint'
@@ -2507,6 +2513,13 @@ app.friendListHomeUiFromTheme = function(th) {
         : id === 'ink'
           ? '#5d4037'
           : '#1b5e20',
+    /** 观战列表行副文案：用户称号（与状态行同位置，蓝字加粗在 friendListHome 中绘制） */
+    spectatorListRowTitle:
+      id === 'mint'
+        ? '#0277bd'
+        : id === 'ink'
+          ? '#1565c0'
+          : '#0d47a1',
     spectatorListStripBg0:
       id === 'mint'
         ? 'rgba(0, 105, 92, 0.1)'
@@ -2590,9 +2603,9 @@ app.friendListHomeUiFromTheme = function(th) {
           : 'rgba(255, 255, 255, 0.1)',
     /** 空状态副文案，比 title 更弱 */
     spectatorPopoverEmptyMuted: th.muted,
-    /** 观战：N 人「人数」用色，与 watchPill 字色一致 */
+    /** 「观战人数：」后数字用色，与 watchPill 字色一致 */
     spectatorBadgeCount: winTitle,
-    /** 观战： / 人 两侧字用 muted */
+    /** 「观战人数：」标签用色（muted） */
     spectatorBadgeMuted: th.muted,
     /** 私聊顶栏：与侧栏渐变中段一致 */
     chatHeaderBg: panelArr[1],
@@ -2648,7 +2661,7 @@ app.W = 375;
 app.H = 667;
 app.DPR = 2;
 
-/** 初始化旁观人数（防止首次绘制前未定义导致黑屏） */
+/** 初始化观战人数（防止首次绘制前未定义导致黑屏） */
 app.spectatorCount = 0;
 /** 对局内独立观战列表面板（与侧栏好友列表分离） */
 app.spectatorPopoverOpen = false;
@@ -2807,7 +2820,7 @@ app.onlineOpponentLeft = false;
  * 用于避免好友尚未进房时误判「对方离开 / 逃跑」终局与结算 runaway。
  */
 app.onlineFriendBothEverConnected = false;
-/** 残局好友房：房主 WS 使用旁观 token，不落子 */
+/** 残局好友房：房主 WS 使用观战 token，不落子 */
 app.onlineSpectatorMode = false;
 app.socketTask = null;
 /** WebSocket 已 onOpen，可 send；断线后为 false，用于重连提示与拦截落子 */
@@ -2833,7 +2846,7 @@ app._puzzleFriendInviteOnShowTimer = null;
 app._puzzleFriendInviteOnShowFallbackGen = 0;
 /** WS STATE.puzzleRoom：残局房不展示读秒、不依赖本机猜房型 */
 app.onlinePuzzleRoomFromWs = false;
-/** 残局好友房房主旁观、好友未进房：本地练习用，连成五后恢复至此（与最近一次同步后的残局模板一致） */
+/** 残局好友房房主观战、好友未进房：本地练习用，连成五后恢复至此（与最近一次同步后的残局模板一致） */
 app.puzzleFriendPracticeStartBoard = null;
 app.puzzleFriendPracticeStartCurrent = null;
 /** 本局是否已请求 POST /api/games/settle（防重复；新局由 applyOnlineState 置 false） */
@@ -2921,7 +2934,7 @@ app.shouldShowOnlineChatButton = function() {
 };
 
 /**
- * 残局好友房房主旁观：仅在人机占位、尚无人类好友入座时可本地练习（与 STATE 白/黑是否 bot 一致）。
+ * 残局好友房房主观战：仅在人机占位、尚无人类好友入座时可本地练习（与 STATE 白/黑是否 bot 一致）。
  * 注意：服务端 whiteConnected 会包含「白方人机已就位」，不能单用 onlineWhiteConnected。
  */
 app.puzzleFriendSpectatorPracticeAllowed = function() {
@@ -2942,7 +2955,7 @@ app.puzzleFriendSpectatorPracticeAllowed = function() {
 /**
  * 好友联机（非随机匹配）：双方未都在座时视为对局未开始。
  * 用于邀请后对面未进房、白方未加入、关闭转发面板后仍在等待等场景。
- * 残局好友房房主旁观时：本地练习中不挡点击（与 part5 触摸 guard 配合）。
+ * 残局好友房房主观战时：本地练习中不挡点击（与 part5 触摸 guard 配合）。
  */
 app.isOnlineFriendMatchNotStarted = function() {
   if (!app.isPvpOnline || app.isRandomMatch) {
@@ -3043,7 +3056,7 @@ app.hasPuzzleFriendHumanGuest = function() {
  * 点击棋盘旁「对手」头像时：是否拦截 opponent-rating。
  * - 联机房间（有 onlineRoomId）内对面为人机：服务端有人机账号，允许 GET /api/rooms/opponent-rating（含随机匹配超时接入的机器人）。
  * - 无联机房间时对面仍判为人机：勿拉接口（本地人机等）。
- * - 残局好友房旁观侧对人机：尚无真人入座或占位未就绪时提示，勿拉 opponent-rating。
+ * - 残局好友房观战侧对人机：尚无真人入座或占位未就绪时提示，勿拉 opponent-rating。
  */
 app.shouldToastNoOpponentLadderForOnlineOppAvatar = function() {
   if (typeof app.isMyOnlineOpponentBot === 'function' && app.isMyOnlineOpponentBot()) {
@@ -3684,7 +3697,7 @@ app.tryFetchOnlineOpponentProfile = function() {
   if (app.onlineSpectatorMode) {
     /**
      * 残局好友房：仅白连上可能是人机；须等真人好友入座再拉对手资料，避免误把人机当「对手」。
-     * 非残局旁观仍沿用原「白方已连上」启发式。
+     * 非残局观战仍沿用原「白方已连上」启发式。
      */
     if (app.onlinePuzzleFriendRoom) {
       if (
@@ -3800,7 +3813,7 @@ app.notifyOnlineSocketSendBlocked = function() {
     return;
   }
   if (app.onlineSpectatorMode) {
-    wx.showToast({ title: '旁观模式无法操作', icon: 'none' });
+    wx.showToast({ title: '观战模式无法操作', icon: 'none' });
     return;
   }
   if (typeof app.shouldAutoReconnectOnline === 'function' && app.shouldAutoReconnectOnline()) {
@@ -4597,7 +4610,7 @@ app.applyOnlineState = function(data) {
   var prevCurrentStone = app.current;
   var nextBoard = app.copyBoardFromServer(data.board);
 
-  /** 实时旁观人数（后端 GameRoom.spectatorSessions.size），用于右上角徽章实时更新 */
+  /** 实时观战人数（后端 GameRoom.spectatorSessions.size），用于右上角徽章实时更新 */
   app.spectatorCount = typeof data.spectatorCount === 'number' ? data.spectatorCount : (app.spectatorCount || 0);
   var incW =
     data.whiteConnected === true ||
@@ -4724,7 +4737,7 @@ app.applyOnlineState = function(data) {
     app.winner = app.normalizeOnlineStoneInt(data.winner, null);
   }
   /**
-   * spectator 须严格区分「明确为 false」与「缺省/异常」：若仅写 else 则缺字段时会把旁观清掉，
+   * spectator 须严格区分「明确为 false」与「缺省/异常」：若仅写 else 则缺字段时会把观战态清掉，
    * 从「选择聊天」点返回后偶发不完整帧或重连首包会导致残局好友房主底栏误变成和棋/认输样式。
    */
   (function () {
@@ -4742,7 +4755,7 @@ app.applyOnlineState = function(data) {
         app.BLACK
       );
     } else if (app.onlinePuzzleFriendRoom && app.onlineSpectatorMode) {
-      /* 缺字段：保持旁观 */
+      /* 缺字段：保持观战态 */
     } else if (!app.onlineSpectatorMode) {
       app.pvpOnlineYourColor = app.normalizeOnlineStoneInt(
         data.yourColor,
@@ -4816,7 +4829,7 @@ app.applyOnlineState = function(data) {
       wx.showToast({ title: '好友已加入，棋盘已重置', icon: 'none' });
     }
     if (app.onlineSpectatorMode) {
-      app.lastMsg = '旁观中 · 好友已加入';
+      app.lastMsg = '观战中 · 好友已加入';
     }
     app.puzzleFriendPracticeStartBoard = null;
     app.puzzleFriendPracticeStartCurrent = null;

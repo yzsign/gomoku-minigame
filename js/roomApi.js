@@ -346,7 +346,7 @@ function roomOpponentRatingOptions(roomId) {
 }
 
 /**
- * GET /api/rooms/{roomId}/spectators — 本房当前旁观中的好友（须登录；玩家与旁观者均可调）
+ * GET /api/rooms/{roomId}/spectators — 本房当前观战中的好友（须登录；玩家与观战者均可调）
  * 返回体：{ friends: FriendListItemDto[] }
  */
 function roomSpectatorsOptions(roomId) {
