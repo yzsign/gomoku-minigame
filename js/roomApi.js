@@ -43,6 +43,23 @@ function roomApiJoinOptions(roomId) {
   };
 }
 
+/**
+ * 好友在 PVP 对局中时申请观战票：POST /api/rooms/friend-watch?peerUserId=
+ * 联 WS 时用返回的 watchToken 作 Gomoku WebSocket 的 token 参数（非黑/白座子 token）。
+ */
+function roomFriendWatchOptions(peerUserId) {
+  return {
+    url:
+      GOMOKU_API_BASE +
+      '/api/rooms/friend-watch?peerUserId=' +
+      encodeURIComponent(String(peerUserId)),
+    method: 'POST',
+    header: withAuthHeaders({}),
+    /** 便于正确解析 Spring 返回的 ApiError JSON；无此字段时部分环境 res.data 为字符串 */
+    dataType: 'json'
+  };
+}
+
 /** 随机匹配：POST /api/match/random */
 function roomApiRandomMatchOptions() {
   return {
@@ -564,6 +581,7 @@ module.exports = {
   GOMOKU_API_BASE: GOMOKU_API_BASE,
   roomApiCreateOptions: roomApiCreateOptions,
   roomApiJoinOptions: roomApiJoinOptions,
+  roomFriendWatchOptions: roomFriendWatchOptions,
   roomApiRandomMatchOptions: roomApiRandomMatchOptions,
   roomApiRandomMatchPairedOptions: roomApiRandomMatchPairedOptions,
   roomApiRandomMatchCancelOptions: roomApiRandomMatchCancelOptions,

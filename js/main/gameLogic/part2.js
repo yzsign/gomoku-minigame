@@ -615,6 +615,123 @@ app.startDailyPuzzleFriendInvite = function() {
   });
 };
 
+/**
+ * 从好友列表进入观战：HTTP 取 watchToken 后，与残局房房主旁观类似连 WS，但 onlinePuzzleFriendRoom 为 false。
+ */
+app.startOnlineFriendWatchFromPeer = function (peerUserId) {
+  if (peerUserId == null || peerUserId === '') {
+    return;
+  }
+  authApi.ensureSession(function (sessionOk, errHint) {
+    if (!sessionOk) {
+      if (typeof wx !== 'undefined' && wx.showToast) {
+        wx.showToast({ title: errHint || '请先完成登录', icon: 'none' });
+      }
+      return;
+    }
+    if (typeof app.closeHomeFriendList === 'function') {
+      app.closeHomeFriendList({ immediate: true });
+    }
+    app.disconnectOnline();
+    if (typeof wx === 'undefined' || !wx.request) {
+      return;
+    }
+    wx.showLoading({ title: '进入观战…', mask: true });
+    wx.request(
+      Object.assign(roomApi.roomFriendWatchOptions(peerUserId), {
+        success: function (res) {
+          wx.hideLoading();
+          if (res.statusCode === 401) {
+            wx.showToast({ title: '请先登录', icon: 'none' });
+            return;
+          }
+          if (res.statusCode !== 200 || !res.data) {
+            var msg = '无法观战';
+            var er = res.data;
+            if (typeof er === 'string') {
+              try {
+                er = JSON.parse(er);
+              } catch (eFw) {
+                er = null;
+              }
+            }
+            if (er && er.code) {
+              var code = String(er.code);
+              if (code === 'NOT_IN_GAME' || code === 'ROOM_GONE' || code === 'ROOM_NOT_FOUND') {
+                msg = '该好友当前不在可观看的对局中';
+              } else if (code === 'PUZZLE_NOT_SUPPORTED') {
+                msg = '该类型对局暂不支持从好友列表观战';
+              } else if (code === 'NOT_FRIENDS') {
+                msg = '仅可观看好友对局';
+              } else if (code === 'GAME_OVER') {
+                msg = '对局已结束';
+              } else if (code === 'BAD_REQUEST' || code === 'IS_PLAYER_USE_SEAT' || code === 'WATCHER_IS_PEER') {
+                msg = '无法观战本局（您已在座位中）';
+              } else if (er.message) {
+                msg = String(er.message);
+              }
+            } else if (res.statusCode === 404) {
+              /**
+               * 后端对 NOT_IN_GAME/ROOM_GONE 也使用 HTTP 404 + ApiError，故控制台会显示 404，属正常。
+               * 若无 JSON 的 code（例如未部署本接口、返回 HTML 错误页），则另作提示。
+               */
+              var raw = res.data;
+              var rawStr = typeof raw === 'string' ? raw : '';
+              if (!er && (rawStr && rawStr.indexOf('<') === 0)) {
+                msg = '观战接口不可用：请确认云托管已部署含 POST /api/rooms/friend-watch 的后端';
+              } else {
+                msg = '该好友当前不在可观看的对局中';
+              }
+            }
+            wx.showToast({ title: msg, icon: 'none' });
+            return;
+          }
+          var d = res.data;
+          app.isDailyPuzzle = false;
+          app.dailyPuzzleLocalStudy = false;
+          app.dailyPuzzleMeta = null;
+          app.dailyPuzzleMoves = [];
+          app.dailyPuzzleInitialBoard = null;
+          app.dailyPuzzleSubmitting = false;
+          app.dailyPuzzleResultKind = '';
+          app.dailyPuzzleSubmitActivityPointsDelta = null;
+          if (typeof app.destroyAiWorker === 'function') {
+            app.destroyAiWorker();
+          }
+          app.dailyPuzzleBotGen = (app.dailyPuzzleBotGen || 0) + 1;
+          app.showResultOverlay = false;
+          app.onlineResultOverlaySticky = false;
+          app.onlineRoomId = d.roomId;
+          var wTok = d.watchToken != null ? d.watchToken : d.watch_token;
+          app.onlineToken = wTok;
+          app.onlineSpectatorMode = true;
+          app.onlinePuzzleFriendRoom = false;
+          app.pvpOnlineYourColor = app.BLACK;
+          app.isPvpLocal = false;
+          app.isRandomMatch = false;
+          app.isPvpOnline = true;
+          app.screen = 'game';
+          app.lastOpponentMove = null;
+          app.board = gomoku.createBoard();
+          app.current = app.BLACK;
+          app.gameOver = false;
+          app.winner = null;
+          app.lastMsg = '';
+          if (typeof app.clearPerGameConsumableSkillState === 'function') {
+            app.clearPerGameConsumableSkillState();
+          }
+          app.startOnlineSocket();
+          app.draw();
+        },
+        fail: function () {
+          wx.hideLoading();
+          wx.showToast({ title: '网络请求失败', icon: 'none' });
+        }
+      })
+    );
+  });
+};
+
 app.joinOnlineAsGuest = function(roomId) {
   if (!roomId) {
     return;

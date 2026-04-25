@@ -14,6 +14,13 @@ module.exports = function registerFriendListHome(app, deps) {
   var HOME_FRIEND_LIST_FAB_R = 22.5;
   /** 好友列表行高（设计 rpx，原 96 增大 20%） */
   var HOME_FRIEND_LIST_ROW_DESIGN_RPX = Math.round(96 * 1.2);
+  /** 左滑后右侧「备注 / 删除」列宽（rpx），与微信侧栏条接近 */
+  var FRIEND_LIST_SWIPE_REMARK_RPX = 80;
+  var FRIEND_LIST_SWIPE_DELETE_RPX = 80;
+  /** 行内右侧「观战」按钮（仅好友在对局中时显示，与左滑区独立） */
+  var FRIEND_LIST_WATCH_BTN_RPX = 72;
+  /** 判定横向滑动 vs 竖向滚动（px²） */
+  var FRIEND_LIST_SWIPE_DECIDE_PX2 = 8 * 8;
   /** 抠图或 contain 策略变更时递增，使缓存失效 */
   var FRIEND_FAB_DRAW_REV = 7;
   /**
@@ -26,6 +33,8 @@ module.exports = function registerFriendListHome(app, deps) {
    * 未读呼吸动画对整页 drawHome 的节流（ms）。过低会徒增 CPU；过高动画发涩。
    */
   var FRIEND_FAB_UNREAD_PULSE_MIN_DRAW_MS = 33;
+  /** 来新消息时加强显示（与呼吸叠加） */
+  var FRIEND_FAB_MSG_HIGHLIGHT_MS = 2200;
   var friendFabUnreadPulseLastDrawMs = 0;
 
   /** 好友面板 / 默认 FAB 相对原锚点略下移 */
@@ -65,6 +74,12 @@ module.exports = function registerFriendListHome(app, deps) {
   app._friendListRowTapIdx = -1;
   app._friendListRowTapX = 0;
   app._friendListRowTapY = 0;
+  /**
+   * 好友行左滑：{ peerKey: string | null, offset: number }，offset 为 0 ~ actionTotal
+   */
+  app.friendListRowSwipe = { peerKey: null, offset: 0 };
+  /** 当前列表手势：null | { id, x0, y0, idx, peerKey, mode: 0 未决 | 1 竖向滚动 | 2 横向左滑, startOff } */
+  app._flRowTouch = null;
   /** 与某好友的会话面板（画布内）；消息仅存内存 */
   app.homeFriendChatPeer = null;
   app.friendChatScrollY = 0;
@@ -73,6 +88,8 @@ module.exports = function registerFriendListHome(app, deps) {
   app.friendChatComposeDraft = '';
   /** 有未读好友私聊时 FAB 呼吸动画（见 drawHomeFriendListFab） */
   app._friendDmUnreadPeers = {};
+  /** 收到新私聊时用于一次「强高亮」脉冲（Date.now() + ms 前有效） */
+  app._friendFabHighlightUntil = 0;
   app._friendChatMsgId = 0;
   app._friendChatScrollTouchId = null;
   app._friendChatScrollLastY = 0;
@@ -643,7 +660,8 @@ module.exports = function registerFriendListHome(app, deps) {
       var f = raw[i];
       if (q) {
         var name = String(f.displayName || f.nickname || '').toLowerCase();
-        if (name.indexOf(q) < 0) {
+        var rmk = String(f.remark != null ? f.remark : '').toLowerCase();
+        if (name.indexOf(q) < 0 && rmk.indexOf(q) < 0) {
           continue;
         }
       }
@@ -759,6 +777,250 @@ module.exports = function registerFriendListHome(app, deps) {
       }
       r.online = friendRowIsOnline(r);
       r.inGame = friendRowInGame(r);
+      if (r.remark == null) {
+        r.remark = '';
+      }
+    }
+  }
+
+  function getFriendListSwipeActionWidths() {
+    var remarkW = app.rpx(FRIEND_LIST_SWIPE_REMARK_RPX);
+    var delW = app.rpx(FRIEND_LIST_SWIPE_DELETE_RPX);
+    return { remark: remarkW, del: delW, total: remarkW + delW };
+  }
+
+  function friendListCloseSwipe() {
+    app.friendListRowSwipe = { peerKey: null, offset: 0 };
+  }
+
+  function getFriendListWatchBtnLayout(L, panelX, yRow, offRow) {
+    var rowPad = app.rpx(8);
+    var rowHCell = L.rowH - app.rpx(4);
+    var btnW = app.rpx(FRIEND_LIST_WATCH_BTN_RPX);
+    var o = offRow > 0 ? offRow : 0;
+    var contentW = L.w - rowPad * 2;
+    var x0 = panelX + rowPad + contentW - btnW - o;
+    return { x: x0, y: yRow, w: btnW, h: rowHCell };
+  }
+
+  function friendListHitWatch(x, y, L, panelX, yRow, offRow) {
+    var r = getFriendListWatchBtnLayout(L, panelX, yRow, offRow);
+    return (
+      x >= r.x &&
+      x <= r.x + r.w &&
+      y >= r.y &&
+      y <= r.y + r.h
+    );
+  }
+
+  function getFriendListSwipeActionRects(L, panelX, yRow) {
+    var wAct = getFriendListSwipeActionWidths();
+    var rowPad = app.rpx(8);
+    var rowLeft = panelX + rowPad;
+    var rowW = L.w - rowPad * 2;
+    var yCard = yRow;
+    var hCard = L.rowH - app.rpx(4);
+    var rDelX = rowLeft + rowW - wAct.del;
+    var rRemX = rDelX - wAct.remark;
+    return {
+      rem: { x: rRemX, y: yCard, w: wAct.remark, h: hCard },
+      del: { x: rDelX, y: yCard, w: wAct.del, h: hCard }
+    };
+  }
+
+  function friendListPeerKey(fr) {
+    if (!fr || fr.peerUserId == null) {
+      return '';
+    }
+    return String(fr.peerUserId).trim();
+  }
+
+  /**
+   * 在左滑已露出时，依触摸 x 判断点了「备注」或「删」；需与 getFriendListSwipeActionRects 一致。
+   */
+  function friendListHitSwipeAction(x, y, L, panelX, yRow, off) {
+    if (off < 0.5) {
+      return null;
+    }
+    var rowPad = app.rpx(8);
+    var rowLeft = panelX + rowPad;
+    var rowW = L.w - rowPad * 2;
+    var wAct = getFriendListSwipeActionWidths();
+    if (x < rowLeft + rowW - off || x > rowLeft + rowW) {
+      return null;
+    }
+    var yCard = yRow;
+    var hCard = L.rowH - app.rpx(4);
+    if (y < yCard || y > yCard + hCard) {
+      return null;
+    }
+    if (x >= rowLeft + rowW - wAct.del) {
+      return 'delete';
+    }
+    if (x >= rowLeft + rowW - wAct.total) {
+      return 'remark';
+    }
+    return null;
+  }
+
+  function updateFriendRowLocalDisplayAfterRemark(fr, remarkTrim) {
+    if (!fr) {
+      return;
+    }
+    fr.remark = remarkTrim;
+    var nick = String(fr.nickname != null ? fr.nickname : '');
+    fr.displayName = remarkTrim ? remarkTrim : nick;
+  }
+
+  function callFriendApiThenRefreshCache(peerKey, onDone) {
+    if (typeof onDone === 'function') {
+      onDone();
+    }
+    try {
+      persistCache(app.friendListRaw || []);
+    } catch (eP) {}
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+  }
+
+  function deleteFriendByPeerId(peerId, onDone) {
+    authApi.ensureSession(function (ok) {
+      if (!ok || !authApi.getSessionToken()) {
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '请先登录', icon: 'none' });
+        }
+        return;
+      }
+      wx.request(
+        Object.assign(roomApi.socialFriendDeleteOptions(peerId), {
+          success: function (res) {
+            if (res.statusCode === 200 || res.statusCode === 204) {
+              var raw = app.friendListRaw || [];
+              var nraw = [];
+              var ii;
+              for (ii = 0; ii < raw.length; ii++) {
+                if (String((raw[ii] && raw[ii].peerUserId) || '') !== String(peerId)) {
+                  nraw.push(raw[ii]);
+                }
+              }
+              app.friendListRaw = nraw;
+              if (app._friendDmUnreadPeers) {
+                delete app._friendDmUnreadPeers['k' + String(peerId)];
+              }
+              friendListCloseSwipe();
+              if (typeof wx.showToast === 'function') {
+                wx.showToast({ title: '已删除', icon: 'success' });
+              }
+              callFriendApiThenRefreshCache(String(peerId), onDone);
+            } else {
+              var m = apiErrorMessage(res) || '删除失败';
+              if (typeof wx.showToast === 'function') {
+                wx.showToast({ title: m, icon: 'none' });
+              }
+            }
+          },
+          fail: function () {
+            if (typeof wx.showToast === 'function') {
+              wx.showToast({ title: '网络异常', icon: 'none' });
+            }
+          }
+        })
+      );
+    });
+  }
+
+  function patchFriendRemarkByPeerId(peerId, remarkRaw, onDone) {
+    var remarkTrim = String(remarkRaw != null ? remarkRaw : '').replace(/^\s+|\s+$/g, '');
+    if (remarkTrim.length > 64) {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: '备注过长', icon: 'none' });
+      }
+      return;
+    }
+    authApi.ensureSession(function (ok) {
+      if (!ok || !authApi.getSessionToken()) {
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '请先登录', icon: 'none' });
+        }
+        return;
+      }
+      wx.request(
+        Object.assign(
+          roomApi.socialFriendRemarkOptions(peerId, remarkTrim),
+          {
+            success: function (res) {
+              if (res.statusCode === 200 || res.statusCode === 204) {
+                var raw = app.friendListRaw || [];
+                var jj;
+                for (jj = 0; jj < raw.length; jj++) {
+                  if (
+                    raw[jj] &&
+                    String(raw[jj].peerUserId) === String(peerId)
+                  ) {
+                    updateFriendRowLocalDisplayAfterRemark(raw[jj], remarkTrim);
+                    break;
+                  }
+                }
+                friendListCloseSwipe();
+                if (typeof wx.showToast === 'function') {
+                  wx.showToast({ title: '已保存', icon: 'success' });
+                }
+                callFriendApiThenRefreshCache(String(peerId), onDone);
+              } else {
+                var m2 = apiErrorMessage(res) || '保存失败';
+                if (typeof wx.showToast === 'function') {
+                  wx.showToast({ title: m2, icon: 'none' });
+                }
+              }
+            },
+            fail: function () {
+              if (typeof wx.showToast === 'function') {
+                wx.showToast({ title: '网络异常', icon: 'none' });
+              }
+            }
+          }
+        )
+      );
+    });
+  }
+
+  function openFriendRemarkDialog(peer) {
+    if (!peer || peer.peerUserId == null) {
+      return;
+    }
+    friendListCloseSwipe();
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+    var def = String(
+      peer.remark != null
+        ? peer.remark
+        : (peer.nickname != null ? peer.nickname : '')
+    );
+    if (def.length > 64) {
+      def = def.slice(0, 64);
+    }
+    if (typeof wx.showModal === 'function') {
+      wx.showModal({
+        title: '设置备注',
+        editable: true,
+        placeholderText: '备注名',
+        content: def,
+        success: function (res) {
+          if (res.confirm) {
+            var v = res.content != null ? String(res.content) : '';
+            patchFriendRemarkByPeerId(peer.peerUserId, v, null);
+          } else {
+            friendListCloseSwipe();
+            if (typeof app.draw === 'function') {
+              app.draw();
+            }
+          }
+        }
+      });
+    } else {
+      patchFriendRemarkByPeerId(peer.peerUserId, def, null);
     }
   }
 
@@ -885,6 +1147,7 @@ module.exports = function registerFriendListHome(app, deps) {
       String(app.homeFriendChatPeer.peerUserId) === String(fromUserId);
     if (!viewingSame) {
       app._friendDmUnreadPeers[getFriendChatKey(fromUserId)] = true;
+      app._friendFabHighlightUntil = Date.now() + FRIEND_FAB_MSG_HIGHLIGHT_MS;
     }
     if (typeof app.draw === 'function') {
       app.draw();
@@ -1098,6 +1361,8 @@ module.exports = function registerFriendListHome(app, deps) {
     app.dismissFriendDmKeyboard();
     app.homeFriendChatPeer = null;
     app._friendChatScrollTouchId = null;
+    friendListCloseSwipe();
+    app._flRowTouch = null;
     app._flAnimMode = null;
     app.homeFriendListOpen = false;
     app.homeFriendFabPressed = false;
@@ -1116,6 +1381,7 @@ module.exports = function registerFriendListHome(app, deps) {
   function startCloseAnim(done) {
     app._friendListScrollTouchId = null;
     app._friendChatScrollTouchId = null;
+    app._flRowTouch = null;
     app._friendListRowTapIdx = -1;
     stopFlAnimRaf();
     var from =
@@ -1165,6 +1431,8 @@ module.exports = function registerFriendListHome(app, deps) {
   app.openHomeFriendList = function () {
     stopFriendFabUnreadPulse();
     app.homeFriendListOpen = true;
+    friendListCloseSwipe();
+    app._flRowTouch = null;
     app.homeFriendChatPeer = null;
     app.friendChatScrollY = 0;
     app.friendListScrollY = 0;
@@ -1737,9 +2005,13 @@ module.exports = function registerFriendListHome(app, deps) {
       y <= L.y0 + L.h;
 
     if (!app.homeFriendChatPeer && hitCollapse(L, panelX, x, y)) {
+      friendListCloseSwipe();
+      app._flRowTouch = null;
       return true;
     }
     if (!app.homeFriendChatPeer && hitSearch(L, panelX, x, y)) {
+      friendListCloseSwipe();
+      app._flRowTouch = null;
       return true;
     }
 
@@ -1785,18 +2057,37 @@ module.exports = function registerFriendListHome(app, deps) {
     var i;
     for (i = 0; i < rows.length && i < 50; i++) {
       if (hitFriendRow(L, panelX, x, y, i)) {
+        var fHit = rows[i];
+        var pkHit = friendListPeerKey(fHit);
+        if (pkHit && app.friendListRowSwipe && app.friendListRowSwipe.peerKey && app.friendListRowSwipe.peerKey !== pkHit) {
+          friendListCloseSwipe();
+        }
         app._friendListRowTapIdx = i;
         app._friendListRowTapX = x;
         app._friendListRowTapY = y;
         if (e && e.touches && e.touches[0]) {
-          app._friendListScrollTouchId = e.touches[0].identifier;
+          var tid0 = e.touches[0].identifier;
+          app._friendListScrollTouchId = tid0;
           app._friendListScrollLastY = y;
+          app._flRowTouch = {
+            id: tid0,
+            x0: x,
+            y0: y,
+            idx: i,
+            peerKey: pkHit,
+            mode: 0,
+            startOff: 0
+          };
+          if (pkHit && app.friendListRowSwipe && app.friendListRowSwipe.peerKey === pkHit) {
+            app._flRowTouch.startOff = app.friendListRowSwipe.offset || 0;
+          }
         }
         return true;
       }
     }
 
     if (insidePanel && y >= L.listTop && y <= L.listTop + L.listH) {
+      friendListCloseSwipe();
       if (e && e.touches && e.touches[0]) {
         app._friendListScrollTouchId = e.touches[0].identifier;
         app._friendListScrollLastY = y;
@@ -1930,6 +2221,73 @@ module.exports = function registerFriendListHome(app, deps) {
       return true;
     }
     if (
+      app.homeFriendListOpen &&
+      !app.homeFriendChatPeer &&
+      app._flRowTouch &&
+      app._flAnimMode !== 'out'
+    ) {
+      var tSwipe = null;
+      var tsi;
+      if (e.touches && e.touches.length) {
+        for (tsi = 0; tsi < e.touches.length; tsi++) {
+          if (e.touches[tsi].identifier === app._flRowTouch.id) {
+            tSwipe = e.touches[tsi];
+            break;
+          }
+        }
+      }
+      if (tSwipe) {
+        var ft0 = app._flRowTouch;
+        var sdx = tSwipe.clientX - ft0.x0;
+        var sdy = tSwipe.clientY - ft0.y0;
+        if (ft0.mode === 0) {
+          if (sdx * sdx + sdy * sdy < FRIEND_LIST_SWIPE_DECIDE_PX2) {
+            return true;
+          }
+          if (Math.abs(sdx) > Math.abs(sdy)) {
+            ft0.mode = 2;
+            app._friendListScrollTouchId = null;
+            var wM = getFriendListSwipeActionWidths().total;
+            var s0 = typeof ft0.startOff === 'number' ? ft0.startOff : 0;
+            if (s0 < 0) s0 = 0;
+            if (s0 > wM) s0 = wM;
+            if (ft0.peerKey) {
+              app.friendListRowSwipe = {
+                peerKey: ft0.peerKey,
+                offset: s0
+              };
+            }
+            ft0.horizStartX = tSwipe.clientX;
+            ft0.horizBaseOff = s0;
+            if (typeof app.draw === 'function') {
+              app.draw();
+            }
+            return true;
+          }
+          friendListCloseSwipe();
+          app._flRowTouch = null;
+          app._friendListScrollLastY = tSwipe.clientY;
+        } else if (ft0.mode === 2) {
+          var wAct0 = getFriendListSwipeActionWidths();
+          var maxO0 = wAct0.total;
+          var oNew = ft0.horizBaseOff + (ft0.horizStartX - tSwipe.clientX);
+          if (oNew < 0) oNew = 0;
+          if (oNew > maxO0) oNew = maxO0;
+          if (ft0.peerKey) {
+            app.friendListRowSwipe = {
+              peerKey: ft0.peerKey,
+              offset: oNew
+            };
+          }
+          app._friendListRowTapIdx = -1;
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+          return true;
+        }
+      }
+    }
+    if (
       !app.homeFriendListOpen ||
       app._flAnimMode === 'out' ||
       !app._friendListScrollTouchId
@@ -2028,11 +2386,24 @@ module.exports = function registerFriendListHome(app, deps) {
       app._friendListRowTapIdx < 0 ||
       Math.abs(x - app._friendListRowTapX) > slop ||
       Math.abs(y - app._friendListRowTapY) > slop;
+    if (app._flRowTouch && app._flRowTouch.mode === 2) {
+      moved = true;
+    }
 
     var L = app.getHomeFriendListPanelLayout();
 
     var slide = easeInOut(app._flSlideT != null ? app._flSlideT : 1);
     var panelX = L.x0 - L.w * (1 - slide) * 0.92;
+
+    var oPreSwipe =
+      (app.friendListRowSwipe && app.friendListRowSwipe.offset) || 0;
+    var pkSwipe =
+      app.friendListRowSwipe && app.friendListRowSwipe.peerKey
+        ? app.friendListRowSwipe.peerKey
+        : '';
+    var hadListHoriz = !!(app._flRowTouch && app._flRowTouch.mode === 2);
+    var pkSnap = hadListHoriz && app._flRowTouch ? app._flRowTouch.peerKey : '';
+    app._flRowTouch = null;
 
     if (app.homeFriendChatPeer) {
       if (hitFriendChatBack(L, panelX, x, y)) {
@@ -2156,7 +2527,125 @@ module.exports = function registerFriendListHome(app, deps) {
       if (typeof app.openFriendListSearchKeyboard === 'function') {
         app.openFriendListSearchKeyboard();
       }
+      if (hadListHoriz) {
+        var wFin0 = getFriendListSwipeActionWidths().total;
+        if (oPreSwipe < wFin0 * 0.5) {
+          friendListCloseSwipe();
+        } else if (pkSnap) {
+          app.friendListRowSwipe = { peerKey: pkSnap, offset: wFin0 };
+        }
+      }
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
       return true;
+    }
+
+    if (oPreSwipe > 0.5 && pkSwipe) {
+      var rowsA = getFilteredFriends();
+      var ira;
+      var iRowHit = -1;
+      for (ira = 0; ira < rowsA.length; ira++) {
+        if (friendListPeerKey(rowsA[ira]) === pkSwipe) {
+          iRowHit = ira;
+          break;
+        }
+      }
+      if (iRowHit >= 0) {
+        var fList = rowsA[iRowHit];
+        var yRowH = L.listTop + iRowHit * L.rowH + app.friendListScrollY;
+        var actHit = friendListHitSwipeAction(
+          x,
+          y,
+          L,
+          panelX,
+          yRowH,
+          oPreSwipe
+        );
+        if (actHit === 'remark') {
+          openFriendRemarkDialog(fList);
+          return true;
+        }
+        if (actHit === 'delete') {
+          if (hadListHoriz) {
+            var wFD = getFriendListSwipeActionWidths().total;
+            if (oPreSwipe < wFD * 0.5) {
+              friendListCloseSwipe();
+            } else if (pkSnap) {
+              app.friendListRowSwipe = {
+                peerKey: pkSnap,
+                offset: wFD
+              };
+            }
+          }
+          if (typeof wx.showModal === 'function') {
+            wx.showModal({
+              title: '删除好友',
+              content: '确定从好友列表中删除该好友吗？',
+              success: function (res) {
+                if (res.confirm) {
+                  deleteFriendByPeerId(fList.peerUserId, null);
+                } else if (typeof app.draw === 'function') {
+                  app.draw();
+                }
+              }
+            });
+          } else {
+            deleteFriendByPeerId(fList.peerUserId, null);
+          }
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+          return true;
+        }
+        if (
+          friendRowInGame(fList) &&
+          friendListHitWatch(x, y, L, panelX, yRowH, oPreSwipe) &&
+          typeof app.startOnlineFriendWatchFromPeer === 'function'
+        ) {
+          if (hadListHoriz) {
+            var wFW = getFriendListSwipeActionWidths().total;
+            if (oPreSwipe < wFW * 0.5) {
+              friendListCloseSwipe();
+            } else if (pkSnap) {
+              app.friendListRowSwipe = { peerKey: pkSnap, offset: wFW };
+            }
+          } else {
+            friendListCloseSwipe();
+          }
+          app.startOnlineFriendWatchFromPeer(fList.peerUserId);
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+          return true;
+        }
+        var rPadG = app.rpx(8);
+        var rLeftG = panelX + rPadG;
+        var rWG = L.w - rPadG * 2;
+        var wTotG = getFriendListSwipeActionWidths().total;
+        if (
+          !hadListHoriz &&
+          hitFriendRow(L, panelX, x, y, iRowHit) &&
+          x < rLeftG + rWG - wTotG
+        ) {
+          friendListCloseSwipe();
+          if (typeof app.openHomeFriendChatMode === 'function') {
+            app.openHomeFriendChatMode(fList);
+          }
+          return true;
+        }
+      }
+    }
+    if (hadListHoriz) {
+      var wFin = getFriendListSwipeActionWidths().total;
+      if (oPreSwipe < wFin * 0.5) {
+        friendListCloseSwipe();
+      } else if (pkSnap) {
+        app.friendListRowSwipe = { peerKey: pkSnap, offset: wFin };
+      }
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
     }
 
     var rows = getFilteredFriends();
@@ -2165,8 +2654,26 @@ module.exports = function registerFriendListHome(app, deps) {
       var idx = app._friendListRowTapIdx;
       app._friendListRowTapIdx = -1;
       var fTap = rows[idx];
-      if (fTap && typeof app.openHomeFriendChatMode === 'function') {
-        app.openHomeFriendChatMode(fTap);
+      if (fTap) {
+        var yRowTap = L.listTop + idx * L.rowH + app.friendListScrollY;
+        var offTap = 0;
+        if (
+          app.friendListRowSwipe &&
+          app.friendListRowSwipe.peerKey === friendListPeerKey(fTap)
+        ) {
+          offTap = app.friendListRowSwipe.offset || 0;
+        }
+        if (
+          friendRowInGame(fTap) &&
+          friendListHitWatch(x, y, L, panelX, yRowTap, offTap) &&
+          typeof app.startOnlineFriendWatchFromPeer === 'function'
+        ) {
+          app.startOnlineFriendWatchFromPeer(fTap.peerUserId);
+          return true;
+        }
+        if (typeof app.openHomeFriendChatMode === 'function') {
+          app.openHomeFriendChatMode(fTap);
+        }
       }
       return true;
     }
@@ -2309,11 +2816,28 @@ module.exports = function registerFriendListHome(app, deps) {
     var fillB = FL ? FL.fabFill : '#F5EADF';
     var strokeB = FL ? FL.fabStroke : 'rgba(93, 64, 55, 0.35)';
     var iconC = FL && FL.fabIcon ? FL.fabIcon : '#5D4037';
+    var fabUnread = FL && FL.fabUnreadHighlight ? FL.fabUnreadHighlight : '#E65100';
+    var fabUnreadSoft =
+      FL && FL.fabUnreadHighlightSoft
+        ? FL.fabUnreadHighlightSoft
+        : 'rgba(255, 200, 140, 0.8)';
     var F = app.getHomeFriendListFabLayout();
     var hasUnread = friendDmHasAnyUnread();
+    var tFab = Date.now();
+    var highlightActive =
+      hasUnread &&
+      typeof app._friendFabHighlightUntil === 'number' &&
+      tFab < app._friendFabHighlightUntil;
+    var hiPhase = 0;
+    if (highlightActive) {
+      hiPhase = (app._friendFabHighlightUntil - tFab) / FRIEND_FAB_MSG_HIGHLIGHT_MS;
+      if (hiPhase > 1) hiPhase = 1;
+      hiPhase = 1 - (1 - hiPhase) * (1 - hiPhase);
+    }
     var breath = 1;
     if (hasUnread && !app.homeFriendFabPressed && !app.homeFriendFabDragging) {
-      breath = 1 + 0.06 * (0.5 + 0.5 * Math.sin(Date.now() * 0.007));
+      var ampB = highlightActive ? 0.1 : 0.07;
+      breath = 1 + ampB * (0.5 + 0.5 * Math.sin(tFab * 0.007));
     }
     var scale = (app.homeFriendFabPressed ? 0.95 : 1) * breath;
     var cx = F.cx;
@@ -2336,6 +2860,30 @@ module.exports = function registerFriendListHome(app, deps) {
     app.ctx.translate(-cx, -cy);
     app.ctx.globalAlpha = 1;
     app.ctx.globalCompositeOperation = 'source-over';
+
+    if (hasUnread) {
+      var ph0 = tFab * 0.0062;
+      var aRing0 =
+        0.32 + 0.2 * (0.5 + 0.5 * Math.sin(ph0)) + 0.28 * hiPhase;
+      var rRing0 = sPr * (1.1 + 0.055 * Math.sin(ph0) + 0.1 * hiPhase);
+      app.ctx.save();
+      app.ctx.globalAlpha = Math.min(0.92, aRing0);
+      app.ctx.strokeStyle = fabUnread;
+      app.ctx.lineWidth = Math.max(2.5, app.rpx(4.2));
+      app.ctx.lineCap = 'round';
+      app.ctx.beginPath();
+      app.ctx.arc(sPx, sPy, rRing0, 0, Math.PI * 2);
+      app.ctx.stroke();
+      var rRing1 = sPr * (1.3 + 0.04 * Math.sin(ph0 * 0.75));
+      app.ctx.globalAlpha =
+        0.2 + 0.14 * hiPhase + 0.12 * (0.5 + 0.5 * Math.sin(ph0 * 0.85));
+      app.ctx.strokeStyle = fabUnreadSoft;
+      app.ctx.lineWidth = app.rpx(2.6);
+      app.ctx.beginPath();
+      app.ctx.arc(sPx, sPy, rRing1, 0, Math.PI * 2);
+      app.ctx.stroke();
+      app.ctx.restore();
+    }
 
     var fabImg = getFriendFabDrawSource();
     var useFabImg =
@@ -3092,30 +3640,90 @@ module.exports = function registerFriendListHome(app, deps) {
       );
     } else {
       var ri;
-      app.ctx.save();
-      app.ctx.globalAlpha = pa;
-      for (ri = 0; ri < rows.length && ri < 50; ri++) {
-        var yRow0 = L.listTop + ri * L.rowH + app.friendListScrollY;
-        if (yRow0 > L.listTop + L.listH + L.rowH || yRow0 + L.rowH < L.listTop) {
-          continue;
-        }
-        var ze0 = FL && FL.rowEven ? FL.rowEven : 'rgba(245,234,223,0.35)';
-        var ze1 = FL && FL.rowOdd ? FL.rowOdd : 'rgba(255,255,255,0.5)';
-        app.ctx.fillStyle = ri % 2 === 0 ? ze0 : ze1;
-        app.ctx.fillRect(
-          panelX + app.rpx(8),
-          yRow0,
-          L.w - app.rpx(16),
-          L.rowH - app.rpx(4)
-        );
-      }
-      app.ctx.restore();
       for (ri = 0; ri < rows.length && ri < 50; ri++) {
         var fr = rows[ri];
         var yRow = L.listTop + ri * L.rowH + app.friendListScrollY;
         if (yRow > L.listTop + L.listH + L.rowH || yRow + L.rowH < L.listTop) {
           continue;
         }
+        var skR = friendListPeerKey(fr);
+        var offRow = 0;
+        if (
+          app.friendListRowSwipe &&
+          app.friendListRowSwipe.peerKey === skR
+        ) {
+          offRow = app.friendListRowSwipe.offset || 0;
+        }
+        var rectsAct = getFriendListSwipeActionRects(L, panelX, yRow);
+        var rowCellPad = app.rpx(8);
+        var rowHCell = L.rowH - app.rpx(4);
+        app.ctx.save();
+        app.ctx.beginPath();
+        app.ctx.rect(
+          panelX + rowCellPad,
+          yRow,
+          L.w - rowCellPad * 2,
+          rowHCell
+        );
+        app.ctx.clip();
+        if (offRow > 0) {
+          app.ctx.fillStyle = '#7A6F6A';
+          app.ctx.fillRect(
+            rectsAct.rem.x,
+            rectsAct.rem.y,
+            rectsAct.rem.w,
+            rectsAct.rem.h
+          );
+          app.ctx.fillStyle = '#C62828';
+          app.ctx.fillRect(
+            rectsAct.del.x,
+            rectsAct.del.y,
+            rectsAct.del.w,
+            rectsAct.del.h
+          );
+          app.ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+          app.ctx.font =
+            '500 ' +
+            app.rpx(24) +
+            'px "PingFang SC","Hiragino Sans GB",sans-serif';
+          app.ctx.textAlign = 'center';
+          app.ctx.textBaseline = 'middle';
+          app.ctx.fillText(
+            '备注',
+            rectsAct.rem.x + rectsAct.rem.w * 0.5,
+            rectsAct.rem.y + rectsAct.rem.h * 0.5
+          );
+          app.ctx.fillText(
+            '删除',
+            rectsAct.del.x + rectsAct.del.w * 0.5,
+            rectsAct.del.y + rectsAct.del.h * 0.5
+          );
+          app.ctx.textAlign = 'left';
+        }
+        app.ctx.textAlign = 'left';
+        app.ctx.save();
+        app.ctx.globalAlpha = pa;
+        app.ctx.translate(-offRow, 0);
+        var ze0 = FL && FL.rowEven ? FL.rowEven : 'rgba(245,234,223,0.35)';
+        var ze1 = FL && FL.rowOdd ? FL.rowOdd : 'rgba(255,255,255,0.5)';
+        var rowBgOpaque =
+          ri % 2 === 0
+            ? 'rgba(252, 248, 242, 0.99)'
+            : 'rgba(255, 255, 255, 0.99)';
+        app.ctx.fillStyle = rowBgOpaque;
+        app.ctx.fillRect(
+          panelX + rowCellPad,
+          yRow,
+          L.w - rowCellPad * 2,
+          rowHCell
+        );
+        app.ctx.fillStyle = ri % 2 === 0 ? ze0 : ze1;
+        app.ctx.fillRect(
+          panelX + rowCellPad,
+          yRow,
+          L.w - rowCellPad * 2,
+          rowHCell
+        );
         var avR = app.rpx(Math.round(28 * 1.2));
         var acx = panelX + app.rpx(8) + avR;
         var acy = yRow + L.rowH * 0.5;
@@ -3215,9 +3823,12 @@ module.exports = function registerFriendListHome(app, deps) {
         var nameY = frInGame
           ? yRow + L.rowH * 0.36
           : yRow + L.rowH * 0.5;
+        var watchReserve = frInGame
+          ? app.rpx(FRIEND_LIST_WATCH_BTN_RPX) + app.rpx(6)
+          : 0;
         var nameMaxPx = Math.max(
           app.rpx(48),
-          L.w - app.rpx(16) - (nameX - panelX) - app.rpx(6)
+          L.w - app.rpx(16) - (nameX - panelX) - app.rpx(6) - watchReserve
         );
         while (
           nameStr.length > 0 &&
@@ -3248,7 +3859,56 @@ module.exports = function registerFriendListHome(app, deps) {
             app.snapPx(nameX),
             app.snapPx(yRow + L.rowH * 0.7)
           );
+          var wRect = getFriendListWatchBtnLayout(
+            L,
+            panelX,
+            yRow,
+            offRow
+          );
+          app.ctx.fillStyle = 'rgba(21, 128, 61, 0.14)';
+          var wbx = wRect.x;
+          var wby = wRect.y + wRect.h * 0.14;
+          var wbw = wRect.w;
+          var wbh = wRect.h * 0.72;
+          var wbr = Math.min(
+            app.rpx(8),
+            wbw * 0.2,
+            wbh * 0.2
+          );
+          /** 用 app.roundRect（arcTo），勿用 ctx.roundRect：小游戏引擎与标准 Canvas 的 radii 参数不兼容。 */
+          if (typeof app.roundRect === 'function') {
+            app.roundRect(wbx, wby, wbw, wbh, wbr);
+            app.ctx.fill();
+            app.roundRect(wbx, wby, wbw, wbh, wbr);
+            app.ctx.strokeStyle = 'rgba(21, 128, 61, 0.5)';
+            app.ctx.lineWidth = Math.max(1, app.rpx(1.5));
+            app.ctx.stroke();
+          } else {
+            app.ctx.beginPath();
+            app.ctx.rect(wbx, wby, wbw, wbh);
+            app.ctx.fill();
+            app.ctx.beginPath();
+            app.ctx.rect(wbx, wby, wbw, wbh);
+            app.ctx.strokeStyle = 'rgba(21, 128, 61, 0.5)';
+            app.ctx.lineWidth = Math.max(1, app.rpx(1.5));
+            app.ctx.stroke();
+          }
+          app.ctx.fillStyle = '#15803d';
+          app.ctx.font =
+            '600 ' +
+            app.rpx(24) +
+            'px "PingFang SC","Hiragino Sans GB",sans-serif';
+          app.ctx.textAlign = 'center';
+          app.ctx.textBaseline = 'middle';
+          app.ctx.fillText(
+            '观战',
+            wRect.x + wRect.w * 0.5,
+            wRect.y + wRect.h * 0.5
+          );
+          app.ctx.textAlign = 'left';
         }
+        app.ctx.restore();
+        app.ctx.restore();
       }
     }
     app.ctx.restore();

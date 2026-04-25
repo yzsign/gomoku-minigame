@@ -2336,6 +2336,19 @@ app.friendListHomeUiFromTheme = function(th) {
     fabFill: th.btnGhostFill,
     fabStroke: th.btnGhostStroke,
     fabIcon: th.title,
+    /** 有未读私聊时外圈高亮主色 / 外圈 */
+    fabUnreadHighlight:
+      id === 'mint'
+        ? 'rgba(0, 128, 132, 0.92)'
+        : id === 'ink'
+          ? 'rgba(200, 120, 88, 0.94)'
+          : 'rgba(230, 95, 40, 0.93)',
+    fabUnreadHighlightSoft:
+      id === 'mint'
+        ? 'rgba(150, 220, 215, 0.55)'
+        : id === 'ink'
+          ? 'rgba(255, 200, 170, 0.45)'
+          : 'rgba(255, 200, 150, 0.75)',
     fabShadow: th.btnShadow,
     /** 侧栏大面板渐变/子块填充：相对实色 1.0 的不透明度（越大越实） */
     panelBodyAlpha: 0.92,
