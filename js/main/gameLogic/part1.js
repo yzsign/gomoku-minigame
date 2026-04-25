@@ -2245,9 +2245,9 @@ app.historyPageUiFromTheme = function(th) {
       : null;
   var res = th.result || {};
   var winC =
-    res.win && res.win.title ? res.win.title : '#a67c3d';
+    res.win && res.win.title ? res.win.title : '#4CAF50';
   var loseC =
-    res.lose && res.lose.title ? res.lose.title : '#b06060';
+    res.lose && res.lose.title ? res.lose.title : '#C62828';
   var drawC =
     res.draw && res.draw.title ? res.draw.title : th.subtitle;
   return {

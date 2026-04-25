@@ -33,8 +33,8 @@ var THEMES = {
     pageIndicator: '#44919f',
     result: {
       defaultEnd: '#f0f7f5',
-      win: { bg: '#cce8e4', title: '#134c56' },
-      lose: { bg: '#dfe8ec', title: '#2c4552' },
+      win: { bg: '#cce8e4', title: '#4CAF50' },
+      lose: { bg: '#f8f5f0', title: '#C62828' },
       draw: { bg: '#ecf0ee', title: '#5c5a48' },
       sub: '#627888',
       secondaryFill: 'rgba(255,255,255,0.64)',
@@ -90,8 +90,8 @@ var THEMES = {
     pageIndicator: '#E0B896',
     result: {
       defaultEnd: '#faf6f0',
-      win: { bg: '#e0edd8', title: '#1b5e20' },
-      lose: { bg: '#f0e8e4', title: '#8b4040' },
+      win: { bg: '#e0edd8', title: '#4CAF50' },
+      lose: { bg: '#f8f5f0', title: '#C62828' },
       draw: { bg: '#f5ecd8', title: '#a65c18' },
       sub: '#8a7868',
       secondaryFill: 'rgba(255,255,255,0.6)',
@@ -145,8 +145,8 @@ var THEMES = {
     pageIndicator: '#8f8578',
     result: {
       defaultEnd: '#f2ede4',
-      win: { bg: '#e0e4dc', title: '#2d3d32' },
-      lose: { bg: '#ebe4de', title: '#5a4038' },
+      win: { bg: '#e0e4dc', title: '#4CAF50' },
+      lose: { bg: '#f8f5f0', title: '#C62828' },
       draw: { bg: '#eee8e0', title: '#5a5048' },
       sub: '#6a625c',
       secondaryFill: 'rgba(255,255,255,0.62)',

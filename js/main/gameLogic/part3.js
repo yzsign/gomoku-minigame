@@ -2849,13 +2849,17 @@ function drawResultGuardianRoundedAvatar(app, th, img, cx, cy, size, cornerR) {
   ctx.restore();
 }
 
-function drawResultCircleAvatar(app, th, img, cx, cy, size, isWinner) {
+function drawResultCircleAvatar(app, th, img, cx, cy, size, isWinner, isLoser) {
   var ctx = app.ctx;
+  isLoser = !!isLoser;
   var r = size * 0.5;
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.clip();
+  if (isLoser) {
+    ctx.globalAlpha = 0.9;
+  }
   if (img && img.width && img.height) {
     var sw = Math.min(img.width, img.height);
     var sx = (img.width - sw) / 2;
@@ -2870,6 +2874,7 @@ function drawResultCircleAvatar(app, th, img, cx, cy, size, isWinner) {
     ctx.textBaseline = 'middle';
     ctx.fillText('?', app.snapPx(cx), app.snapPx(cy));
   }
+  ctx.globalAlpha = 1;
   ctx.restore();
   ctx.save();
   ctx.beginPath();
@@ -2881,6 +2886,10 @@ function drawResultCircleAvatar(app, th, img, cx, cy, size, isWinner) {
     ctx.shadowBlur = 12;
     ctx.stroke();
     ctx.shadowBlur = 0;
+  } else if (isLoser) {
+    ctx.strokeStyle = '#E0E0E0';
+    ctx.lineWidth = 3;
+    ctx.stroke();
   } else {
     ctx.strokeStyle = 'rgba(230, 230, 230, 0.98)';
     ctx.lineWidth = 2.5;
@@ -2905,14 +2914,33 @@ function drawResultCircleAvatar(app, th, img, cx, cy, size, isWinner) {
     ctx.textBaseline = 'middle';
     ctx.fillText('\u2713', app.snapPx(bx), app.snapPx(by + 0.5));
     ctx.restore();
+  } else if (isLoser) {
+    var br2 = Math.max(9, r * 0.26);
+    var bx2 = cx + r * 0.62;
+    var by2 = cy - r * 0.62;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(bx2, by2, br2, 0, Math.PI * 2);
+    ctx.fillStyle = '#F44336';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u2717', app.snapPx(bx2), app.snapPx(by2 + 0.5));
+    ctx.restore();
   }
 }
 
-function drawResultGuardianCircleAvatar(app, th, img, cx, cy, size, isWinner) {
+function drawResultGuardianCircleAvatar(app, th, img, cx, cy, size, isWinner, isLoser) {
   var ctx = app.ctx;
+  isLoser = !!isLoser;
   var r = size * 0.5;
   if (!img || !img.width || !img.height) {
-    drawResultCircleAvatar(app, th, img, cx, cy, size, isWinner);
+    drawResultCircleAvatar(app, th, img, cx, cy, size, isWinner, isLoser);
     return;
   }
   var iw = img.width;
@@ -2920,7 +2948,7 @@ function drawResultGuardianCircleAvatar(app, th, img, cx, cy, size, isWinner) {
   var inner = size * 0.9;
   var scale = Math.min(inner / iw, inner / ih);
   if (!isFinite(scale) || scale <= 0) {
-    drawResultCircleAvatar(app, th, img, cx, cy, size, isWinner);
+    drawResultCircleAvatar(app, th, img, cx, cy, size, isWinner, isLoser);
     return;
   }
   var dw = iw * scale;
@@ -2931,7 +2959,11 @@ function drawResultGuardianCircleAvatar(app, th, img, cx, cy, size, isWinner) {
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.clip();
+  if (isLoser) {
+    ctx.globalAlpha = 0.9;
+  }
   ctx.drawImage(img, 0, 0, iw, ih, dx, dy, dw, dh);
+  ctx.globalAlpha = 1;
   ctx.restore();
   ctx.save();
   ctx.beginPath();
@@ -2943,6 +2975,10 @@ function drawResultGuardianCircleAvatar(app, th, img, cx, cy, size, isWinner) {
     ctx.shadowBlur = 12;
     ctx.stroke();
     ctx.shadowBlur = 0;
+  } else if (isLoser) {
+    ctx.strokeStyle = '#E0E0E0';
+    ctx.lineWidth = 3;
+    ctx.stroke();
   } else {
     ctx.strokeStyle = 'rgba(230, 230, 230, 0.98)';
     ctx.lineWidth = 2.5;
@@ -2966,6 +3002,24 @@ function drawResultGuardianCircleAvatar(app, th, img, cx, cy, size, isWinner) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('\u2713', app.snapPx(bx), app.snapPx(by + 0.5));
+    ctx.restore();
+  } else if (isLoser) {
+    var br2 = Math.max(9, r * 0.26);
+    var bx2 = cx + r * 0.62;
+    var by2 = cy - r * 0.62;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(bx2, by2, br2, 0, Math.PI * 2);
+    ctx.fillStyle = '#F44336';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u2717', app.snapPx(bx2), app.snapPx(by2 + 0.5));
     ctx.restore();
   }
 }
@@ -3755,9 +3809,15 @@ app.drawResultOverlay = function() {
     app._resultWinFireworksStartMs = null;
   }
   var bgG = ctx.createLinearGradient(0, 0, 0, app.H);
-  bgG.addColorStop(0, '#FFF9F2');
-  bgG.addColorStop(0.55, '#FFF3E8');
-  bgG.addColorStop(1, '#FFEED9');
+  if (pack.mood === 'lose') {
+    bgG.addColorStop(0, '#F8F5F0');
+    bgG.addColorStop(0.52, '#F4F0E8');
+    bgG.addColorStop(1, '#EDE6DC');
+  } else {
+    bgG.addColorStop(0, '#FFF9F2');
+    bgG.addColorStop(0.55, '#FFF3E8');
+    bgG.addColorStop(1, '#FFEED9');
+  }
   ctx.fillStyle = bgG;
   ctx.fillRect(0, 0, app.W, app.H);
 
@@ -3789,7 +3849,7 @@ app.drawResultOverlay = function() {
     app.W * 0.5,
     ly.titleMainY,
     32,
-    pack.mood === 'win' ? '#333333' : pack.titleColor,
+    pack.titleColor,
     'bold'
   );
   if (pack.sub) {
@@ -3820,9 +3880,15 @@ app.drawResultOverlay = function() {
   }
 
   ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
-  ctx.shadowBlur = 24;
-  ctx.shadowOffsetY = 8;
+  if (pack.mood === 'lose') {
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.06)';
+    ctx.shadowBlur = 16;
+    ctx.shadowOffsetY = 4;
+  } else {
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
+    ctx.shadowBlur = 24;
+    ctx.shadowOffsetY = 8;
+  }
   ctx.fillStyle = '#FFFFFF';
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
   ctx.lineWidth = 1.25;
@@ -3883,7 +3949,7 @@ app.drawResultOverlay = function() {
       }
       return false;
     })();
-  function drawVsResultAvatarCircle(img, vsCx, vsCy, isWinner) {
+  function drawVsResultAvatarCircle(img, vsCx, vsCy, isWinner, isLoser) {
     if (
       gBotImg &&
       img === gBotImg &&
@@ -3898,7 +3964,8 @@ app.drawResultOverlay = function() {
         vsCx,
         vsCy,
         ly.avatarS,
-        isWinner
+        isWinner,
+        isLoser
       );
     } else {
       drawResultCircleAvatar(
@@ -3908,12 +3975,16 @@ app.drawResultOverlay = function() {
         vsCx,
         vsCy,
         ly.avatarS,
-        isWinner
+        isWinner,
+        isLoser
       );
     }
   }
-  drawVsResultAvatarCircle(imgLeft, ly.vsLeftCx, ly.vsCy, leftWon);
-  drawVsResultAvatarCircle(imgRight, ly.vsRightCx, ly.vsCy, rightWon);
+  var failScreen = pack.mood === 'lose';
+  var loseLeft = failScreen && !leftWon;
+  var loseRight = failScreen && !rightWon;
+  drawVsResultAvatarCircle(imgLeft, ly.vsLeftCx, ly.vsCy, leftWon, loseLeft);
+  drawVsResultAvatarCircle(imgRight, ly.vsRightCx, ly.vsCy, rightWon, loseRight);
 
   ctx.font = 'bold 22px "PingFang SC","Hiragino Sans GB",sans-serif';
   ctx.fillStyle = '#999999';
@@ -4121,9 +4192,17 @@ app.drawResultOverlay = function() {
   } else {
     var primaryLabel = '再来一局';
     var btnG = ctx.createLinearGradient(px0, py0, px0 + ly.primaryW, py0);
-    btnG.addColorStop(0, '#FF6B8B');
-    btnG.addColorStop(1, '#FF8E53');
-    ctx.shadowColor = 'rgba(255, 107, 139, 0.4)';
+    if (pack.mood === 'lose') {
+      btnG.addColorStop(0, '#4A5B6E');
+      btnG.addColorStop(1, '#2E3A4A');
+    } else {
+      btnG.addColorStop(0, '#FF6B8B');
+      btnG.addColorStop(1, '#FF8E53');
+    }
+    ctx.shadowColor =
+      pack.mood === 'lose'
+        ? 'rgba(32, 42, 58, 0.32)'
+        : 'rgba(255, 107, 139, 0.4)';
     ctx.shadowBlur = 20;
     ctx.shadowOffsetY = 5;
     ctx.fillStyle = btnG;
