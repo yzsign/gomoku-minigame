@@ -736,6 +736,64 @@ app.draw = function() {
   ) {
     app.drawOnlineGameClockAboveBoard(app.ctx, th, app.layout);
   }
+
+  /** 棋盘右上角独立「旁观 X人」徽章按钮（可点击打开列表），复用 watchPill 主题色，小巧胶囊风格 */
+  if (
+    app.isPvpOnline &&
+    app.layout &&
+    typeof app.spectatorCount === 'number' &&
+    app.layout.spectatorBadgeX != null &&
+    typeof app.friendListHomeUiFromTheme === 'function'
+  ) {
+    try {
+      var FL = app.friendListHomeUiFromTheme(th || app.getUiTheme());
+      var bx = app.layout.spectatorBadgeX;
+      var by = app.layout.spectatorBadgeY;
+      var bw = app.layout.spectatorBadgeW || app.rpx(76);
+      var bh = app.layout.spectatorBadgeH || app.rpx(26);
+      var count = Math.max(0, app.spectatorCount || 0);
+      var badgeText = count > 0 ? '旁观 ' + count + '人' : '旁观';
+
+      app.ctx.save();
+      app.ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
+      app.ctx.shadowBlur = 3;
+      app.ctx.shadowOffsetY = 1;
+
+      if (typeof app.roundRect === 'function') {
+        app.roundRect(bx, by, bw, bh, app.rpx(999)); // 极大圆角实现胶囊
+      } else {
+        // fallback rect if roundRect not yet defined
+        app.ctx.beginPath();
+        app.ctx.rect(bx, by, bw, bh);
+      }
+
+      var grad = app.ctx.createLinearGradient(bx, by, bx + bw * 0.6, by + bh);
+      grad.addColorStop(0, (FL && FL.spectatorBadgeBg) || '#ffffff');
+      grad.addColorStop(1, (FL && FL.spectatorBadgeBg) || '#f1f8f4');
+      app.ctx.fillStyle = grad;
+      app.ctx.fill();
+
+      app.ctx.strokeStyle = (FL && FL.watchPillStroke) || 'rgba(46, 125, 50, 0.25)';
+      app.ctx.lineWidth = 1;
+      app.ctx.stroke();
+
+      app.ctx.shadowBlur = 0;
+      app.ctx.shadowOffsetY = 0;
+      app.ctx.fillStyle = (FL && FL.spectatorBadgeText) || '#2e7d32';
+      app.ctx.font = '500 ' + Math.max(10, app.rpx(12)) + 'px "PingFang SC","Helvetica",sans-serif';
+      app.ctx.textAlign = 'center';
+      app.ctx.textBaseline = 'middle';
+      app.ctx.fillText(badgeText, bx + bw * 0.5, by + bh * 0.5 + 0.5);
+      app.ctx.restore();
+    } catch (e) {
+      console.error('Spectator badge draw failed:', e);
+      // Do not let badge errors break the entire game render
+      if (app.ctx && typeof app.ctx.restore === 'function') {
+        try { app.ctx.restore(); } catch (rErr) {}
+      }
+    }
+  }
+
   app.ctx.restore();
 
   var status = app.lastMsg;
@@ -4667,6 +4725,27 @@ if (typeof wx.onTouchEnd === 'function') {
     ) {
       return;
     }
+
+    /** 点击棋盘右上角旁观徽章：打开 spectator mode 的好友列表（仅显示当前在观战的好友） */
+    if (
+      t &&
+      app.isPvpOnline &&
+      app.layout &&
+      app.layout.spectatorBadgeX != null &&
+      t.clientX >= app.layout.spectatorBadgeX &&
+      t.clientX <= app.layout.spectatorBadgeX + (app.layout.spectatorBadgeW || 80) &&
+      t.clientY >= app.layout.spectatorBadgeY &&
+      t.clientY <= app.layout.spectatorBadgeY + (app.layout.spectatorBadgeH || 30)
+    ) {
+      if (typeof app.openHomeFriendList === 'function') {
+        app.openHomeFriendList(true);
+      }
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
+      return;
+    }
+
     if (app.screen === 'admin_puzzle' && t) {
       if (typeof app.handleAdminPuzzleTouchEnd === 'function') {
         app.handleAdminPuzzleTouchEnd(

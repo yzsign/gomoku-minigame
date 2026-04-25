@@ -345,6 +345,23 @@ function roomOpponentRatingOptions(roomId) {
   };
 }
 
+/**
+ * GET /api/rooms/{roomId}/spectators — 本房当前旁观中的好友（须登录；玩家与旁观者均可调）
+ * 返回体：{ friends: FriendListItemDto[] }
+ */
+function roomSpectatorsOptions(roomId) {
+  return {
+    url:
+      GOMOKU_API_BASE +
+      '/api/rooms/' +
+      encodeURIComponent(String(roomId)) +
+      '/spectators',
+    method: 'GET',
+    header: withAuthHeaders({}),
+    dataType: 'json'
+  };
+}
+
 /** GET /api/users/rating?userId=：按用户 id 查询公开天梯（需登录；战绩页点头像） */
 function userRatingByUserIdOptions(userId) {
   var id =
@@ -604,6 +621,7 @@ module.exports = {
   mePieceSkinSelectOptions: mePieceSkinSelectOptions,
   meEquipOptions: meEquipOptions,
   roomOpponentRatingOptions: roomOpponentRatingOptions,
+  roomSpectatorsOptions: roomSpectatorsOptions,
   userRatingByUserIdOptions: userRatingByUserIdOptions,
   gameSettleOptions: gameSettleOptions,
   gameReplayByRoomOptions: gameReplayByRoomOptions,

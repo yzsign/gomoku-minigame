@@ -51,6 +51,14 @@ module.exports = function registerFriendListHome(app, deps) {
   app._friendListPersistRestored = false;
   /** 对战中打开好友列表时，自动过滤为「当前观战」（inGame = true）的朋友 */
   app._gameSpectatorFilter = false;
+  /**
+   * 旁观模式下列表数据：null = 未拉到 / 回退 inGame 本地过滤；数组 = GET /api/rooms/{id}/spectators
+   */
+  app._spectatorListRoomFriends = null;
+  app.spectatorListLoading = false;
+  /** 收到联机 STATE 时合并刷新旁观列表，避免每包打满 HTTP */
+  var _spectatorListStateRefreshTimer = null;
+  var SPECTATOR_LIST_STATE_REFRESH_MS = 380;
   app.homeFriendFabPressed = false;
   /** 用户拖动后的悬浮按钮中心；未设置时用默认（左侧对齐吉祥物高度） */
   app.homeFriendFabCustomCx = undefined;
@@ -658,14 +666,26 @@ module.exports = function registerFriendListHome(app, deps) {
   };
 
   function getFilteredFriends() {
-    var raw = app.friendListRaw || [];
-    var q = (app.friendListSearchQuery || '').trim().toLowerCase();
     var isSpectatorMode = !!app._gameSpectatorFilter && app.isPvpOnline;
+    var raw;
+    if (isSpectatorMode) {
+      raw =
+        app._spectatorListRoomFriends != null
+          ? app._spectatorListRoomFriends
+          : app.friendListRaw || [];
+    } else {
+      raw = app.friendListRaw || [];
+    }
+    var q = (app.friendListSearchQuery || '').trim().toLowerCase();
     var out = [];
     var i;
     for (i = 0; i < raw.length; i++) {
       var f = raw[i];
-      if (isSpectatorMode && !friendRowInGame(f)) {
+      if (
+        isSpectatorMode &&
+        app._spectatorListRoomFriends == null &&
+        !friendRowInGame(f)
+      ) {
         continue;
       }
       if (q) {
@@ -796,6 +816,127 @@ module.exports = function registerFriendListHome(app, deps) {
       }
     }
   }
+
+  /**
+   * 拉取当前联机房的旁观好友（与棋盘徽章总人数 spectatorCount 配合展示）
+   * @param {boolean} silentRefresh 为 true 时不进入全屏「加载中」、不清空已展示列表（用于 STATE 合并刷新）
+   */
+  function fetchSpectatorsForCurrentRoom(silentRefresh) {
+    var silent = !!silentRefresh;
+    if (!roomApi || typeof roomApi.roomSpectatorsOptions !== 'function') {
+      if (!silent) {
+        app._spectatorListRoomFriends = [];
+        app.spectatorListLoading = false;
+      }
+      return;
+    }
+    var roomId = app.onlineRoomId;
+    if (!roomId) {
+      if (!silent) {
+        app._spectatorListRoomFriends = [];
+        app.spectatorListLoading = false;
+      }
+      return;
+    }
+    if (!silent) {
+      app.spectatorListLoading = true;
+      app._spectatorListRoomFriends = null;
+    }
+    wx.request(
+      Object.assign(roomApi.roomSpectatorsOptions(roomId), {
+        success: function (res) {
+          if (!silent) {
+            app.spectatorListLoading = false;
+          }
+          var d = res.data;
+          if (d && typeof d === 'string') {
+            try {
+              d = JSON.parse(d);
+            } catch (eJ) {
+              d = null;
+            }
+          }
+          if (res.statusCode === 200 && d && Array.isArray(d.friends)) {
+            var arr = d.friends.slice();
+            normalizeFriendListRowsInPlace(arr);
+            var j;
+            for (j = 0; j < arr.length; j++) {
+              var row = arr[j];
+              if (row) {
+                row._spectatorInRoom = true;
+                row.inGame = true;
+                row.online = true;
+              }
+            }
+            app._spectatorListRoomFriends = arr;
+            for (j = 0; j < arr.length; j++) {
+              if (arr[j] && arr[j].peerUserId && arr[j].avatarUrl) {
+                ensureAvatarImg(arr[j].peerUserId, arr[j].avatarUrl);
+              }
+            }
+          } else {
+            if (!silent) {
+              app._spectatorListRoomFriends = null;
+              if (typeof wx.showToast === 'function') {
+                wx.showToast({ title: '旁观列表加载失败', icon: 'none' });
+              }
+            }
+          }
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+        },
+        fail: function () {
+          if (!silent) {
+            app.spectatorListLoading = false;
+            app._spectatorListRoomFriends = null;
+            if (typeof wx.showToast === 'function') {
+              wx.showToast({ title: '网络异常', icon: 'none' });
+            }
+          }
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+        }
+      })
+    );
+  }
+
+  /**
+   * 联机每帧 STATE 后调度刷新旁观侧栏（侧栏以旁观模式打开时）；节流合并，避免对局热时请求过密
+   */
+  function scheduleSpectatorListRefreshAfterState() {
+    if (
+      !app.homeFriendListOpen ||
+      !app._gameSpectatorFilter ||
+      !app.isPvpOnline ||
+      !app.onlineRoomId
+    ) {
+      return;
+    }
+    if (!roomApi || typeof roomApi.roomSpectatorsOptions !== 'function') {
+      return;
+    }
+    if (_spectatorListStateRefreshTimer) {
+      try {
+        clearTimeout(_spectatorListStateRefreshTimer);
+      } catch (eC) {}
+    }
+    _spectatorListStateRefreshTimer = setTimeout(function () {
+      _spectatorListStateRefreshTimer = null;
+      if (
+        !app.homeFriendListOpen ||
+        !app._gameSpectatorFilter ||
+        !app.isPvpOnline ||
+        !app.onlineRoomId
+      ) {
+        return;
+      }
+      fetchSpectatorsForCurrentRoom(true);
+    }, SPECTATOR_LIST_STATE_REFRESH_MS);
+  }
+
+  app.scheduleSpectatorListRefreshAfterState = scheduleSpectatorListRefreshAfterState;
 
   function getFriendListSwipeActionWidths() {
     var remarkW = app.rpx(FRIEND_LIST_SWIPE_REMARK_RPX);
@@ -1483,7 +1624,15 @@ module.exports = function registerFriendListHome(app, deps) {
     app._flAnimMode = null;
     app.homeFriendListOpen = false;
     app._gameSpectatorFilter = false;
+    app._spectatorListRoomFriends = null;
+    app.spectatorListLoading = false;
     app.homeFriendFabPressed = false;
+    if (_spectatorListStateRefreshTimer) {
+      try {
+        clearTimeout(_spectatorListStateRefreshTimer);
+      } catch (eCt) {}
+      _spectatorListStateRefreshTimer = null;
+    }
     app._flSlideT = 1;
     persistOpen();
     if (typeof app.draw === 'function') {
@@ -1550,6 +1699,12 @@ module.exports = function registerFriendListHome(app, deps) {
     stopFriendFabUnreadPulse();
     app.homeFriendListOpen = true;
     app._gameSpectatorFilter = !!spectatorMode && app.isPvpOnline;
+    if (app._gameSpectatorFilter && app.onlineRoomId) {
+      fetchSpectatorsForCurrentRoom();
+    } else {
+      app._spectatorListRoomFriends = null;
+      app.spectatorListLoading = false;
+    }
     friendListCloseSwipe();
     app._flRowTouch = null;
     app.homeFriendChatPeer = null;
@@ -2483,12 +2638,8 @@ module.exports = function registerFriendListHome(app, deps) {
           var dx = x - F.cx;
           var dy = y - F.cy;
           if (dx * dx + dy * dy <= F.r * F.r * 1.44) {
-<<<<<<< HEAD
-            app.openHomeFriendList();
-=======
             var inGameMode = app.isPvpOnline && !app.onlineSpectatorMode;
             app.openHomeFriendList(inGameMode);
->>>>>>> b1d7540 (feat(game): spectator list during match via friend list filter)
             if (typeof app.refreshHomeFriendListFromServer === 'function') {
               app.refreshHomeFriendListFromServer();
             }
@@ -2726,6 +2877,7 @@ module.exports = function registerFriendListHome(app, deps) {
         }
         if (
           friendRowInGame(fList) &&
+          !fList._spectatorInRoom &&
           friendListHitWatch(x, y, L, panelX, yRowH, oPreSwipe) &&
           typeof app.startOnlineFriendWatchFromPeer === 'function'
         ) {
@@ -2791,6 +2943,7 @@ module.exports = function registerFriendListHome(app, deps) {
         }
         if (
           friendRowInGame(fTap) &&
+          !fTap._spectatorInRoom &&
           friendListHitWatch(x, y, L, panelX, yRowTap, offTap) &&
           typeof app.startOnlineFriendWatchFromPeer === 'function'
         ) {
@@ -3652,11 +3805,21 @@ module.exports = function registerFriendListHome(app, deps) {
       app.ctx.textAlign = 'left';
     } else {
     var isSpectatorMode = !!app._gameSpectatorFilter && app.isPvpOnline;
-    var titleText = isSpectatorMode ? '当前观战' : '好友列表';
+    var titleText = isSpectatorMode
+      ? (FL && FL.spectatorListTitle ? FL.spectatorListTitle : '旁观列表')
+      : '好友列表';
     if (isSpectatorMode) {
-      var specCount = getFilteredFriends().length;
-      if (specCount > 0) {
-        titleText += ' (' + specCount + '人)';
+      var friendN = getFilteredFriends().length;
+      var total =
+        typeof app.spectatorCount === 'number' ? app.spectatorCount : friendN;
+      if (app.spectatorListLoading && app._spectatorListRoomFriends == null) {
+        titleText += ' (加载中…)';
+      } else if (friendN > 0 || total > 0) {
+        if (total > friendN) {
+          titleText += ' (好友' + friendN + '·共' + total + '人)';
+        } else {
+          titleText += ' (' + friendN + '人)';
+        }
       }
     }
     app.ctx.fillStyle = colTitle;
@@ -3749,14 +3912,20 @@ module.exports = function registerFriendListHome(app, deps) {
     );
     app.ctx.clip();
 
-    if (app.friendListLoading && (!app.friendListRaw || !app.friendListRaw.length)) {
+    if (
+      (app.friendListLoading &&
+        (!app.friendListRaw || !app.friendListRaw.length)) ||
+      (isSpectatorMode &&
+        app.spectatorListLoading &&
+        app._spectatorListRoomFriends == null)
+    ) {
       app.ctx.fillStyle = FL && FL.loading ? FL.loading : '#999999';
       app.ctx.font =
         app.rpx(24) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
       app.ctx.textAlign = 'left';
       app.ctx.textBaseline = 'middle';
       app.ctx.fillText(
-        '加载中…',
+        isSpectatorMode ? '加载旁观列表…' : '加载中…',
         app.snapPx(panelX + app.rpx(16)),
         app.snapPx(L.listTop + L.listH * 0.4)
       );
@@ -3768,7 +3937,7 @@ module.exports = function registerFriendListHome(app, deps) {
       app.ctx.textAlign = 'left';
       app.ctx.textBaseline = 'middle';
       app.ctx.fillText(
-        '暂无好友',
+        isSpectatorMode ? '暂无好友旁观本局' : '暂无好友',
         app.snapPx(panelX + app.rpx(16)),
         app.snapPx(L.listTop + L.listH * 0.5)
       );
@@ -3864,6 +4033,7 @@ module.exports = function registerFriendListHome(app, deps) {
         var hasDmUnread = friendDmPeerHasUnread(fr.peerUserId);
         var frOnline = friendRowIsOnline(fr);
         var frInGame = friendRowInGame(fr);
+        var frSpectatorInRoom = !!fr._spectatorInRoom;
         var dimAvatar = !frOnline && !frInGame;
         var img =
           fr.peerUserId && app._friendAvImgs['k' + fr.peerUserId];
@@ -3954,12 +4124,14 @@ module.exports = function registerFriendListHome(app, deps) {
           'px "PingFang SC","Hiragino Sans GB",sans-serif';
         var nameStr = String(fr.displayName || fr.nickname || '');
         var nameX = acx + avR + app.rpx(12);
-        var nameY = frInGame
+        var showStatusLine = frInGame || frSpectatorInRoom;
+        var nameY = showStatusLine
           ? yRow + L.rowH * 0.36
           : yRow + L.rowH * 0.5;
-        var watchReserve = frInGame
-          ? app.rpx(FRIEND_LIST_WATCH_BTN_RPX) + app.rpx(8)
-          : 0;
+        var watchReserve =
+          frInGame && !frSpectatorInRoom
+            ? app.rpx(FRIEND_LIST_WATCH_BTN_RPX) + app.rpx(8)
+            : 0;
         var nameMaxPx = Math.max(
           app.rpx(48),
           L.w - app.rpx(16) - (nameX - panelX) - app.rpx(6) - watchReserve
@@ -3982,7 +4154,26 @@ module.exports = function registerFriendListHome(app, deps) {
           app.snapPx(nameX),
           app.snapPx(nameY)
         );
-        if (frInGame) {
+        if (frSpectatorInRoom) {
+          var specC =
+            FL && FL.friendInGame
+              ? FL.friendInGame
+              : FL && FL.online
+                ? FL.online
+                : '#2e7d32';
+          app.ctx.fillStyle = specC;
+          app.ctx.font =
+            '500 ' +
+            app.rpx(21) +
+            'px "PingFang SC","Hiragino Sans GB",sans-serif';
+          app.ctx.textAlign = 'left';
+          app.ctx.textBaseline = 'middle';
+          app.ctx.fillText(
+            '旁观中',
+            app.snapPx(nameX),
+            app.snapPx(yRow + L.rowH * 0.7)
+          );
+        } else if (frInGame) {
           var inGameC =
             FL && FL.friendInGame
               ? FL.friendInGame
@@ -4007,68 +4198,7 @@ module.exports = function registerFriendListHome(app, deps) {
             yRow,
             offRow
           );
-<<<<<<< HEAD
-          var wbx = wRect.x;
-          var wby = wRect.y;
-          var wbw = wRect.w;
-          var wbh = wRect.h;
-          var wbr = Math.min(wbh * 0.5, wbw * 0.5, app.rpx(10));
-          var fillStyle = '#f2f8f5';
-          try {
-            if (app.ctx.createLinearGradient) {
-              var gg = app.ctx.createLinearGradient(
-                wbx,
-                wby,
-                wbx,
-                wby + wbh
-              );
-              gg.addColorStop(0, '#ffffff');
-              gg.addColorStop(0.55, '#f4faf7');
-              gg.addColorStop(1, '#e2efe8');
-              fillStyle = gg;
-            }
-          } catch (eWatchGrad) {
-            fillStyle = '#f2f8f5';
-          }
-          /** 用 app.roundRect（arcTo），勿用 ctx.roundRect：小游戏引擎与标准 Canvas 的 radii 参数不兼容。 */
-          if (typeof app.roundRect === 'function') {
-            app.ctx.fillStyle = 'rgba(12, 74, 48, 0.06)';
-            app.roundRect(wbx + 0.5, wby + app.rpx(1.2), wbw, wbh, wbr);
-            app.ctx.fill();
-            app.ctx.fillStyle = fillStyle;
-            app.roundRect(wbx, wby, wbw, wbh, wbr);
-            app.ctx.fill();
-            app.roundRect(wbx, wby, wbw, wbh, wbr);
-            app.ctx.strokeStyle = 'rgba(22, 101, 52, 0.2)';
-            app.ctx.lineWidth = Math.max(1, app.rpx(1));
-            app.ctx.stroke();
-          } else {
-            app.ctx.fillStyle = fillStyle;
-            app.ctx.beginPath();
-            app.ctx.rect(wbx, wby, wbw, wbh);
-            app.ctx.fill();
-            app.ctx.beginPath();
-            app.ctx.rect(wbx, wby, wbw, wbh);
-            app.ctx.strokeStyle = 'rgba(22, 101, 52, 0.22)';
-            app.ctx.lineWidth = Math.max(1, app.rpx(1));
-            app.ctx.stroke();
-          }
-          app.ctx.fillStyle = '#1b6b3d';
-          app.ctx.font =
-            '600 ' +
-            app.rpx(20) +
-            'px "PingFang SC","Hiragino Sans GB",sans-serif';
-          app.ctx.textAlign = 'center';
-          app.ctx.textBaseline = 'middle';
-          app.ctx.fillText(
-            '观战',
-            wRect.x + wRect.w * 0.5,
-            wRect.y + wbh * 0.5
-          );
-          app.ctx.textAlign = 'left';
-=======
           drawFriendListWatchPill(wRect, FL);
->>>>>>> b1d7540 (feat(game): spectator list during match via friend list filter)
         }
         app.ctx.restore();
         app.ctx.restore();

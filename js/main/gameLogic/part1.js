@@ -2471,6 +2471,15 @@ app.friendListHomeUiFromTheme = function(th) {
         : id === 'ink'
           ? 'rgba(28, 22, 16, 0.07)'
           : 'rgba(20, 70, 32, 0.06)',
+    /** 棋盘右上角旁观 X 人徽章（小巧独立，与 clock pill 风格一致） */
+    spectatorBadgeBg:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.96)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 250, 0.96)'
+          : 'rgba(255, 253, 250, 0.96)',
+    spectatorBadgeText: winTitle,
+    spectatorListTitle: '旁观列表',
     /** 私聊顶栏：与侧栏渐变中段一致 */
     chatHeaderBg: panelArr[1],
     /** 私聊消息列表区（暖色 parchment，非微信灰） */
@@ -2524,6 +2533,9 @@ app.sys = {};
 app.W = 375;
 app.H = 667;
 app.DPR = 2;
+
+/** 初始化旁观人数（防止首次绘制前未定义导致黑屏） */
+app.spectatorCount = 0;
 
 /**
  * 按当前窗口与 pixelRatio 设置画布物理像素与 app.ctx 变换。
@@ -4456,6 +4468,9 @@ app.applyOnlineState = function(data) {
   var prevStoneCount = app.countStonesOnBoard(prevBoard);
   var prevCurrentStone = app.current;
   var nextBoard = app.copyBoardFromServer(data.board);
+
+  /** 实时旁观人数（后端 GameRoom.spectatorSessions.size），用于右上角徽章实时更新 */
+  app.spectatorCount = typeof data.spectatorCount === 'number' ? data.spectatorCount : (app.spectatorCount || 0);
   var incW =
     data.whiteConnected === true ||
     data.whiteConnected === 1 ||
@@ -4941,6 +4956,9 @@ app.applyOnlineState = function(data) {
   app.tryFetchOnlineOpponentProfile();
   if (typeof app.scheduleOnlinePuzzleClientBotIfNeeded === 'function') {
     app.scheduleOnlinePuzzleClientBotIfNeeded();
+  }
+  if (typeof app.scheduleSpectatorListRefreshAfterState === 'function') {
+    app.scheduleSpectatorListRefreshAfterState();
   }
   app.draw();
 }

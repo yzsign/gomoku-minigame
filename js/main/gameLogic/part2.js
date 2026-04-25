@@ -953,6 +953,13 @@ app.computeLayout = function() {
   var boardPx = span * cell;
   /* 底栏垂直中心：条底对齐 H - safeBottom（刘海/ home 条之上） */
   var bottomY = app.H - safeBottom - barH * 0.5;
+
+  /* 棋盘右上角独立旁观徽章（小胶囊按钮，点击打开列表） - 位置紧贴棋盘右上，避免与 clock 重叠 */
+  var sbW = toPx(76);
+  var sbH = toPx(26);
+  var sbX = originX + boardPx - sbW - toPx(6);
+  var sbY = originY - sbH - toPx(10);
+
   return {
     margin: sideMargin,
     cell: cell,
@@ -962,7 +969,11 @@ app.computeLayout = function() {
     size: app.SIZE,
     topBar: topBar,
     insetTop: insetTop,
-    bottomY: bottomY
+    bottomY: bottomY,
+    spectatorBadgeX: sbX,
+    spectatorBadgeY: sbY,
+    spectatorBadgeW: sbW,
+    spectatorBadgeH: sbH
   };
 }
 
