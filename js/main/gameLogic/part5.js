@@ -3806,6 +3806,9 @@ app.applyAiMoveResult = function(mv) {
   var ai = app.pveAiColor();
   app.board[mv.r][mv.c] = ai;
   app.pveMoveHistory.push({ r: mv.r, c: mv.c, color: ai });
+  if (typeof app.touchMatchWallClockIfNeeded === 'function') {
+    app.touchMatchWallClockIfNeeded();
+  }
   app.lastOpponentMove = { r: mv.r, c: mv.c };
   if (gomoku.checkWin(app.board, mv.r, mv.c, ai)) {
     app.finishGameWithWin(mv.r, mv.c, ai);
@@ -4154,6 +4157,9 @@ app.tryPlace = function(r, c) {
     app.board[r][c] = dPlaced;
     app.playPlaceStoneSound();
     app.dailyPuzzleMoves.push({ r: r, c: c, color: dPlaced });
+    if (typeof app.touchMatchWallClockIfNeeded === 'function') {
+      app.touchMatchWallClockIfNeeded();
+    }
     if (gomoku.checkWin(app.board, r, c, dPlaced)) {
       app.submitDailyPuzzleMovesAndHandle(r, c, dPlaced, true);
       return;
@@ -4179,6 +4185,9 @@ app.tryPlace = function(r, c) {
   } else if (!app.isPvpOnline) {
     app.pveMoveHistory.push({ r: r, c: c, color: placedColor });
     app.lastOpponentMove = null;
+  }
+  if (typeof app.touchMatchWallClockIfNeeded === 'function') {
+    app.touchMatchWallClockIfNeeded();
   }
   if (gomoku.checkWin(app.board, r, c, app.current)) {
     app.finishGameWithWin(r, c, app.current);

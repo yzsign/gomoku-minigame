@@ -3121,6 +3121,11 @@ app.shouldSkipOnlineLeaveConfirm = function() {
 
 /** 联机：从盘面差分同步的终局手顺（悔棋会缩短），用于结算 moves 与回放 */
 app.onlineMoveHistory = [];
+/** 结算页对局时长：首步落子记起点，openResult 记终点；新局由 clearMatchWallClock 清空 */
+app.matchWallClockStartMs = null;
+app.matchWallClockEndMs = null;
+/** 本局会话锚点（新局开始时打点）；首步时钟未记时，对局时长用「入局～终局」兜底 */
+app.matchSessionStartedAtMs = null;
 /** POST /api/games/settle 返回的 gameId，棋谱可事后拉取 */
 app.lastSettledGameId = null;
 /**
@@ -3963,6 +3968,68 @@ app.countStonesOnBoard = function(b) {
   return n;
 }
 
+app.clearMatchWallClock = function() {
+  app.matchWallClockStartMs = null;
+  app.matchWallClockEndMs = null;
+};
+
+app.markMatchSessionAnchor = function() {
+  app.matchSessionStartedAtMs = Date.now();
+};
+
+app.touchMatchWallClockIfNeeded = function() {
+  if (app.matchWallClockStartMs == null) {
+    app.matchWallClockStartMs = Date.now();
+  }
+};
+
+app.formatResultOverlayDuration = function() {
+  var start = app.matchWallClockStartMs;
+  if (start == null || typeof start !== 'number') {
+    start = app.matchSessionStartedAtMs;
+  }
+  var end = app.matchWallClockEndMs;
+  if (start == null || typeof start !== 'number') {
+    return '\u2014';
+  }
+  if (end == null || typeof end !== 'number') {
+    end = Date.now();
+  }
+  var sec = Math.max(0, Math.floor((end - start) / 1000));
+  var m = Math.floor(sec / 60);
+  var s = sec % 60;
+  return m + ':' + (s < 10 ? '0' : '') + s;
+};
+
+app.getResultOverlayMoveCount = function() {
+  var n = 0;
+  if (app.isPvpOnline) {
+    n =
+      app.onlineMoveHistory && app.onlineMoveHistory.length
+        ? app.onlineMoveHistory.length
+        : 0;
+  } else if (app.isPvpLocal) {
+    n =
+      app.localMoveHistory && app.localMoveHistory.length
+        ? app.localMoveHistory.length
+        : 0;
+  } else if (app.isDailyPuzzle) {
+    n =
+      app.dailyPuzzleMoves && app.dailyPuzzleMoves.length
+        ? app.dailyPuzzleMoves.length
+        : 0;
+  } else {
+    n =
+      app.pveMoveHistory && app.pveMoveHistory.length
+        ? app.pveMoveHistory.length
+        : 0;
+  }
+  if (n > 0) {
+    return n;
+  }
+  return app.countStonesOnBoard(app.board);
+};
+
 /**
  * 终局后：人机已登录则 POST /api/me/pve-game 入库；同桌和棋仍写本机 local_pvp。
  * 联机战绩由服务端结算写入 /api/me/game-history。
@@ -4052,6 +4119,12 @@ app.syncOnlineMoveHistory = function(prevBoard, nextBoard) {
   var nc = app.countStonesOnBoard(nextBoard);
   if (nc === 0) {
     app.onlineMoveHistory = [];
+    if (typeof app.clearMatchWallClock === 'function') {
+      app.clearMatchWallClock();
+    }
+    if (typeof app.markMatchSessionAnchor === 'function') {
+      app.markMatchSessionAnchor();
+    }
     return;
   }
   var pc = app.countStonesOnBoard(prevBoard);
@@ -4068,6 +4141,9 @@ app.syncOnlineMoveHistory = function(prevBoard, nextBoard) {
           });
         }
       }
+    }
+    if (typeof app.touchMatchWallClockIfNeeded === 'function') {
+      app.touchMatchWallClockIfNeeded();
     }
   } else if (nc < pc) {
     while (app.onlineMoveHistory.length > nc) {

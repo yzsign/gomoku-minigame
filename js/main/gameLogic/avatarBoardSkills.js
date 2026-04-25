@@ -222,7 +222,14 @@ module.exports = function avatarBoardSkills(app, deps) {
   }
 
   /** 新局时调用；短剑仅受服务端库存约束，无单局次数上限 */
-  app.clearPerGameConsumableSkillState = function() {};
+  app.clearPerGameConsumableSkillState = function() {
+    if (typeof app.clearMatchWallClock === 'function') {
+      app.clearMatchWallClock();
+    }
+    if (typeof app.markMatchSessionAnchor === 'function') {
+      app.markMatchSessionAnchor();
+    }
+  };
 
   /** @type {Object.<string, AvatarBoardSkillDef>} */
   var BY_PANEL_KEY = {

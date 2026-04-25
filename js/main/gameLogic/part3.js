@@ -2625,6 +2625,7 @@ app.openResult = function() {
   if (!app.gameOver) {
     return;
   }
+  app.matchWallClockEndMs = Date.now();
   app.clearWinRevealTimer();
   app.winningLineCells = null;
   if (app.isPvpOnline) {
@@ -2702,6 +2703,7 @@ app.openResult = function() {
   }
   app.onlineResultOverlaySticky = false;
   app.showResultOverlay = true;
+  app._resultWinFireworksStartMs = null;
   if (
     app.isDailyPuzzle &&
     app.dailyPuzzleSubmitActivityPointsDelta != null &&
@@ -2847,26 +2849,241 @@ function drawResultGuardianRoundedAvatar(app, th, img, cx, cy, size, cornerR) {
   ctx.restore();
 }
 
-function drawResultConfetti(app, top, hBand) {
+function drawResultCircleAvatar(app, th, img, cx, cy, size, isWinner) {
   var ctx = app.ctx;
-  var W = app.W;
-  var seed = 17;
-  var k;
-  var colors = ['#fbbf24', '#60a5fa', '#fb7185', '#34d399', '#a78bfa'];
-  for (k = 0; k < 28; k++) {
-    seed = (seed * 9301 + 49297) % 233280;
-    var rx = (seed % 1000) / 1000;
-    seed = (seed * 9301 + 49297) % 233280;
-    var ry = (seed % 1000) / 1000;
-    var x = rx * W;
-    var y = top + ry * hBand;
-    var r = 2 + (k % 4);
-    ctx.fillStyle = colors[k % colors.length];
+  var r = size * 0.5;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.clip();
+  if (img && img.width && img.height) {
+    var sw = Math.min(img.width, img.height);
+    var sx = (img.width - sw) / 2;
+    var sy = (img.height - sw) / 2;
+    ctx.drawImage(img, sx, sy, sw, sw, cx - r, cy - r, size, size);
+  } else {
+    ctx.fillStyle = 'rgba(230, 230, 235, 0.95)';
+    ctx.fillRect(cx - r, cy - r, size, size);
+    ctx.fillStyle = th && th.title ? th.title : '#333';
+    ctx.font = 'bold 14px "PingFang SC",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('?', app.snapPx(cx), app.snapPx(cy));
+  }
+  ctx.restore();
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  if (isWinner) {
+    ctx.strokeStyle = '#FFC107';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = 'rgba(255, 193, 7, 0.45)';
+    ctx.shadowBlur = 12;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  } else {
+    ctx.strokeStyle = 'rgba(230, 230, 230, 0.98)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  }
+  ctx.restore();
+  if (isWinner) {
+    var br = Math.max(9, r * 0.26);
+    var bx = cx + r * 0.62;
+    var by = cy - r * 0.62;
+    ctx.save();
     ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.arc(bx, by, br, 0, Math.PI * 2);
+    ctx.fillStyle = '#4CAF50';
     ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u2713', app.snapPx(bx), app.snapPx(by + 0.5));
+    ctx.restore();
   }
 }
+
+function drawResultGuardianCircleAvatar(app, th, img, cx, cy, size, isWinner) {
+  var ctx = app.ctx;
+  var r = size * 0.5;
+  if (!img || !img.width || !img.height) {
+    drawResultCircleAvatar(app, th, img, cx, cy, size, isWinner);
+    return;
+  }
+  var iw = img.width;
+  var ih = img.height;
+  var inner = size * 0.9;
+  var scale = Math.min(inner / iw, inner / ih);
+  if (!isFinite(scale) || scale <= 0) {
+    drawResultCircleAvatar(app, th, img, cx, cy, size, isWinner);
+    return;
+  }
+  var dw = iw * scale;
+  var dh = ih * scale;
+  var dx = cx - dw * 0.5;
+  var dy = cy - dh * 0.5;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.drawImage(img, 0, 0, iw, ih, dx, dy, dw, dh);
+  ctx.restore();
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  if (isWinner) {
+    ctx.strokeStyle = '#FFC107';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = 'rgba(255, 193, 7, 0.45)';
+    ctx.shadowBlur = 12;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  } else {
+    ctx.strokeStyle = 'rgba(230, 230, 230, 0.98)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  }
+  ctx.restore();
+  if (isWinner) {
+    var br = Math.max(9, r * 0.26);
+    var bx = cx + r * 0.62;
+    var by = cy - r * 0.62;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(bx, by, br, 0, Math.PI * 2);
+    ctx.fillStyle = '#4CAF50';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u2713', app.snapPx(bx), app.snapPx(by + 0.5));
+    ctx.restore();
+  }
+}
+
+/**
+ * 胜利结算全屏烟花：背景之上、奖杯之下；时间轴由 _resultWinFireworksStartMs 锚定，离开胜利态时清零。
+ */
+function drawResultWinFireworks(app, ctx) {
+  var W = app.W;
+  var H = app.H;
+  if (app._resultWinFireworksStartMs == null) {
+    app._resultWinFireworksStartMs = Date.now();
+  }
+  var elapsed = Date.now() - app._resultWinFireworksStartMs;
+  var BURST_INTERVAL = 720;
+  var BURST_LIFE = 1300;
+  var colors = [
+    '#FF6B8B',
+    '#FF8E53',
+    '#FFC107',
+    '#F472B6',
+    '#3B82F6',
+    '#34D399',
+    '#FB7185',
+    '#A78BFA'
+  ];
+  function frand(s) {
+    var x = ((s | 0) * 9301 + 49297) % 233280;
+    if (x < 0) {
+      x += 233280;
+    }
+    return x / 233280;
+  }
+  var firstB = Math.max(0, Math.floor((elapsed - BURST_LIFE) / BURST_INTERVAL));
+  var lastB = Math.floor(elapsed / BURST_INTERVAL);
+  var b;
+  for (b = firstB; b <= lastB; b++) {
+    var spawnT = b * BURST_INTERVAL;
+    var age = elapsed - spawnT;
+    if (age < 0 || age >= BURST_LIFE) {
+      continue;
+    }
+    var seed = b * 7919 + 104729;
+    var bx = (frand(seed) * 0.62 + 0.19) * W;
+    var by = (frand(seed + 17) * 0.32 + 0.05) * H;
+    var t = age / BURST_LIFE;
+    var ease = 1 - Math.pow(1 - t, 1.75);
+    var maxR = Math.min(W, H) * (0.1 + 0.08 * frand(seed + 31));
+    var np = 34;
+    if (t < 0.09) {
+      var fl = 1 - t / 0.09;
+      ctx.save();
+      ctx.globalAlpha = fl * 0.88;
+      var r0 = maxR * 0.5 * fl;
+      var rg = ctx.createRadialGradient(bx, by, 0, bx, by, r0);
+      rg.addColorStop(0, 'rgba(255,248,220,' + (0.92 * fl) + ')');
+      rg.addColorStop(0.4, 'rgba(255,214,140,' + (0.5 * fl) + ')');
+      rg.addColorStop(1, 'rgba(255,180,80,0)');
+      ctx.fillStyle = rg;
+      ctx.beginPath();
+      ctx.arc(app.snapPx(bx), app.snapPx(by), r0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    var k;
+    for (k = 0; k < np; k++) {
+      var ang = Math.PI * 2 * frand(seed + k * 41 + 3);
+      var spdVar = 0.82 + 0.36 * frand(seed + k * 19 + 5);
+      var dist = ease * maxR * spdVar;
+      var grav = t * t * maxR * 0.42;
+      var px = bx + Math.cos(ang) * dist;
+      var py = by + Math.sin(ang) * dist + grav;
+      var alpha = Math.max(0, (1 - t) * (1 - t)) * 0.9;
+      var psz = (1 - t * 0.68) * 2.8 + 0.55;
+      var ci = Math.floor(frand(seed + k * 23 + 7) * colors.length) % colors.length;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = colors[ci];
+      ctx.beginPath();
+      ctx.arc(app.snapPx(px), app.snapPx(py), psz * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+/**
+ * 胜利结算顶栏奖杯弹跳需连续重绘；与团团积分动画共用 draw 时避免双 RAF 叠帧。
+ */
+app.stopResultWinHeaderAnim = function() {
+  if (app._resultWinHeaderRaf != null) {
+    app.themeBubbleCaf(app._resultWinHeaderRaf);
+    app._resultWinHeaderRaf = null;
+  }
+};
+
+app.ensureResultWinHeaderAnimLoop = function() {
+  if (app._resultWinHeaderRaf != null) {
+    return;
+  }
+  if (app.resultTuanPointsRafId != null) {
+    return;
+  }
+  function loop() {
+    if (!app.showResultOverlay || (!app.gameOver && !app.onlineResultOverlaySticky)) {
+      app._resultWinHeaderRaf = null;
+      return;
+    }
+    if (resultOverlayTitlePack(app).mood !== 'win') {
+      app._resultWinHeaderRaf = null;
+      return;
+    }
+    app.draw();
+    app._resultWinHeaderRaf = app.themeBubbleRaf(loop);
+  }
+  app._resultWinHeaderRaf = app.themeBubbleRaf(loop);
+};
 
 /** 联机结算页：仅自己一侧飘字，时长与 themeBubble 共用 RAF */
 var RESULT_TUAN_POINTS_ANIM_MS = 1400;
@@ -2877,6 +3094,9 @@ app.stopResultTuanPointsAnim = function() {
     app.resultTuanPointsRafId = null;
   }
   app.resultTuanPointsAnim = null;
+  if (typeof app.ensureResultWinHeaderAnimLoop === 'function') {
+    app.ensureResultWinHeaderAnimLoop();
+  }
 };
 
 /**
@@ -3216,6 +3436,122 @@ function resultOverlayTitlePack(app) {
   return { main: main, sub: sub, titleColor: titleColor, mood: mood, rs: rs };
 }
 
+function resultOverlayLeftSideWon(app) {
+  if (app.winner == null || app.winner === undefined) {
+    return false;
+  }
+  var w = Number(app.winner);
+  if (isNaN(w)) {
+    return false;
+  }
+  var mc = app.getMyAssignedStoneColor();
+  if (mc !== null && mc !== undefined) {
+    return w === mc;
+  }
+  if (app.onlineSpectatorMode && app.onlineFriendWatchPeerUserId != null) {
+    var peer = Number(app.onlineFriendWatchPeerUserId);
+    if (
+      app.onlineStateBlackUserId != null &&
+      peer === Number(app.onlineStateBlackUserId)
+    ) {
+      return w === gomoku.BLACK;
+    }
+    if (
+      app.onlineStateWhiteUserId != null &&
+      peer === Number(app.onlineStateWhiteUserId)
+    ) {
+      return w === gomoku.WHITE;
+    }
+  }
+  return false;
+}
+
+function getResultOverlayRankLabel(app) {
+  var elo = null;
+  var sr = app.lastSettleRating;
+  /**
+   * 与 eloLine 一致：优先 callerEloAfter；否则用黑白分列 + 己方执子色（仅实棋手，观战仍用下方缓存）。
+   * 仅 caller 缺失时若回退到 ratingCardData，会与已返回的 black/white 终局分不一致，段位会显示错。
+   */
+  var settleForMe =
+    app.isPvpOnline &&
+    !app.onlineSpectatorMode &&
+    sr &&
+    typeof sr.blackEloAfter === 'number' &&
+    isFinite(sr.blackEloAfter) &&
+    typeof sr.whiteEloAfter === 'number' &&
+    isFinite(sr.whiteEloAfter);
+  if (
+    app.isPvpOnline &&
+    !app.onlineSpectatorMode &&
+    sr &&
+    typeof sr.callerEloAfter === 'number' &&
+    isFinite(sr.callerEloAfter)
+  ) {
+    elo = sr.callerEloAfter;
+  } else if (settleForMe) {
+    var myC = Number(app.pvpOnlineYourColor);
+    if (!isNaN(myC)) {
+      elo =
+        myC === gomoku.BLACK
+          ? sr.blackEloAfter
+          : sr.whiteEloAfter;
+    }
+  }
+  if (
+    elo == null &&
+    app.ratingCardData &&
+    typeof app.ratingCardData.elo === 'number' &&
+    isFinite(app.ratingCardData.elo)
+  ) {
+    elo = app.ratingCardData.elo;
+  }
+  if (
+    elo == null &&
+    typeof app.homeRatingEloCache === 'number' &&
+    isFinite(app.homeRatingEloCache)
+  ) {
+    elo = app.homeRatingEloCache;
+  }
+  if (elo == null || !isFinite(elo)) {
+    return '\u2014';
+  }
+  var rt = ratingTitle.getRankAndTitleByElo(elo);
+  return rt && rt.rankLabel ? rt.rankLabel : '\u2014';
+}
+
+function resultOverlaySideRoles(app) {
+  var mc = app.getMyAssignedStoneColor();
+  if (mc !== null && mc !== undefined) {
+    return {
+      left: mc === gomoku.BLACK ? '执黑' : '执白',
+      right: mc === gomoku.BLACK ? '执白' : '执黑'
+    };
+  }
+  if (app.onlineSpectatorMode && app.onlineFriendWatchPeerUserId != null) {
+    var peer = Number(app.onlineFriendWatchPeerUserId);
+    if (
+      app.onlineStateBlackUserId != null &&
+      peer === Number(app.onlineStateBlackUserId)
+    ) {
+      return {
+        left: '执黑',
+        right: '执白'
+      };
+    }
+    if (
+      app.onlineStateWhiteUserId != null &&
+      peer === Number(app.onlineStateWhiteUserId)
+    ) {
+      return {
+        left: '执白',
+        right: '执黑'
+      };
+    }
+  }
+  return { left: '', right: '' };
+}
+
 /** 棋盘页结算全屏层：几何与 drawResultOverlay / hitResultButton 一致 */
 app.getResultOverlayLayout = function() {
   var W = app.W;
@@ -3223,59 +3559,101 @@ app.getResultOverlayLayout = function() {
   var sb = app.sys && app.sys.statusBarHeight ? app.sys.statusBarHeight : 0;
   var pack = resultOverlayTitlePack(app);
   var hasReplayDock = app.canShowOnlineReplayButton();
-  var primaryW = Math.min(W - 44, 336);
-  var primaryH = 50;
-  var avatarS = 56;
+  var primaryW = Math.min(W - 48, 336);
+  var primaryH = 52;
+  var avatarS = 70;
   var dockH = 56;
-  var statsH = 44;
-  var gapPrimaryStats = 22;
-  var clusterPadV = 14;
+  var nameBlockH = 44;
+  var statsStripH = 62;
+  var eloBandH = 30;
+  var gapCardToPrimary = 30;
+  var gapPrimaryStats = 26;
+  var clusterPadV = 22;
+  /** 与参考 .result-title { margin-bottom: 40px }：主标题区底到卡片顶 */
+  var gapTitleToCard = 40;
 
   var safeInsetBottom = 0;
   if (app.sys && app.sys.safeArea && typeof app.sys.safeArea.bottom === 'number') {
     safeInsetBottom = Math.max(0, H - app.sys.safeArea.bottom);
   }
-  var dockBottomPad = 10 + Math.min(safeInsetBottom, 28);
+  var dockBottomPad = 12 + Math.min(safeInsetBottom, 28);
   var dockCy = H - dockBottomPad - dockH * 0.5;
-  var dockZoneTop = dockCy - dockH * 0.62 - 10;
+  var dockZoneTop = dockCy - dockH * 0.62 - 18;
 
-  var trophyCy = sb + 28;
+  /** 参考 .trophy（48px）margin-bottom 16px + .result-title（32px）垂直节奏；头图整体再下移 */
+  var resultHeaderOffsetY = 60;
+  var trophyCy = sb + 36 + resultHeaderOffsetY;
   var titleMainY;
   if (pack.mood === 'win') {
-    titleMainY = sb + 96;
+    titleMainY = trophyCy + 56;
   } else {
-    titleMainY = sb + 56;
+    titleMainY = sb + 70 + resultHeaderOffsetY;
   }
-  var headerEndY = titleMainY + (pack.sub ? 40 : 14);
+  var headerEndY = titleMainY + (pack.sub ? 50 : 18);
 
-  var clusterH = avatarS + statsH + gapPrimaryStats + primaryH;
-  var midZoneTop = headerEndY + 18;
+  var clusterH =
+    avatarS +
+    nameBlockH +
+    statsStripH +
+    eloBandH +
+    gapCardToPrimary +
+    gapPrimaryStats +
+    primaryH;
+  var midZoneTop = headerEndY + gapTitleToCard;
   var midZoneBottom = dockZoneTop;
   var midH = midZoneBottom - midZoneTop;
   if (midH < clusterH + 24) {
-    midZoneTop = Math.max(headerEndY + 8, midZoneBottom - clusterH - 24);
+    midZoneTop = Math.max(headerEndY + 10, midZoneBottom - clusterH - 24);
   }
   var clusterCenterY = midZoneTop + (midZoneBottom - midZoneTop) * 0.5;
   var clusterTop = clusterCenterY - clusterH * 0.5;
-  if (clusterTop < headerEndY + 8) {
-    clusterTop = headerEndY + 8;
+  if (clusterTop < headerEndY + 10) {
+    clusterTop = headerEndY + 10;
   }
-  if (clusterTop + clusterH > dockZoneTop - 6) {
-    clusterTop = Math.max(headerEndY + 8, dockZoneTop - clusterH - 6);
+  if (clusterTop + clusterH > dockZoneTop - 8) {
+    clusterTop = Math.max(headerEndY + 10, dockZoneTop - clusterH - 8);
+  }
+
+  /** 结算白卡片 + 主按钮（再来一局）整体上移 */
+  var resultCardClusterLiftPx = 50;
+  clusterTop -= resultCardClusterLiftPx;
+  if (clusterTop < headerEndY + 10) {
+    clusterTop = headerEndY + 10;
+  }
+  if (clusterTop + clusterH > dockZoneTop - 8) {
+    clusterTop = Math.max(headerEndY + 10, dockZoneTop - clusterH - 8);
   }
 
   var vsCy = clusterTop + avatarS * 0.5;
+  var namesY = vsCy + avatarS * 0.5 + 14;
+  var statsTop = namesY + nameBlockH - 4;
   var primaryCy =
-    clusterTop + avatarS + statsH + gapPrimaryStats + primaryH * 0.5;
+    clusterTop +
+    avatarS +
+    nameBlockH +
+    statsStripH +
+    eloBandH +
+    gapCardToPrimary +
+    gapPrimaryStats +
+    primaryH * 0.5;
 
   var midX = W * 0.5;
-  var pairHalf = Math.min(108, Math.max(76, W * 0.27));
+  var pairHalf = Math.min(118, Math.max(82, W * 0.29));
 
-  var cardW = Math.min(W - 32, 348);
-  var cardH = clusterH + clusterPadV * 2;
+  var cardW = Math.min(W - 36, 348);
+  var cardH =
+    clusterPadV * 2 +
+    avatarS +
+    nameBlockH +
+    statsStripH +
+    eloBandH;
   var cardX = (W - cardW) * 0.5;
   var cardY = clusterTop - clusterPadV;
-  var cardR = Math.min(20, cardH * 0.12);
+  var cardR = 20;
+  var statsX = cardX + 22;
+  var statsW = cardW - 44;
+  var statsH = statsStripH;
+  var statsY = statsTop;
 
   /** 联机回应方：与悔棋/和棋一致用 wx.showModal，不在画布上画同意/拒绝 */
   var showRematchRespond = false;
@@ -3302,6 +3680,11 @@ app.getResultOverlayLayout = function() {
     vsTextY: vsCy,
     avatarS: avatarS,
     avatarR: 12,
+    namesY: namesY,
+    statsX: statsX,
+    statsY: statsY,
+    statsW: statsW,
+    statsH: statsH,
     primaryCx: midX,
     primaryCy: primaryCy,
     primaryW: primaryW,
@@ -3340,14 +3723,14 @@ app.hitResultOverlayAvatar = function(clientX, clientY) {
   }
   var ly = app.getResultOverlayLayout();
   var pad = 10;
-  var half = ly.avatarS * 0.5 + pad;
-  function inSquare(cx, cy) {
-    return (
-      Math.abs(clientX - cx) <= half && Math.abs(clientY - cy) <= half
-    );
+  var rad = ly.avatarS * 0.5 + pad;
+  function inCircle(cx, cy) {
+    var dx = clientX - cx;
+    var dy = clientY - cy;
+    return dx * dx + dy * dy <= rad * rad;
   }
-  var hitLeft = inSquare(ly.vsLeftCx, ly.vsCy);
-  var hitRight = inSquare(ly.vsRightCx, ly.vsCy);
+  var hitLeft = inCircle(ly.vsLeftCx, ly.vsCy);
+  var hitRight = inCircle(ly.vsRightCx, ly.vsCy);
   if (!hitLeft && !hitRight) {
     return null;
   }
@@ -3367,25 +3750,37 @@ app.drawResultOverlay = function() {
   var pack = resultOverlayTitlePack(app);
   var rs = pack.rs;
   var ctx = app.ctx;
-  var bgG = ctx.createLinearGradient(0, 0, 0, app.H);
-  if (th.bg && th.bg.length >= 3) {
-    bgG.addColorStop(0, th.bg[0]);
-    bgG.addColorStop(0.52, th.bg[1]);
-    bgG.addColorStop(1, th.bg[2]);
-  } else {
-    bgG.addColorStop(0, rs.defaultEnd);
-    bgG.addColorStop(1, rs.defaultEnd);
+  if (pack.mood !== 'win') {
+    app.stopResultWinHeaderAnim();
+    app._resultWinFireworksStartMs = null;
   }
+  var bgG = ctx.createLinearGradient(0, 0, 0, app.H);
+  bgG.addColorStop(0, '#FFF9F2');
+  bgG.addColorStop(0.55, '#FFF3E8');
+  bgG.addColorStop(1, '#FFEED9');
   ctx.fillStyle = bgG;
   ctx.fillRect(0, 0, app.W, app.H);
 
   var ly = app.getResultOverlayLayout();
   if (pack.mood === 'win') {
-    drawResultConfetti(app, ly.sb + 4, 100);
-    ctx.font = '52px sans-serif';
+    drawResultWinFireworks(app, ctx);
+    /** 参考 .trophy：48px、#FFC、trophyBounce 1.5s ease-in-out、峰值 translateY(-10px) */
+    var trophyBounce =
+      Math.sin((Date.now() / 1500) * Math.PI * 2) * -10;
+    ctx.font = '48px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('\uD83C\uDFC6', app.snapPx(app.W * 0.5), app.snapPx(ly.trophyCy));
+    ctx.save();
+    ctx.shadowColor = 'rgba(255, 193, 7, 0.55)';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 2;
+    ctx.fillText(
+      '\uD83C\uDFC6',
+      app.snapPx(app.W * 0.5),
+      app.snapPx(ly.trophyCy + trophyBounce)
+    );
+    ctx.restore();
+    app.ensureResultWinHeaderAnimLoop();
   }
 
   render.drawText(
@@ -3393,8 +3788,8 @@ app.drawResultOverlay = function() {
     pack.main,
     app.W * 0.5,
     ly.titleMainY,
-    30,
-    pack.titleColor,
+    32,
+    pack.mood === 'win' ? '#333333' : pack.titleColor,
     'bold'
   );
   if (pack.sub) {
@@ -3402,7 +3797,7 @@ app.drawResultOverlay = function() {
       ctx,
       pack.sub,
       app.W * 0.5,
-      ly.titleMainY + 34,
+      ly.titleMainY + 40,
       14,
       rs.sub,
       'normal'
@@ -3417,7 +3812,7 @@ app.drawResultOverlay = function() {
       ctx,
       '等待对方接受再来一局…',
       app.W * 0.5,
-      ly.titleMainY + 52,
+      ly.titleMainY + 58,
       13,
       rs.sub,
       'normal'
@@ -3425,11 +3820,11 @@ app.drawResultOverlay = function() {
   }
 
   ctx.save();
-  ctx.shadowColor = 'rgba(55, 48, 40, 0.08)';
-  ctx.shadowBlur = 20;
-  ctx.shadowOffsetY = 4;
-  ctx.fillStyle = rs.secondaryFill;
-  ctx.strokeStyle = rs.secondaryStroke;
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
+  ctx.shadowBlur = 24;
+  ctx.shadowOffsetY = 8;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
   ctx.lineWidth = 1.25;
   app.roundRect(ly.cardX, ly.cardY, ly.cardW, ly.cardH, ly.cardR);
   ctx.fill();
@@ -3457,7 +3852,38 @@ app.drawResultOverlay = function() {
     }
   }
   var gBotImg = defaultAvatars.getGuardianBotAvatarImage();
-  function drawVsResultAvatar(img, vsCx, vsCy) {
+  var leftWon = resultOverlayLeftSideWon(app);
+  var rightWon =
+    app.winner != null &&
+    app.winner !== undefined &&
+    !leftWon &&
+    (function () {
+      var w = Number(app.winner);
+      if (isNaN(w)) {
+        return false;
+      }
+      var mc = app.getMyAssignedStoneColor();
+      if (mc !== null && mc !== undefined) {
+        return w === app.oppositeColor(mc);
+      }
+      if (app.onlineSpectatorMode && app.onlineFriendWatchPeerUserId != null) {
+        var peer = Number(app.onlineFriendWatchPeerUserId);
+        if (
+          app.onlineStateBlackUserId != null &&
+          peer === Number(app.onlineStateBlackUserId)
+        ) {
+          return w === gomoku.WHITE;
+        }
+        if (
+          app.onlineStateWhiteUserId != null &&
+          peer === Number(app.onlineStateWhiteUserId)
+        ) {
+          return w === gomoku.BLACK;
+        }
+      }
+      return false;
+    })();
+  function drawVsResultAvatarCircle(img, vsCx, vsCy, isWinner) {
     if (
       gBotImg &&
       img === gBotImg &&
@@ -3465,35 +3891,104 @@ app.drawResultOverlay = function() {
       img.width &&
       img.height
     ) {
-      drawResultGuardianRoundedAvatar(
+      drawResultGuardianCircleAvatar(
         app,
         th,
         img,
         vsCx,
         vsCy,
         ly.avatarS,
-        ly.avatarR
+        isWinner
       );
     } else {
-      drawResultRoundedSquareAvatar(
+      drawResultCircleAvatar(
         app,
         th,
         img,
         vsCx,
         vsCy,
         ly.avatarS,
-        ly.avatarR
+        isWinner
       );
     }
   }
-  drawVsResultAvatar(imgLeft, ly.vsLeftCx, ly.vsCy);
-  drawVsResultAvatar(imgRight, ly.vsRightCx, ly.vsCy);
+  drawVsResultAvatarCircle(imgLeft, ly.vsLeftCx, ly.vsCy, leftWon);
+  drawVsResultAvatarCircle(imgRight, ly.vsRightCx, ly.vsCy, rightWon);
 
-  ctx.font = 'bold 28px "PingFang SC","Hiragino Sans GB",sans-serif';
-  ctx.fillStyle = th.pageIndicator != null ? th.pageIndicator : '#ea580c';
+  ctx.font = 'bold 22px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = '#999999';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('VS', app.snapPx(app.W * 0.5), app.snapPx(ly.vsTextY));
+
+  var roles = resultOverlaySideRoles(app);
+  var maxNameW = Math.min(120, ly.cardW * 0.34);
+  ctx.font = 'bold 16px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = '#333333';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  var nameLeft = app.truncateNameToWidth(
+    ctx,
+    app.getMyDisplayName(),
+    maxNameW
+  );
+  var nameRight = app.truncateNameToWidth(
+    ctx,
+    app.getOpponentDisplayName(),
+    maxNameW
+  );
+  ctx.fillText(nameLeft, app.snapPx(ly.vsLeftCx), app.snapPx(ly.namesY));
+  ctx.fillText(nameRight, app.snapPx(ly.vsRightCx), app.snapPx(ly.namesY));
+  ctx.font = '12px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = '#666666';
+  if (roles.left) {
+    ctx.fillText(roles.left, app.snapPx(ly.vsLeftCx), app.snapPx(ly.namesY + 20));
+  }
+  if (roles.right) {
+    ctx.fillText(roles.right, app.snapPx(ly.vsRightCx), app.snapPx(ly.namesY + 20));
+  }
+
+  var statBgR = 12;
+  ctx.save();
+  ctx.fillStyle = '#F8F8F8';
+  app.roundRect(ly.statsX, ly.statsY, ly.statsW, ly.statsH, statBgR);
+  ctx.fill();
+  ctx.restore();
+
+  var moveCnt =
+    typeof app.getResultOverlayMoveCount === 'function'
+      ? app.getResultOverlayMoveCount()
+      : app.countStonesOnBoard(app.board);
+  var durStr =
+    typeof app.formatResultOverlayDuration === 'function'
+      ? app.formatResultOverlayDuration()
+      : '\u2014';
+  var rankRaw = getResultOverlayRankLabel(app);
+  var colW3 = ly.statsW / 3;
+  ctx.font = 'bold 15px "PingFang SC","Hiragino Sans GB",sans-serif';
+  var rankStr =
+    rankRaw === '\u2014'
+      ? rankRaw
+      : app.truncateNameToWidth(ctx, rankRaw, colW3 - 12);
+
+  var col1 = ly.statsX + ly.statsW / 6;
+  var col2 = ly.statsX + ly.statsW / 2;
+  var col3 = ly.statsX + (5 * ly.statsW) / 6;
+  var statLabelY = ly.statsY + 18;
+  var statValY = ly.statsY + 46;
+  ctx.font = '12px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = '#999999';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('对局时长', app.snapPx(col1), app.snapPx(statLabelY));
+  ctx.fillText('总落子数', app.snapPx(col2), app.snapPx(statLabelY));
+  ctx.fillText('当前段位', app.snapPx(col3), app.snapPx(statLabelY));
+  ctx.font = 'bold 18px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = '#333333';
+  ctx.fillText(durStr, app.snapPx(col1), app.snapPx(statValY));
+  ctx.fillText(String(moveCnt), app.snapPx(col2), app.snapPx(statValY));
+  ctx.font = 'bold 15px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillText(rankStr, app.snapPx(col3), app.snapPx(statValY));
 
   function eloLine(forBlack, onlineWhich) {
     if (app.isDailyPuzzle) {
@@ -3596,27 +4091,17 @@ app.drawResultOverlay = function() {
       lw = eloLine(false);
     }
   }
+  var eloFootY = ly.statsY + ly.statsH + 13;
   ctx.textAlign = 'center';
-  ctx.font = 'bold 18px "PingFang SC","Hiragino Sans GB",sans-serif';
-  ctx.fillStyle = th.title;
-  ctx.fillText(lb.elo, app.snapPx(ly.vsLeftCx), app.snapPx(ly.vsCy + ly.avatarS * 0.5 + 16));
-  ctx.fillText(lw.elo, app.snapPx(ly.vsRightCx), app.snapPx(ly.vsCy + ly.avatarS * 0.5 + 16));
-  ctx.font = '600 14px "PingFang SC","Hiragino Sans GB",sans-serif';
-  if (lb.delta) {
-    ctx.fillStyle = lb.dNeg ? '#dc2626' : lb.dZero ? '#64748b' : '#16a34a';
-    ctx.fillText(
-      lb.delta,
-      app.snapPx(ly.vsLeftCx),
-      app.snapPx(ly.vsCy + ly.avatarS * 0.5 + 34)
-    );
+  ctx.textBaseline = 'middle';
+  ctx.font = '11px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = '#999999';
+  var eloFootStr = '';
+  if (lb.elo && lb.elo !== '--') {
+    eloFootStr = '得分 ' + lb.elo + (lb.delta || '');
   }
-  if (lw.delta) {
-    ctx.fillStyle = lw.dNeg ? '#dc2626' : lw.dZero ? '#64748b' : '#16a34a';
-    ctx.fillText(
-      lw.delta,
-      app.snapPx(ly.vsRightCx),
-      app.snapPx(ly.vsCy + ly.avatarS * 0.5 + 34)
-    );
+  if (eloFootStr) {
+    ctx.fillText(eloFootStr, app.snapPx(app.W * 0.5), app.snapPx(eloFootY));
   }
 
   drawResultOverlayTuanPointsAnim(app, ctx, th, ly);
@@ -3635,28 +4120,27 @@ app.drawResultOverlay = function() {
     );
   } else {
     var primaryLabel = '再来一局';
-    var pinkG = ctx.createLinearGradient(px0, py0, px0, py0 + ly.primaryH);
-    pinkG.addColorStop(0, '#fce7f3');
-    pinkG.addColorStop(0.45, '#f9a8d4');
-    pinkG.addColorStop(1, '#ec4899');
-    ctx.shadowColor = 'rgba(236, 72, 153, 0.35)';
-    ctx.shadowBlur = 18;
-    ctx.shadowOffsetY = 4;
-    ctx.fillStyle = pinkG;
-    app.roundRect(px0, py0, ly.primaryW, ly.primaryH, ly.primaryH * 0.5);
+    var btnG = ctx.createLinearGradient(px0, py0, px0 + ly.primaryW, py0);
+    btnG.addColorStop(0, '#FF6B8B');
+    btnG.addColorStop(1, '#FF8E53');
+    ctx.shadowColor = 'rgba(255, 107, 139, 0.4)';
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetY = 5;
+    ctx.fillStyle = btnG;
+    app.roundRect(px0, py0, ly.primaryW, ly.primaryH, 12);
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.shadowOffsetY = 0;
-    ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
     ctx.lineWidth = 1.25;
-    app.roundRect(px0 + 0.5, py0 + 0.5, ly.primaryW - 1, ly.primaryH - 1, ly.primaryH * 0.5);
+    app.roundRect(px0 + 0.5, py0 + 0.5, ly.primaryW - 1, ly.primaryH - 1, 11.5);
     ctx.stroke();
     ctx.font = 'bold 17px "PingFang SC","Hiragino Sans GB",sans-serif';
     ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(
-      '\u2709 ' + primaryLabel,
+      primaryLabel,
       app.snapPx(ly.primaryCx),
       app.snapPx(ly.primaryCy)
     );
@@ -3670,8 +4154,13 @@ app.drawResultOverlay = function() {
     nDock === 3 ? ['首页', '回放', '继续'] : ['首页', '继续'];
   var dockIcons = nDock === 3 ? ['🏠', '🎬', '↻'] : ['🏠', '↻'];
   var dockTop = dockY - ly.dockH * 0.5;
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.05)';
+  ctx.shadowBlur = 10;
+  ctx.shadowOffsetY = -2;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, dockTop, app.W, ly.dockH);
+  ctx.restore();
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
   ctx.lineWidth = 1;
   ctx.beginPath();
