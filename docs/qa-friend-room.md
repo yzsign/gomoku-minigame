@@ -110,3 +110,26 @@
 - 小程序：`app.startOnlineAsHost`、`app.startOnlineFriendWatchFromPeer`（`js/main/gameLogic/part2.js`），好友列表面板（`js/main/gameLogic/friendListHome.js`）。
 - 房间 API：`js/roomApi.js`；WebSocket 基址与 `GOMOKU_API_BASE` 一致。
 - 后端：`RoomController`（`/api/rooms/friend-watch`、`/{roomId}/spectators`），`GomokuWebSocketHandler`（`friendWatch` 分支），`RoomService.ensureFriendWatchTokenInMemoryAndDb`，SQL `migration-v37-friend-watch-token.sql`。
+
+---
+
+## 代码静态核对（与实现一致性）
+
+以下对照仓库当前实现，用于确认「清单预期」有代码支撑；**不替代**真机联调。
+
+| 清单区块 | 结论 | 依据（摘要） |
+|----------|------|----------------|
+| 预备 / API 环境 | 一致 | `roomApi.js` 中 `GOMOKU_API_BASE` 拼出 `POST /api/rooms`、`join`、`friend-watch`；`authApi` 提供会话头。 |
+| **§1 开房** | 一致 | 后端 `RoomController.createRoom` → `roomService.createRoom(uid)` 即**非**随机房（`randomMatch=false`）。客户端 `startOnlineAsHost` 设 `isRandomMatch=false`、黑子 token、`lastMsg` 等；分享 `query` 含 `roomId`、`online=1`。 |
+| **§1.3 等白方不判负** | 一致 | 服务端 `GameRoom.syncFriendRoomClockPauseForLiveSeats`（`!randomMatch && !puzzleRoom`）在**双方曾在座前**暂停读秒；`broadcastState` 与 `RoomGameStatePollTask` 中先于超时判定执行。客户端 `shouldShowOnlineGameClockUi` / `isOnlineFriendMatchNotStarted` 在双方未连上时不展示联机读秒 UI。 |
+| **§2 分享** | 一致 | `startOnlineAsHost` 内 `wx.shareAppMessage` 的 `query: 'roomId=' + app.onlineRoomId + '&online=1'`。`tryLaunchOnlineInvite` 解析后调 `joinOnlineAsGuest`；`part2` 含分享取消/ `onShow` 相关注释。 |
+| **§3 第二人** | 一致 | `joinOnlineAsGuest` → `POST /api/rooms/join`；`applyOnlineState` 更新 `blackConnected`/`whiteConnected`。双方连上后 `isOnlineFriendMatchNotStarted` 为 false，读秒 UI 可显示。 |
+| **§4 对弈** | 一致 | 落子、STATE 由 `GomokuWebSocketHandler` 与 `tryPersist` 路径处理；`onlineFriendBothEverConnected` 在 `applyOnlineState` 中置位，用于断线不误判逃跑（与 `isRandomMatch \|\| onlineFriendBothEverConnected` 分支一致）。 |
+| **§5.1–5.2 观战票与 WS** | 一致 | `startOnlineFriendWatchFromPeer` → `roomFriendWatchOptions`；用 `watchToken`/`watch_token` 作为 `onlineToken` 调 `startOnlineSocket`；服务端 `FriendWatchService` + `ensureFriendWatchTokenInMemoryAndDb` 与 `buildRoomFromParticipant` 读 `friend_watch_token`（**依赖 v37 迁移**）。 |
+| **§5.3 观战不可下** | 一致 | 多处对 `onlineSpectatorMode` 与 `isOnlineFriendMatchNotStarted` 的触摸/落子保护（如 `part5` 中游戏页轻触守卫）。 |
+| **§5.4 观战人数与列表** | 一致 | `GameRoom` `spectatorSessions` 与 `stateJson` 中 `spectatorCount`；`GET /{roomId}/spectators` 在 `RoomController`；`friendListHome.js` 用 `roomApi` 拉列表并与 `spectatorCount` 配合。 |
+| **§5.5 多观战** | 一致 | `GomokuWebSocketHandler` 中好友观战分支**不再**以整房单槽拒第二人，改为**同一用户**已存在未关闭连接时提示：`该账号已有一条观战连接，请先关闭`（**不是**旧文案「观战位已有连接」）。不同好友 D 可并行观战。 |
+| **§6 多实例** | 条件一致 | 逻辑上 `updateFriendWatchTokenIfNull` + 冷启动从 DB 恢复 `friendWatchToken` 满足「换机/换实例发券 + WS」；**须**已执行 v37 且各实例为同一版后端。 |
+| **§7 终局后观战** | 一致 | `FriendWatchService.issueForPeer` 在 `room.isGameOver()` 时返回 `GAME_OVER`。 |
+
+**说明**：残局好友房在好友列表 PVP 观战路径中由接口返回 `PUZZLE_NOT_SUPPORTED`（`FriendWatchService`），与清单「不适用于残局房观战」一致；观战方不走黑白座位 `resolveColorByToken`。
