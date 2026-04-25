@@ -954,11 +954,24 @@ app.computeLayout = function() {
   /* 底栏垂直中心：条底对齐 H - safeBottom（刘海/ home 条之上） */
   var bottomY = app.H - safeBottom - barH * 0.5;
 
-  /* 棋盘右上角独立旁观徽章（小胶囊按钮，点击打开列表） - 位置紧贴棋盘右上，避免与 clock 重叠 */
-  var sbW = toPx(76);
+  /**
+   * 观战按钮：顶栏下沿再下 20（750 稿）处，屏幕左侧；下拉面板的左缘与按钮左缘对齐。
+   */
+  var marginL = toPx(20);
+  var sbW = toPx(108);
   var sbH = toPx(26);
-  var sbX = originX + boardPx - sbW - toPx(6);
-  var sbY = originY - sbH - toPx(10);
+  var safeL =
+    app.sys && app.sys.safeArea && typeof app.sys.safeArea.left === 'number'
+      ? app.sys.safeArea.left
+      : 0;
+  var sbX = safeL + marginL;
+  /** 顶栏下沿（layout.topBar）以下 20px 设计间距 */
+  var sbY = topBar + toPx(20);
+  var spW = toPx(220);
+  var spH = toPx(320);
+  var spX = safeL + marginL;
+  var spY = sbY + sbH + toPx(8);
+  var spRowH = toPx(44);
 
   return {
     margin: sideMargin,
@@ -973,7 +986,12 @@ app.computeLayout = function() {
     spectatorBadgeX: sbX,
     spectatorBadgeY: sbY,
     spectatorBadgeW: sbW,
-    spectatorBadgeH: sbH
+    spectatorBadgeH: sbH,
+    spectatorPopoverX: spX,
+    spectatorPopoverY: spY,
+    spectatorPopoverW: spW,
+    spectatorPopoverH: spH,
+    spectatorPopoverRowH: spRowH
   };
 }
 

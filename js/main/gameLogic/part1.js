@@ -2480,6 +2480,120 @@ app.friendListHomeUiFromTheme = function(th) {
           : 'rgba(255, 253, 250, 0.96)',
     spectatorBadgeText: winTitle,
     spectatorListTitle: '旁观列表',
+    /**
+     * 旁观列表面板专用：偏冷青绿渐变，与暖色 parchment「好友列表」侧栏一眼区分。
+     */
+    spectatorPanelG0:
+      id === 'mint'
+        ? '#e8f5f2'
+        : id === 'ink'
+          ? '#e9ecea'
+          : '#eef4f0',
+    spectatorPanelG1:
+      id === 'mint'
+        ? '#dff0eb'
+        : id === 'ink'
+          ? '#e1e8e3'
+          : '#e6f0ea',
+    spectatorPanelG2:
+      id === 'mint'
+        ? '#d4ebe4'
+        : id === 'ink'
+          ? '#d8e0dc'
+          : '#dceee3',
+    spectatorListTitleColor:
+      id === 'mint'
+        ? '#00695c'
+        : id === 'ink'
+          ? '#5d4037'
+          : '#1b5e20',
+    spectatorListStripBg0:
+      id === 'mint'
+        ? 'rgba(0, 105, 92, 0.1)'
+        : id === 'ink'
+          ? 'rgba(93, 64, 55, 0.08)'
+          : 'rgba(27, 94, 32, 0.08)',
+    spectatorListStripBg1:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.65)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 250, 0.55)'
+          : 'rgba(255, 255, 255, 0.58)',
+    spectatorListStripBorder:
+      id === 'mint'
+        ? 'rgba(0, 121, 107, 0.28)'
+        : id === 'ink'
+          ? 'rgba(120, 95, 78, 0.28)'
+          : 'rgba(46, 125, 50, 0.26)',
+    spectatorListStripText: th.muted,
+    /**
+     * 对局内观战下拉面板：描边/投影与杂货铺卡片、侧栏同系
+     */
+    spectatorPopoverShadow:
+      id === 'mint'
+        ? 'rgba(6, 40, 48, 0.1)'
+        : id === 'ink'
+          ? 'rgba(10, 8, 6, 0.12)'
+          : 'rgba(48, 40, 32, 0.1)',
+    spectatorPopoverStroke:
+      id === 'mint'
+        ? 'rgba(0, 105, 100, 0.2)'
+        : id === 'ink'
+          ? 'rgba(90, 75, 62, 0.22)'
+          : 'rgba(80, 120, 88, 0.22)',
+    /**
+     * 对局内观战浮层（canvas）：半透「玻璃卡」与中央 VS 卡一致，非实色块。
+     */
+    spectatorPopoverGlass0:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.78)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 250, 0.72)'
+          : 'rgba(255, 253, 250, 0.82)',
+    spectatorPopoverGlass1:
+      id === 'mint'
+        ? 'rgba(228, 244, 240, 0.48)'
+        : id === 'ink'
+          ? 'rgba(236, 230, 224, 0.42)'
+          : 'rgba(250, 244, 234, 0.52)',
+    spectatorPopoverGlass2:
+      id === 'mint'
+        ? 'rgba(200, 232, 224, 0.38)'
+        : id === 'ink'
+          ? 'rgba(218, 210, 202, 0.35)'
+          : 'rgba(236, 228, 216, 0.42)',
+    /** 外缘：浅白 + 极淡主色，模拟玻璃包边 */
+    spectatorPopoverStrokeGlass:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.55)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 250, 0.48)'
+          : 'rgba(255, 255, 255, 0.52)',
+    spectatorPopoverStrokeEdge:
+      id === 'mint'
+        ? 'rgba(0, 100, 96, 0.1)'
+        : id === 'ink'
+          ? 'rgba(55, 45, 38, 0.12)'
+          : 'rgba(90, 75, 55, 0.1)',
+    /** 浮层内列表行：低对比斑马纹，避免实色条 */
+    spectatorPopoverRowEven:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.28)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 250, 0.22)'
+          : 'rgba(255, 254, 250, 0.26)',
+    spectatorPopoverRowOdd:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.1)'
+        : id === 'ink'
+          ? 'rgba(255, 255, 255, 0.06)'
+          : 'rgba(255, 255, 255, 0.1)',
+    /** 空状态副文案，比 title 更弱 */
+    spectatorPopoverEmptyMuted: th.muted,
+    /** 观战：N 人「人数」用色，与 watchPill 字色一致 */
+    spectatorBadgeCount: winTitle,
+    /** 观战： / 人 两侧字用 muted */
+    spectatorBadgeMuted: th.muted,
     /** 私聊顶栏：与侧栏渐变中段一致 */
     chatHeaderBg: panelArr[1],
     /** 私聊消息列表区（暖色 parchment，非微信灰） */
@@ -2536,6 +2650,14 @@ app.DPR = 2;
 
 /** 初始化旁观人数（防止首次绘制前未定义导致黑屏） */
 app.spectatorCount = 0;
+/** 对局内独立观战列表面板（与侧栏好友列表分离） */
+app.spectatorPopoverOpen = false;
+app.spectatorPopoverScrollY = 0;
+app.spectatorPopoverRows = null;
+app.spectatorPopoverListLoading = false;
+app._spectatorPopoverScrollTouchId = null;
+app._spectatorPopoverScrollLastY = 0;
+app._spectatorPopoverTouchStartedInPanel = null;
 
 /**
  * 按当前窗口与 pixelRatio 设置画布物理像素与 app.ctx 变换。
@@ -3364,6 +3486,12 @@ app.disconnectOnline = function() {
   if (typeof app.clearOnlineChatAvatarBubbleState === 'function') {
     app.clearOnlineChatAvatarBubbleState();
   }
+  app.spectatorPopoverOpen = false;
+  app.spectatorPopoverScrollY = 0;
+  app.spectatorPopoverRows = null;
+  app.spectatorPopoverListLoading = false;
+  app._spectatorPopoverScrollTouchId = null;
+  app.spectatorCount = 0;
   app._puzzleFriendInviteSnapshot = null;
   app._puzzleFriendInviteShareAwaitOnShow = false;
   if (app._puzzleFriendInviteOnShowTimer != null) {

@@ -565,6 +565,342 @@ function resetCanvasShadowState(ctx) {
   ctx.shadowColor = 'rgba(0,0,0,0)';
 }
 
+app.getSpectatorPopoverScrollMetrics = function () {
+  var L = app.layout;
+  if (!L || L.spectatorPopoverX == null) {
+    return { maxScroll: 0, viewH: 0, rowH: app.rpx(44) };
+  }
+  var rows = app.spectatorPopoverRows;
+  var n = rows && Array.isArray(rows) ? rows.length : 0;
+  var rowH = L.spectatorPopoverRowH != null ? L.spectatorPopoverRowH : app.rpx(40);
+  var viewH = L.spectatorPopoverH != null ? L.spectatorPopoverH : 0;
+  var contentH = n * rowH;
+  return {
+    maxScroll: Math.max(0, contentH - viewH),
+    viewH: viewH,
+    rowH: rowH,
+    contentH: contentH
+  };
+};
+
+app.hitSpectatorBadgeRect = function (x, y) {
+  if (!app.isPvpOnline || !app.layout || app.layout.spectatorBadgeX == null) {
+    return false;
+  }
+  var L = app.layout;
+  var bw = L.spectatorBadgeW != null ? L.spectatorBadgeW : app.rpx(80);
+  var bh = L.spectatorBadgeH != null ? L.spectatorBadgeH : app.rpx(30);
+  return (
+    x >= L.spectatorBadgeX &&
+    x <= L.spectatorBadgeX + bw &&
+    y >= L.spectatorBadgeY &&
+    y <= L.spectatorBadgeY + bh
+  );
+};
+
+app.hitSpectatorPopoverPanel = function (x, y) {
+  if (!app.spectatorPopoverOpen || !app.layout || app.layout.spectatorPopoverX == null) {
+    return false;
+  }
+  var L = app.layout;
+  return (
+    x >= L.spectatorPopoverX &&
+    x <= L.spectatorPopoverX + L.spectatorPopoverW &&
+    y >= L.spectatorPopoverY &&
+    y <= L.spectatorPopoverY + L.spectatorPopoverH
+  );
+};
+
+app.drawSpectatorPopover = function (ctx) {
+  if (!app.spectatorPopoverOpen || !app.layout || app.layout.spectatorPopoverX == null) {
+    return;
+  }
+  var th0 = app.getUiTheme();
+  var FL0 =
+    typeof app.friendListHomeUiFromTheme === 'function'
+      ? app.friendListHomeUiFromTheme(th0)
+      : null;
+  var L = app.layout;
+  var x0 = L.spectatorPopoverX;
+  var y0 = L.spectatorPopoverY;
+  var w0 = L.spectatorPopoverW;
+  var h0 = L.spectatorPopoverH;
+  /** 大圆角，贴近结算/VS 白卡，勿过小显得像系统灰框 */
+  var r = Math.min(
+    app.rpx(24),
+    w0 * 0.12,
+    h0 * 0.07,
+    Math.min(w0, h0) * 0.2
+  );
+  if (r < 6) {
+    r = 6;
+  }
+  var sm = app.getSpectatorPopoverScrollMetrics();
+  var rowH = sm.rowH;
+  if (rowH < 1) {
+    return;
+  }
+
+  var fsName = app.rpx(26);
+  var fsTime = app.rpx(22);
+  var fsAv = app.rpx(22);
+
+  var pg0 =
+    FL0 && FL0.spectatorPopoverGlass0
+      ? FL0.spectatorPopoverGlass0
+      : FL0 && FL0.spectatorPanelG0
+        ? FL0.spectatorPanelG0
+        : 'rgba(255,252,250,0.78)';
+  var pg1 =
+    FL0 && FL0.spectatorPopoverGlass1
+      ? FL0.spectatorPopoverGlass1
+      : FL0 && FL0.spectatorPanelG1
+        ? FL0.spectatorPanelG1
+        : 'rgba(245,248,244,0.5)';
+  var pg2 =
+    FL0 && FL0.spectatorPopoverGlass2
+      ? FL0.spectatorPopoverGlass2
+      : FL0 && FL0.spectatorPanelG2
+        ? FL0.spectatorPanelG2
+        : 'rgba(232,240,230,0.42)';
+  var shCol =
+    FL0 && FL0.spectatorPopoverShadow
+      ? FL0.spectatorPopoverShadow
+      : 'rgba(32, 28, 24, 0.08)';
+  var strokeEdge =
+    FL0 && FL0.spectatorPopoverStrokeEdge
+      ? FL0.spectatorPopoverStrokeEdge
+      : 'rgba(90, 75, 55, 0.1)';
+  var strokeGlass =
+    FL0 && FL0.spectatorPopoverStrokeGlass
+      ? FL0.spectatorPopoverStrokeGlass
+      : 'rgba(255, 255, 255, 0.5)';
+  var ze0 =
+    FL0 && FL0.spectatorPopoverRowEven
+      ? FL0.spectatorPopoverRowEven
+      : FL0 && FL0.rowEven
+        ? FL0.rowEven
+        : 'rgba(255, 255, 255, 0.22)';
+  var ze1 =
+    FL0 && FL0.spectatorPopoverRowOdd
+      ? FL0.spectatorPopoverRowOdd
+      : FL0 && FL0.rowOdd
+        ? FL0.rowOdd
+        : 'rgba(255, 255, 255, 0.1)';
+  var colName = FL0 && FL0.name ? FL0.name : th0.title;
+  var colMuted = FL0 && FL0.actionHint ? FL0.actionHint : th0.muted;
+  var colLoad = FL0 && FL0.loading ? FL0.loading : th0.muted;
+  var colEmptySoft =
+    FL0 && FL0.spectatorPopoverEmptyMuted != null
+      ? FL0.spectatorPopoverEmptyMuted
+      : FL0 && FL0.collapse
+        ? FL0.collapse
+        : th0.muted;
+  var avFallback = FL0 && FL0.avatarFallback ? FL0.avatarFallback : '#E0D6C8';
+  var avChar = FL0 && FL0.avatarChar ? FL0.avatarChar : colName;
+  var sepC =
+    FL0 && FL0.sep
+      ? FL0.sep
+      : 'rgba(255, 255, 255, 0.2)';
+
+  ctx.save();
+  ctx.shadowColor = shCol;
+  ctx.shadowBlur = app.rpx(16);
+  ctx.shadowOffsetY = app.rpx(4);
+  var fillP = pg1;
+  try {
+    if (ctx.createLinearGradient) {
+      var gP = ctx.createLinearGradient(x0, y0, x0, y0 + h0);
+      gP.addColorStop(0, pg0);
+      gP.addColorStop(0.5, pg1);
+      gP.addColorStop(1, pg2);
+      fillP = gP;
+    }
+  } catch (eG) {
+    fillP = pg1;
+  }
+  ctx.fillStyle = fillP;
+  if (typeof app.roundRect === 'function') {
+    app.roundRect(x0, y0, w0, h0, r);
+  } else {
+    ctx.beginPath();
+    ctx.rect(x0, y0, w0, h0);
+  }
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+  if (ctx.createLinearGradient) {
+    ctx.save();
+    if (typeof app.roundRect === 'function') {
+      app.roundRect(x0, y0, w0, h0, r);
+    } else {
+      ctx.rect(x0, y0, w0, h0);
+    }
+    ctx.clip();
+    var gSh = ctx.createLinearGradient(x0, y0, x0, y0 + h0 * 0.4);
+    gSh.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+    gSh.addColorStop(0.45, 'rgba(255, 255, 255, 0.08)');
+    gSh.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = gSh;
+    ctx.fillRect(x0, y0, w0, h0);
+    ctx.restore();
+  }
+  if (typeof app.roundRect === 'function') {
+    app.roundRect(x0, y0, w0, h0, r);
+  } else {
+    ctx.beginPath();
+    ctx.rect(x0, y0, w0, h0);
+  }
+  ctx.lineWidth = Math.max(1, app.rpx(1.25));
+  ctx.strokeStyle = strokeEdge;
+  ctx.stroke();
+  if (typeof app.roundRect === 'function') {
+    app.roundRect(x0, y0, w0, h0, r);
+  } else {
+    ctx.beginPath();
+    ctx.rect(x0, y0, w0, h0);
+  }
+  ctx.lineWidth = Math.max(1, app.rpx(1));
+  ctx.strokeStyle = strokeGlass;
+  ctx.stroke();
+
+  var padX = app.rpx(10);
+  var avR = app.rpx(12);
+  var scrollY =
+    typeof app.spectatorPopoverScrollY === 'number' ? app.spectatorPopoverScrollY : 0;
+  if (scrollY < 0) {
+    scrollY = 0;
+  }
+  if (scrollY > sm.maxScroll) {
+    scrollY = sm.maxScroll;
+  }
+  app.spectatorPopoverScrollY = scrollY;
+
+  ctx.save();
+  ctx.beginPath();
+  if (typeof app.roundRect === 'function') {
+    app.roundRect(x0, y0, w0, h0, r);
+  } else {
+    ctx.rect(x0, y0, w0, h0);
+  }
+  ctx.clip();
+
+  var fontStack = '"PingFang SC","Hiragino Sans GB",sans-serif';
+
+  if (app.spectatorPopoverListLoading && app.spectatorPopoverRows == null) {
+    ctx.fillStyle = colLoad;
+    ctx.globalAlpha = 0.9;
+    ctx.font = app.rpx(22) + 'px ' + fontStack;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('加载中…', x0 + w0 * 0.5, y0 + h0 * 0.4);
+    ctx.globalAlpha = 1;
+  } else {
+    var rows = app.spectatorPopoverRows;
+    var n = rows && Array.isArray(rows) ? rows.length : 0;
+    if (n === 0) {
+      ctx.fillStyle = colEmptySoft;
+      ctx.globalAlpha = 0.88;
+      ctx.font = app.rpx(22) + 'px ' + fontStack;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('暂无观战', x0 + w0 * 0.5, y0 + h0 * 0.48);
+      ctx.globalAlpha = 1;
+    } else {
+      var i;
+      for (i = 0; i < n; i++) {
+        var fr = rows[i];
+        if (!fr) {
+          continue;
+        }
+        var yRow = y0 + i * rowH - scrollY;
+        if (yRow + rowH < y0 - 1 || yRow > y0 + h0 + 1) {
+          continue;
+        }
+        ctx.fillStyle = i % 2 === 0 ? ze0 : ze1;
+        ctx.fillRect(x0, yRow, w0, rowH);
+        if (i < n - 1) {
+          ctx.save();
+          ctx.globalAlpha = 0.5;
+          ctx.strokeStyle = sepC;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x0 + padX, yRow + rowH);
+          ctx.lineTo(x0 + w0 - padX, yRow + rowH);
+          ctx.stroke();
+          ctx.restore();
+        }
+        var acx = x0 + padX + avR;
+        var acy = yRow + rowH * 0.5;
+        var nameStr = String(
+          (fr && (fr.displayName || fr.nickname)) || '友'
+        );
+        var img =
+          fr.peerUserId && app._friendAvImgs
+            ? app._friendAvImgs['k' + fr.peerUserId]
+            : null;
+        if (img && img.complete && img.width && !img._failed) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(
+            app.snapPx(acx),
+            app.snapPx(acy),
+            app.snapPx(avR),
+            0,
+            Math.PI * 2
+          );
+          ctx.clip();
+          var asz = app.snapPx(avR * 2);
+          var ax0 = app.snapPx(acx - avR);
+          var ay0 = app.snapPx(acy - avR);
+          ctx.drawImage(img, ax0, ay0, asz, asz);
+          ctx.restore();
+        } else {
+          ctx.fillStyle = avFallback;
+          ctx.beginPath();
+          ctx.arc(
+            app.snapPx(acx),
+            app.snapPx(acy),
+            app.snapPx(avR),
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+          ctx.fillStyle = avChar;
+          ctx.font = fsAv + 'px ' + fontStack;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(
+            nameStr.charAt(0),
+            app.snapPx(acx),
+            app.snapPx(acy)
+          );
+        }
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = colName;
+        ctx.font = fsName + 'px ' + fontStack;
+        var nameX = x0 + padX * 2 + avR * 2;
+        var maxNameW = w0 - nameX - padX - app.rpx(52);
+        var showName = nameStr;
+        if (ctx.measureText(showName).width > maxNameW) {
+          while (showName.length > 1 && ctx.measureText(showName + '…').width > maxNameW) {
+            showName = showName.slice(0, -1);
+          }
+          showName += '…';
+        }
+        ctx.fillText(showName, nameX, acy);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = colMuted;
+        ctx.font = fsTime + 'px ' + fontStack;
+        ctx.fillText('旁观中', x0 + w0 - padX, acy);
+      }
+    }
+  }
+  ctx.restore();
+  ctx.restore();
+};
+
 app.draw = function() {
   /** 每帧重置为逻辑坐标系，避免某次 save/restore 失衡导致变换累积（画面套叠缩小） */
   app.ctx.setTransform(app.DPR, 0, 0, app.DPR, 0, 0);
@@ -737,7 +1073,7 @@ app.draw = function() {
     app.drawOnlineGameClockAboveBoard(app.ctx, th, app.layout);
   }
 
-  /** 棋盘右上角独立「旁观 X人」徽章按钮（可点击打开列表），复用 watchPill 主题色，小巧胶囊风格 */
+  /** 顶栏下沿 + 设计间距，左上角「观战：N 人」按钮（可点出独立观战列表面板，不打开侧栏好友列表） */
   if (
     app.isPvpOnline &&
     app.layout &&
@@ -752,38 +1088,103 @@ app.draw = function() {
       var bw = app.layout.spectatorBadgeW || app.rpx(76);
       var bh = app.layout.spectatorBadgeH || app.rpx(26);
       var count = Math.max(0, app.spectatorCount || 0);
-      var badgeText = count > 0 ? '旁观 ' + count + '人' : '旁观';
+      var p1 = '观战：';
+      var p2 = String(count);
+      var p3 = '人';
+
+      var g0 =
+        FL && FL.watchPillG0
+          ? FL.watchPillG0
+          : 'rgba(255, 255, 255, 0.99)';
+      var g1 =
+        FL && FL.watchPillG1
+          ? FL.watchPillG1
+          : 'rgba(234, 244, 236, 0.96)';
+      var strokeC =
+        FL && FL.watchPillStroke
+          ? FL.watchPillStroke
+          : 'rgba(46, 125, 50, 0.24)';
+      var shadeC =
+        FL && FL.watchPillShade
+          ? FL.watchPillShade
+          : 'rgba(20, 70, 32, 0.06)';
+      var labelMute =
+        FL && FL.spectatorBadgeMuted != null
+          ? FL.spectatorBadgeMuted
+          : th.muted;
+      var countC =
+        FL && FL.spectatorBadgeCount != null
+          ? FL.spectatorBadgeCount
+          : FL && FL.watchPillText
+            ? FL.watchPillText
+            : '#2e7d32';
 
       app.ctx.save();
-      app.ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
-      app.ctx.shadowBlur = 3;
-      app.ctx.shadowOffsetY = 1;
-
+      /**
+       * 圆角须 ≤ min(w,h)/2。勿用 rpx(999) 等超大半径：arcTo 在部分真机/小游戏上会生成异常大路径，整屏被浅色填充（类似纸撕裂大块白斑）。
+       */
+      var capR = Math.min(
+        Math.min(bw, bh) * 0.5,
+        bw * 0.5,
+        bh * 0.5,
+        app.rpx(9)
+      );
+      if (capR < 0.5) {
+        capR = 0.5;
+      }
       if (typeof app.roundRect === 'function') {
-        app.roundRect(bx, by, bw, bh, app.rpx(999)); // 极大圆角实现胶囊
+        app.ctx.fillStyle = shadeC;
+        app.roundRect(
+          bx + app.rpx(0.5),
+          by + app.rpx(1),
+          bw,
+          bh,
+          capR
+        );
+        app.ctx.fill();
+      }
+      var fillB = g1;
+      try {
+        if (app.ctx.createLinearGradient) {
+          var gradB = app.ctx.createLinearGradient(bx, by, bx, by + bh);
+          gradB.addColorStop(0, g0);
+          gradB.addColorStop(1, g1);
+          fillB = gradB;
+        }
+      } catch (eBg) {
+        fillB = g1;
+      }
+      app.ctx.fillStyle = fillB;
+      if (typeof app.roundRect === 'function') {
+        app.roundRect(bx, by, bw, bh, capR);
+        app.ctx.fill();
+        app.roundRect(bx, by, bw, bh, capR);
+        app.ctx.strokeStyle = strokeC;
+        app.ctx.lineWidth = Math.max(1, app.rpx(1));
+        app.ctx.stroke();
       } else {
-        // fallback rect if roundRect not yet defined
-        app.ctx.beginPath();
-        app.ctx.rect(bx, by, bw, bh);
+        app.ctx.fillRect(bx, by, bw, bh);
+        app.ctx.strokeStyle = strokeC;
+        app.ctx.lineWidth = 1;
+        app.ctx.strokeRect(bx, by, bw, bh);
       }
 
-      var grad = app.ctx.createLinearGradient(bx, by, bx + bw * 0.6, by + bh);
-      grad.addColorStop(0, (FL && FL.spectatorBadgeBg) || '#ffffff');
-      grad.addColorStop(1, (FL && FL.spectatorBadgeBg) || '#f1f8f4');
-      app.ctx.fillStyle = grad;
-      app.ctx.fill();
-
-      app.ctx.strokeStyle = (FL && FL.watchPillStroke) || 'rgba(46, 125, 50, 0.25)';
-      app.ctx.lineWidth = 1;
-      app.ctx.stroke();
-
-      app.ctx.shadowBlur = 0;
-      app.ctx.shadowOffsetY = 0;
-      app.ctx.fillStyle = (FL && FL.spectatorBadgeText) || '#2e7d32';
-      app.ctx.font = '500 ' + Math.max(10, app.rpx(12)) + 'px "PingFang SC","Helvetica",sans-serif';
-      app.ctx.textAlign = 'center';
+      var bfs = Math.max(10, app.rpx(12));
+      app.ctx.font = '500 ' + bfs + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
+      app.ctx.textAlign = 'left';
       app.ctx.textBaseline = 'middle';
-      app.ctx.fillText(badgeText, bx + bw * 0.5, by + bh * 0.5 + 0.5);
+      var m1 = app.ctx.measureText(p1);
+      var m2 = app.ctx.measureText(p2);
+      var m3 = app.ctx.measureText(p3);
+      var totalW = m1.width + m2.width + m3.width;
+      var startX = bx + bw * 0.5 - totalW * 0.5;
+      var ty = by + bh * 0.5 + 0.5;
+      app.ctx.fillStyle = labelMute;
+      app.ctx.fillText(p1, startX, ty);
+      app.ctx.fillStyle = countC;
+      app.ctx.fillText(p2, startX + m1.width, ty);
+      app.ctx.fillStyle = labelMute;
+      app.ctx.fillText(p3, startX + m1.width + m2.width, ty);
       app.ctx.restore();
     } catch (e) {
       console.error('Spectator badge draw failed:', e);
@@ -1039,6 +1440,9 @@ app.draw = function() {
   app.drawRatingCardOverlay(th);
   if (typeof app.drawFriendListGlobalChrome === 'function') {
     app.drawFriendListGlobalChrome();
+  }
+  if (typeof app.drawSpectatorPopover === 'function' && app.spectatorPopoverOpen) {
+    app.drawSpectatorPopover(app.ctx);
   }
 }
 
@@ -4187,6 +4591,30 @@ wx.onTouchStart(function (e) {
     return;
   }
 
+  if (app.screen === 'game' && app.isPvpOnline) {
+    if (typeof app.computeLayout === 'function') {
+      app.layout = app.computeLayout();
+    }
+    if (typeof app.hitSpectatorBadgeRect === 'function' && app.hitSpectatorBadgeRect(x, y)) {
+      return;
+    }
+    if (app.spectatorPopoverOpen) {
+      if (typeof app.hitSpectatorPopoverPanel === 'function' && app.hitSpectatorPopoverPanel(x, y)) {
+        if (e.touches && e.touches[0]) {
+          app._spectatorPopoverTouchStartedInPanel = true;
+          app._spectatorPopoverScrollTouchId = e.touches[0].identifier;
+          app._spectatorPopoverScrollLastY = y;
+        }
+        return;
+      }
+      app.spectatorPopoverOpen = false;
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
+      return;
+    }
+  }
+
   if (app.screen === 'home' && app.homeDrawerOpen) {
     if (app.hitHomeDrawerBackdrop(x, y)) {
       app.homeDrawerOpen = false;
@@ -4640,6 +5068,41 @@ if (typeof wx.onTouchMove === 'function') {
       return;
     }
     if (
+      app.screen === 'game' &&
+      app._spectatorPopoverScrollTouchId != null &&
+      e.touches
+    ) {
+      var tSp = null;
+      for (var isp = 0; isp < e.touches.length; isp++) {
+        if (e.touches[isp].identifier === app._spectatorPopoverScrollTouchId) {
+          tSp = e.touches[isp];
+          break;
+        }
+      }
+      if (tSp) {
+        var dy = tSp.clientY - app._spectatorPopoverScrollLastY;
+        app._spectatorPopoverScrollLastY = tSp.clientY;
+        if (typeof app.spectatorPopoverScrollY !== 'number') {
+          app.spectatorPopoverScrollY = 0;
+        }
+        var smP =
+          typeof app.getSpectatorPopoverScrollMetrics === 'function'
+            ? app.getSpectatorPopoverScrollMetrics()
+            : { maxScroll: 0 };
+        app.spectatorPopoverScrollY -= dy;
+        if (app.spectatorPopoverScrollY < 0) {
+          app.spectatorPopoverScrollY = 0;
+        }
+        if (app.spectatorPopoverScrollY > smP.maxScroll) {
+          app.spectatorPopoverScrollY = smP.maxScroll;
+        }
+        if (typeof app.draw === 'function') {
+          app.draw();
+        }
+        return;
+      }
+    }
+    if (
       app.screen === 'admin_puzzle' &&
       typeof app.handleAdminPuzzleTouchMove === 'function' &&
       app.handleAdminPuzzleTouchMove(e)
@@ -4726,24 +5189,51 @@ if (typeof wx.onTouchEnd === 'function') {
       return;
     }
 
-    /** 点击棋盘右上角旁观徽章：打开 spectator mode 的好友列表（仅显示当前在观战的好友） */
+    if (t && e.changedTouches) {
+      var isc;
+      for (isc = 0; isc < e.changedTouches.length; isc++) {
+        if (
+          app._spectatorPopoverScrollTouchId != null &&
+          e.changedTouches[isc].identifier === app._spectatorPopoverScrollTouchId
+        ) {
+          app._spectatorPopoverScrollTouchId = null;
+          break;
+        }
+      }
+    }
+
+    /**
+     * 对局内「观战：N 人」徽章：独立下拉列表（不打开侧栏好友列表）
+     */
     if (
       t &&
+      app.screen === 'game' &&
       app.isPvpOnline &&
-      app.layout &&
-      app.layout.spectatorBadgeX != null &&
-      t.clientX >= app.layout.spectatorBadgeX &&
-      t.clientX <= app.layout.spectatorBadgeX + (app.layout.spectatorBadgeW || 80) &&
-      t.clientY >= app.layout.spectatorBadgeY &&
-      t.clientY <= app.layout.spectatorBadgeY + (app.layout.spectatorBadgeH || 30)
+      typeof app.hitSpectatorBadgeRect === 'function' &&
+      app.hitSpectatorBadgeRect(t.clientX, t.clientY)
     ) {
-      if (typeof app.openHomeFriendList === 'function') {
-        app.openHomeFriendList(true);
+      app.spectatorPopoverOpen = !app.spectatorPopoverOpen;
+      if (app.spectatorPopoverOpen) {
+        app.spectatorPopoverScrollY = 0;
+        if (typeof app.refreshSpectatorPopoverList === 'function') {
+          app.refreshSpectatorPopoverList(false);
+        }
+      } else {
+        app._spectatorPopoverTouchStartedInPanel = null;
       }
       if (typeof app.draw === 'function') {
         app.draw();
       }
       return;
+    }
+    if (t && app.screen === 'game' && app.spectatorPopoverOpen) {
+      if (app._spectatorPopoverTouchStartedInPanel) {
+        app._spectatorPopoverTouchStartedInPanel = null;
+        if (typeof app.draw === 'function') {
+          app.draw();
+        }
+        return;
+      }
     }
 
     if (app.screen === 'admin_puzzle' && t) {
@@ -5121,6 +5611,10 @@ if (typeof wx.onTouchCancel === 'function') {
       app.draw();
       return;
     }
+    if (app._spectatorPopoverScrollTouchId != null) {
+      app._spectatorPopoverScrollTouchId = null;
+    }
+    app._spectatorPopoverTouchStartedInPanel = null;
     if (app.screen === 'history') {
       app.historyScrollTouchId = null;
       app.stopHistoryMomentum();
