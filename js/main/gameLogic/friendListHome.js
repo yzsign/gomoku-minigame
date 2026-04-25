@@ -18,7 +18,11 @@ module.exports = function registerFriendListHome(app, deps) {
   var FRIEND_LIST_SWIPE_REMARK_RPX = 80;
   var FRIEND_LIST_SWIPE_DELETE_RPX = 80;
   /** 行内右侧「观战」按钮（仅好友在对局中时显示，与左滑区独立） */
-  var FRIEND_LIST_WATCH_BTN_RPX = 72;
+  var FRIEND_LIST_WATCH_BTN_RPX = 68;
+  /** 在「半行高」基础上再缩短高度（设计稿约 10px，用 rpx 随屏） */
+  var FRIEND_LIST_WATCH_BTN_HEIGHT_TRIM_RPX = 10;
+  /** 相对行右缘再左移（约 10px，分两次各 5） */
+  var FRIEND_LIST_WATCH_BTN_SHIFT_LEFT_RPX = 10;
   /** 判定横向滑动 vs 竖向滚动（px²） */
   var FRIEND_LIST_SWIPE_DECIDE_PX2 = 8 * 8;
   /** 抠图或 contain 策略变更时递增，使缓存失效 */
@@ -716,7 +720,8 @@ module.exports = function registerFriendListHome(app, deps) {
   }
 
   /**
-   * 在线状态：接口为 boolean online；缓存/序列化可能为 1/0、字符串或 isOnline 字段。
+   * 在线状态：接口 boolean online；兼容 isOnline / is_online、1/0、字符串。
+   * 与 inGame 的关系由 {@link normalizeFriendListRowsInPlace} 合并（对局中亦记为在线）。
    */
   function friendRowIsOnline(fr) {
     if (!fr) {
@@ -725,6 +730,9 @@ module.exports = function registerFriendListHome(app, deps) {
     var v = fr.online;
     if (v == null && fr.isOnline != null) {
       v = fr.isOnline;
+    }
+    if (v == null && fr.is_online != null) {
+      v = fr.is_online;
     }
     if (v === true || v === 1) {
       return true;
@@ -757,7 +765,7 @@ module.exports = function registerFriendListHome(app, deps) {
     return false;
   }
 
-  /** 兼容缓存/旧字段，保证列表行与未读 map、头像缓存共用 peerUserId；并规范 online 为布尔值 */
+  /** 兼容缓存/旧字段，保证列表行与未读 map、头像缓存共用 peerUserId；并规范 online / inGame */
   function normalizeFriendListRowsInPlace(list) {
     if (!list || !list.length) {
       return;
@@ -775,8 +783,8 @@ module.exports = function registerFriendListHome(app, deps) {
           r.peerUserId = r.userId;
         }
       }
-      r.online = friendRowIsOnline(r);
       r.inGame = friendRowInGame(r);
+      r.online = friendRowIsOnline(r) || r.inGame;
       if (r.remark == null) {
         r.remark = '';
       }
@@ -797,10 +805,22 @@ module.exports = function registerFriendListHome(app, deps) {
     var rowPad = app.rpx(8);
     var rowHCell = L.rowH - app.rpx(4);
     var btnW = app.rpx(FRIEND_LIST_WATCH_BTN_RPX);
+    var trim = app.rpx(FRIEND_LIST_WATCH_BTN_HEIGHT_TRIM_RPX);
+    var btnH = Math.max(
+      app.rpx(26),
+      rowHCell * 0.5 - trim
+    );
+    var yBtn = yRow + (rowHCell - btnH) * 0.5;
     var o = offRow > 0 ? offRow : 0;
     var contentW = L.w - rowPad * 2;
-    var x0 = panelX + rowPad + contentW - btnW - o;
-    return { x: x0, y: yRow, w: btnW, h: rowHCell };
+    var x0 =
+      panelX +
+      rowPad +
+      contentW -
+      btnW -
+      o -
+      app.rpx(FRIEND_LIST_WATCH_BTN_SHIFT_LEFT_RPX);
+    return { x: x0, y: yBtn, w: btnW, h: btnH };
   }
 
   function friendListHitWatch(x, y, L, panelX, yRow, offRow) {
@@ -1438,7 +1458,6 @@ module.exports = function registerFriendListHome(app, deps) {
     app.friendListScrollY = 0;
     persistOpen();
     startOpenAnim();
-    app.refreshHomeFriendListFromServer();
     if (typeof app.draw === 'function') {
       app.draw();
     }
@@ -2366,6 +2385,9 @@ module.exports = function registerFriendListHome(app, deps) {
           var dy = y - F.cy;
           if (dx * dx + dy * dy <= F.r * F.r * 1.44) {
             app.openHomeFriendList();
+            if (typeof app.refreshHomeFriendListFromServer === 'function') {
+              app.refreshHomeFriendListFromServer();
+            }
           }
           if (typeof app.draw === 'function') {
             app.draw();
@@ -3824,7 +3846,7 @@ module.exports = function registerFriendListHome(app, deps) {
           ? yRow + L.rowH * 0.36
           : yRow + L.rowH * 0.5;
         var watchReserve = frInGame
-          ? app.rpx(FRIEND_LIST_WATCH_BTN_RPX) + app.rpx(6)
+          ? app.rpx(FRIEND_LIST_WATCH_BTN_RPX) + app.rpx(8)
           : 0;
         var nameMaxPx = Math.max(
           app.rpx(48),
@@ -3865,45 +3887,62 @@ module.exports = function registerFriendListHome(app, deps) {
             yRow,
             offRow
           );
-          app.ctx.fillStyle = 'rgba(21, 128, 61, 0.14)';
           var wbx = wRect.x;
-          var wby = wRect.y + wRect.h * 0.14;
+          var wby = wRect.y;
           var wbw = wRect.w;
-          var wbh = wRect.h * 0.72;
-          var wbr = Math.min(
-            app.rpx(8),
-            wbw * 0.2,
-            wbh * 0.2
-          );
+          var wbh = wRect.h;
+          var wbr = Math.min(wbh * 0.5, wbw * 0.5, app.rpx(10));
+          var fillStyle = '#f2f8f5';
+          try {
+            if (app.ctx.createLinearGradient) {
+              var gg = app.ctx.createLinearGradient(
+                wbx,
+                wby,
+                wbx,
+                wby + wbh
+              );
+              gg.addColorStop(0, '#ffffff');
+              gg.addColorStop(0.55, '#f4faf7');
+              gg.addColorStop(1, '#e2efe8');
+              fillStyle = gg;
+            }
+          } catch (eWatchGrad) {
+            fillStyle = '#f2f8f5';
+          }
           /** 用 app.roundRect（arcTo），勿用 ctx.roundRect：小游戏引擎与标准 Canvas 的 radii 参数不兼容。 */
           if (typeof app.roundRect === 'function') {
+            app.ctx.fillStyle = 'rgba(12, 74, 48, 0.06)';
+            app.roundRect(wbx + 0.5, wby + app.rpx(1.2), wbw, wbh, wbr);
+            app.ctx.fill();
+            app.ctx.fillStyle = fillStyle;
             app.roundRect(wbx, wby, wbw, wbh, wbr);
             app.ctx.fill();
             app.roundRect(wbx, wby, wbw, wbh, wbr);
-            app.ctx.strokeStyle = 'rgba(21, 128, 61, 0.5)';
-            app.ctx.lineWidth = Math.max(1, app.rpx(1.5));
+            app.ctx.strokeStyle = 'rgba(22, 101, 52, 0.2)';
+            app.ctx.lineWidth = Math.max(1, app.rpx(1));
             app.ctx.stroke();
           } else {
+            app.ctx.fillStyle = fillStyle;
             app.ctx.beginPath();
             app.ctx.rect(wbx, wby, wbw, wbh);
             app.ctx.fill();
             app.ctx.beginPath();
             app.ctx.rect(wbx, wby, wbw, wbh);
-            app.ctx.strokeStyle = 'rgba(21, 128, 61, 0.5)';
-            app.ctx.lineWidth = Math.max(1, app.rpx(1.5));
+            app.ctx.strokeStyle = 'rgba(22, 101, 52, 0.22)';
+            app.ctx.lineWidth = Math.max(1, app.rpx(1));
             app.ctx.stroke();
           }
-          app.ctx.fillStyle = '#15803d';
+          app.ctx.fillStyle = '#1b6b3d';
           app.ctx.font =
             '600 ' +
-            app.rpx(24) +
+            app.rpx(20) +
             'px "PingFang SC","Hiragino Sans GB",sans-serif';
           app.ctx.textAlign = 'center';
           app.ctx.textBaseline = 'middle';
           app.ctx.fillText(
             '观战',
             wRect.x + wRect.w * 0.5,
-            wRect.y + wRect.h * 0.5
+            wRect.y + wbh * 0.5
           );
           app.ctx.textAlign = 'left';
         }
