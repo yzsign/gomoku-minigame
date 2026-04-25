@@ -2443,6 +2443,34 @@ app.friendListHomeUiFromTheme = function(th) {
         : id === 'ink'
           ? 'rgba(74, 66, 58, 0.24)'
           : 'rgba(200, 188, 172, 0.45)',
+    /** 行内「游戏中」与战绩胜色、online 点同源 */
+    friendInGame: winTitle,
+    /** 观战 pill：与 Tab 药丸同级，轻向绿 / 暖底 */
+    watchPillG0:
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.99)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 250, 0.98)'
+          : 'rgba(255, 253, 250, 0.99)',
+    watchPillG1:
+      id === 'mint'
+        ? 'rgba(224, 246, 241, 0.97)'
+        : id === 'ink'
+          ? 'rgba(236, 230, 222, 0.97)'
+          : 'rgba(232, 244, 234, 0.97)',
+    watchPillStroke:
+      id === 'mint'
+        ? 'rgba(0, 120, 118, 0.25)'
+        : id === 'ink'
+          ? 'rgba(120, 95, 78, 0.3)'
+          : 'rgba(46, 125, 50, 0.24)',
+    watchPillText: winTitle,
+    watchPillShade:
+      id === 'mint'
+        ? 'rgba(0, 64, 62, 0.05)'
+        : id === 'ink'
+          ? 'rgba(28, 22, 16, 0.07)'
+          : 'rgba(20, 70, 32, 0.06)',
     /** 私聊顶栏：与侧栏渐变中段一致 */
     chatHeaderBg: panelArr[1],
     /** 私聊消息列表区（暖色 parchment，非微信灰） */
