@@ -81,6 +81,23 @@ app.buildBoardFromMoves = function(moves, step) {
   return b;
 }
 
+/** 当前回放步的棋盘是否已有棋子（未点「下一步」时步数为 0，盘面为空，复盘应置灰） */
+app.replayBoardHasAnyStone = function(board) {
+  if (!board) {
+    return false;
+  }
+  var i;
+  var j;
+  for (i = 0; i < app.SIZE; i++) {
+    for (j = 0; j < app.SIZE; j++) {
+      if (board[i][j] !== gomoku.EMPTY) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
 app.clearReplayControlPress = function() {
   app.replayControlPressedId = null;
   app.replayTouchIdentifier = null;
@@ -432,8 +449,9 @@ app.hitReplayControl = function(clientX, clientY) {
   var halfH = 24;
   var studyY = app.getReplayStudyButtonY();
   if (
-    app.replayMoves &&
-    app.replayMoves.length > 0 &&
+    app.replayBoardHasAnyStone(
+      app.buildBoardFromMoves(app.replayMoves || [], app.replayStep)
+    ) &&
     Math.abs(clientX - app.W / 2) <= 72 &&
     Math.abs(clientY - studyY) <= 22
   ) {
@@ -501,7 +519,7 @@ app.drawReplayBoardLayer = function() {
   var total = app.replayMoves.length;
   var btnY = app.getReplayControlsButtonY();
   var studyY = app.getReplayStudyButtonY();
-  var studyOn = total > 0;
+  var studyOn = app.replayBoardHasAnyStone(rb);
   app.drawReplayToolbarButton('复盘', app.W / 2, studyY, studyOn, 'study');
   app.drawReplayToolbarButton('关闭', app.W * 0.18, btnY, true, 'close');
   app.drawReplayStepIconButton(
