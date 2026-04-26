@@ -2438,6 +2438,15 @@ app.drawReplayToolbarPill = function(cx, cy, bw, bh, active, pressed) {
   app.roundRect(x + 0.2, y + 0.2, bw - 0.4, bh - 0.4, Math.max(0, r - 0.2));
   ctx.stroke();
 
+  if (!active) {
+    ctx.save();
+    app.roundRect(x, y, bw, bh, r);
+    ctx.clip();
+    ctx.fillStyle = 'rgba(0,0,0,0.14)';
+    ctx.fillRect(x, y, bw, bh);
+    ctx.restore();
+  }
+
   if (pressed) {
     ctx.save();
     app.roundRect(x, y, bw, bh, r);

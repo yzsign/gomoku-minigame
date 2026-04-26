@@ -185,6 +185,22 @@ app.onReplayControlHit = function(rc) {
     return;
   }
   if (rc === 'study') {
+    var studyBoard = app.buildBoardFromMoves(
+      app.replayMoves || [],
+      app.replayStep
+    );
+    if (!app.replayBoardHasAnyStone(studyBoard)) {
+      if (typeof wx !== 'undefined' && wx.showToast) {
+        var studyHasMoves = app.replayMoves && app.replayMoves.length > 0;
+        wx.showToast({
+          title: studyHasMoves
+            ? '请先点「下一步」浏览棋局'
+            : '暂无棋谱',
+          icon: 'none'
+        });
+      }
+      return;
+    }
     app.enterReplayStudyFromCurrentStep();
     return;
   }
@@ -359,6 +375,12 @@ app.enterReplayStudyFromCurrentStep = function() {
     return;
   }
   var board = app.buildBoardFromMoves(app.replayMoves, app.replayStep);
+  if (!app.replayBoardHasAnyStone(board)) {
+    if (typeof wx !== 'undefined' && wx.showToast) {
+      wx.showToast({ title: '请先点「下一步」浏览棋局', icon: 'none' });
+    }
+    return;
+  }
   var sideToMove = app.replaySideToMoveAfterStep(app.replayStep);
   var stepN = app.replayStep;
   var fb = app.replayBlackPieceSkinId;
@@ -443,18 +465,20 @@ app.getReplayStudyButtonY = function() {
   return app.getReplayControlsButtonY() - 54;
 };
 
+/** 全屏/弹层棋谱：「复盘」药丸点击区域（与绘制位置一致，与是否可点无关）。 */
+app.hitReplayStudyButtonZone = function(clientX, clientY) {
+  var studyY = app.getReplayStudyButtonY();
+  return (
+    Math.abs(clientX - app.W / 2) <= 72 &&
+    Math.abs(clientY - studyY) <= 22
+  );
+};
+
 app.hitReplayControl = function(clientX, clientY) {
   var btnY = app.getReplayControlsButtonY();
   var halfW = 46;
   var halfH = 24;
-  var studyY = app.getReplayStudyButtonY();
-  if (
-    app.replayBoardHasAnyStone(
-      app.buildBoardFromMoves(app.replayMoves || [], app.replayStep)
-    ) &&
-    Math.abs(clientX - app.W / 2) <= 72 &&
-    Math.abs(clientY - studyY) <= 22
-  ) {
+  if (app.hitReplayStudyButtonZone(clientX, clientY)) {
     return 'study';
   }
   var list = [

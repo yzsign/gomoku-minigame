@@ -2574,6 +2574,9 @@ app.maybeRequestOnlineGameSettle = function(matchRoundOverride) {
             } else if (d.caller_plays_black === true || d.caller_plays_black === false) {
               app.lastSettleRating.callerPlaysBlack = d.caller_plays_black;
             }
+            if (isFinite(cApD)) {
+              app.lastSettleRating.callerActivityPointsDelta = cApD;
+            }
             if (app.isPvpOnline) {
               if (isFinite(cEloAfter)) {
                 app.homeRatingEloCache = Math.round(cEloAfter);
@@ -2584,17 +2587,12 @@ app.maybeRequestOnlineGameSettle = function(matchRoundOverride) {
                     : app.lastSettleRating.whiteEloAfter;
                 app.homeRatingEloCache = mineAfter;
               }
-              if (isFinite(cApD) && cApD > 0) {
-                app.startResultTuanPointsAnim(cApD);
-              } else {
-                var mineApD2 = NaN;
-                if (isFinite(bApD) && isFinite(wApD)) {
-                  mineApD2 =
-                    app.pvpOnlineYourColor === app.BLACK ? bApD : wApD;
-                }
-                if (isFinite(mineApD2) && mineApD2 > 0) {
-                  app.startResultTuanPointsAnim(mineApD2);
-                }
+              /**
+               * 须等 showResultOverlay 为真后再飘字。连五终局时 finishGameWithWin 会先关 overlay、
+               * 延迟再 openResult；若 settle 先返回，此处启动会被 RAF 里 !showResultOverlay 清掉。
+               */
+              if (typeof app.tryStartResultTuanPointsAnimFromSettle === 'function') {
+                app.tryStartResultTuanPointsAnimFromSettle();
               }
             }
             app.draw();
@@ -2712,6 +2710,9 @@ app.openResult = function() {
     var dpd = app.dailyPuzzleSubmitActivityPointsDelta;
     app.dailyPuzzleSubmitActivityPointsDelta = null;
     app.startResultTuanPointsAnim(dpd);
+  }
+  if (typeof app.tryStartResultTuanPointsAnimFromSettle === 'function') {
+    app.tryStartResultTuanPointsAnimFromSettle();
   }
   app.recordMatchHistoryFromGameEnd();
   app.screen = 'game';
@@ -3141,6 +3142,53 @@ app.ensureResultWinHeaderAnimLoop = function() {
 
 /** 联机结算页：仅自己一侧飘字，时长与 themeBubble 共用 RAF */
 var RESULT_TUAN_POINTS_ANIM_MS = 1400;
+
+/**
+ * 从 lastSettleRating 取本局己方的团团积分增量（优先 caller*，与 settle 内逻辑一致）。
+ * @returns {number} 正数或 NaN
+ */
+app.getMyActivityPointsDeltaFromLastSettle = function() {
+  var sr = app.lastSettleRating;
+  if (!sr) {
+    return NaN;
+  }
+  if (
+    typeof sr.callerActivityPointsDelta === 'number' &&
+    isFinite(sr.callerActivityPointsDelta) &&
+    sr.callerActivityPointsDelta > 0
+  ) {
+    return sr.callerActivityPointsDelta;
+  }
+  var bApD = sr.blackActivityPointsDelta;
+  var wApD = sr.whiteActivityPointsDelta;
+  if (
+    typeof bApD === 'number' &&
+    isFinite(bApD) &&
+    typeof wApD === 'number' &&
+    isFinite(wApD)
+  ) {
+    return app.pvpOnlineYourColor === app.BLACK ? bApD : wApD;
+  }
+  return NaN;
+};
+
+/**
+ * 在结算全屏层已显示后调用：有增量则启动飘字。用于 openResult 与 settle 回包，避免在胜利线揭示期间误清。
+ */
+app.tryStartResultTuanPointsAnimFromSettle = function() {
+  if (
+    !app.isPvpOnline ||
+    !app.showResultOverlay ||
+    app.onlineSpectatorMode
+  ) {
+    return;
+  }
+  var d = app.getMyActivityPointsDeltaFromLastSettle();
+  if (typeof d !== 'number' || !isFinite(d) || d <= 0) {
+    return;
+  }
+  app.startResultTuanPointsAnim(d);
+};
 
 app.stopResultTuanPointsAnim = function() {
   if (app.resultTuanPointsRafId != null) {
@@ -3572,6 +3620,45 @@ function getResultOverlayRankLabel(app) {
   }
   var rt = ratingTitle.getRankAndTitleByElo(elo);
   return rt && rt.rankLabel ? rt.rankLabel : '\u2014';
+}
+
+/**
+ * 结算层「得分」列：本局天梯分变化。优先 API callerEloDelta，否则按执子色用黑白列（与 /games/settle 一致）。
+ * 避免 eloLine 内 callerEloAfter 有值而 callerEloDelta 未写入时错显为 0；兼容字符串数字。
+ * @returns {number|null} 本局 change，无结算数据为 null
+ */
+function getResultOverlayMyLadderDeltaNum(app) {
+  if (!app.isPvpOnline || app.onlineSpectatorMode) {
+    return null;
+  }
+  var sr = app.lastSettleRating;
+  if (!sr) {
+    return null;
+  }
+  function numish(v) {
+    if (typeof v === 'number' && isFinite(v)) {
+      return v;
+    }
+    if (v === null || v === undefined || v === '') {
+      return null;
+    }
+    var x = Number(v);
+    return isFinite(x) ? x : null;
+  }
+  var cD = numish(sr.callerEloDelta);
+  if (cD !== null) {
+    return cD;
+  }
+  var bD = numish(sr.blackEloDelta);
+  var wD = numish(sr.whiteEloDelta);
+  if (bD === null || wD === null) {
+    return null;
+  }
+  var yc = app.pvpOnlineYourColor;
+  if (yc !== app.BLACK && yc !== app.WHITE) {
+    return null;
+  }
+  return yc === app.BLACK ? bD : wD;
 }
 
 function resultOverlaySideRoles(app) {
@@ -4042,25 +4129,6 @@ app.drawResultOverlay = function() {
       ? rankRaw
       : app.truncateNameToWidth(ctx, rankRaw, colW3 - 12);
 
-  var col1 = ly.statsX + ly.statsW / 6;
-  var col2 = ly.statsX + ly.statsW / 2;
-  var col3 = ly.statsX + (5 * ly.statsW) / 6;
-  var statLabelY = ly.statsY + 18;
-  var statValY = ly.statsY + 46;
-  ctx.font = '12px "PingFang SC","Hiragino Sans GB",sans-serif';
-  ctx.fillStyle = '#999999';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('对局时长', app.snapPx(col1), app.snapPx(statLabelY));
-  ctx.fillText('总落子数', app.snapPx(col2), app.snapPx(statLabelY));
-  ctx.fillText('当前段位', app.snapPx(col3), app.snapPx(statLabelY));
-  ctx.font = 'bold 18px "PingFang SC","Hiragino Sans GB",sans-serif';
-  ctx.fillStyle = '#333333';
-  ctx.fillText(durStr, app.snapPx(col1), app.snapPx(statValY));
-  ctx.fillText(String(moveCnt), app.snapPx(col2), app.snapPx(statValY));
-  ctx.font = 'bold 15px "PingFang SC","Hiragino Sans GB",sans-serif';
-  ctx.fillText(rankStr, app.snapPx(col3), app.snapPx(statValY));
-
   function eloLine(forBlack, onlineWhich) {
     if (app.isDailyPuzzle) {
       return { elo: '--', delta: '', dNeg: false, dZero: true };
@@ -4076,9 +4144,15 @@ app.drawResultOverlay = function() {
         isFinite(sr.callerEloAfter)
       ) {
         e = sr.callerEloAfter;
-        d = typeof sr.callerEloDelta === 'number' && isFinite(sr.callerEloDelta)
-          ? sr.callerEloDelta
-          : 0;
+        if (typeof sr.callerEloDelta === 'number' && isFinite(sr.callerEloDelta)) {
+          d = sr.callerEloDelta;
+        } else {
+          d = forBlack ? sr.blackEloDelta : sr.whiteEloDelta;
+          d =
+            typeof d === 'number' && isFinite(d)
+              ? d
+              : 0;
+        }
       } else if (
         app.isPvpOnline &&
         onlineWhich === 'opp' &&
@@ -4097,7 +4171,7 @@ app.drawResultOverlay = function() {
       var deltaStr = '';
       var dNeg = false;
       var dZero = false;
-      if (typeof d === 'number') {
+      if (typeof d === 'number' && isFinite(d)) {
         dNeg = d < 0;
         dZero = d === 0;
         deltaStr = '(' + (d > 0 ? '+' : '') + d + ')';
@@ -4162,18 +4236,42 @@ app.drawResultOverlay = function() {
       lw = eloLine(false);
     }
   }
+
+  var col1 = ly.statsX + ly.statsW / 6;
+  var col2 = ly.statsX + ly.statsW / 2;
+  var col3 = ly.statsX + (5 * ly.statsW) / 6;
+  var statLabelY = ly.statsY + 18;
+  var statValY = ly.statsY + 46;
+  ctx.font = 'bold 18px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  var myLadD = getResultOverlayMyLadderDeltaNum(app);
+  var scoreValStr = '\u2014';
+  if (myLadD !== null) {
+    scoreValStr = (myLadD > 0 ? '+' : '') + String(myLadD);
+  }
+  ctx.font = '12px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = '#999999';
+  ctx.fillText('得分', app.snapPx(col1), app.snapPx(statLabelY));
+  ctx.fillText('总落子数', app.snapPx(col2), app.snapPx(statLabelY));
+  ctx.fillText('当前段位', app.snapPx(col3), app.snapPx(statLabelY));
+  ctx.font = 'bold 18px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillStyle = '#333333';
+  ctx.fillText(scoreValStr, app.snapPx(col1), app.snapPx(statValY));
+  ctx.fillText(String(moveCnt), app.snapPx(col2), app.snapPx(statValY));
+  ctx.font = 'bold 15px "PingFang SC","Hiragino Sans GB",sans-serif';
+  ctx.fillText(rankStr, app.snapPx(col3), app.snapPx(statValY));
+
   var eloFootY = ly.statsY + ly.statsH + 13;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = '11px "PingFang SC","Hiragino Sans GB",sans-serif';
   ctx.fillStyle = '#999999';
-  var eloFootStr = '';
-  if (lb.elo && lb.elo !== '--') {
-    eloFootStr = '得分 ' + lb.elo + (lb.delta || '');
-  }
-  if (eloFootStr) {
-    ctx.fillText(eloFootStr, app.snapPx(app.W * 0.5), app.snapPx(eloFootY));
-  }
+  ctx.fillText(
+    '对局时长 ' + durStr,
+    app.snapPx(app.W * 0.5),
+    app.snapPx(eloFootY)
+  );
 
   drawResultOverlayTuanPointsAnim(app, ctx, th, ly);
 

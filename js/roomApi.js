@@ -1,10 +1,10 @@
 /**
  * 联机 HTTP / WebSocket 基址与请求选项
- * （需与微信后台「request 合法域名」一致；生产请用 https + wss）
+ * （需与微信后台「request 合法域名」一致；所有接口与 wss 均由此派生）
  */
- //var GOMOKU_API_BASE = 'http://127.0.0.1:8080';
-var GOMOKU_API_BASE ='https://springboot-emh7-241395-4-1418403127.sh.run.tcloudbase.com';
-
+// var GOMOKU_API_BASE = 'http://127.0.0.1:8080';
+// var GOMOKU_API_BASE = 'https://springboot-emh7-241395-4-1418403127.sh.run.tcloudbase.com';
+var GOMOKU_API_BASE = 'https://www.tuantuangmk.com';
 function withAuthHeaders(baseHeader) {
   var h = baseHeader ? Object.assign({}, baseHeader) : {};
   try {

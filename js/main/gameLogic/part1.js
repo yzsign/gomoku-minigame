@@ -77,7 +77,7 @@ app.checkinStateCache = null;
 app.checkinModalVisible = false;
 app.checkinModalData = null;
 
-/** 是否已处理过「首次资料」询问（含用户点暂不） */
+/** 是否已处理过「首次资料」询问（含用户点暂不、拒绝/关闭 getUserProfile、不支持授权的环境） */
 app.PROFILE_PROMPT_STORAGE_KEY = 'gomoku_profile_prompt_done';
 /** 授权后写入，棋盘左下角展示「我」的昵称 */
 app.LOCAL_NICKNAME_KEY = 'gomoku_local_nickname';
@@ -1619,30 +1619,83 @@ app.hitWhichGameBoardNameAvatar = function(clientX, clientY) {
 
 /**
  * 首次进入：系统弹窗「完善资料」，在 showModal 的 success 里调用 wx.getUserProfile（按产品要求保留该写法）。
- * 若本地已有授权缓存的微信昵称（readCachedWeChatUserInfo），则不再询问。
+ * 若本地已有授权缓存的微信资料，或（登录后）GET /api/me/rating 能拿到昵称与头像，则不再询问。
  * 若已通过分享链接进入对局，则不再弹出以免盖住棋盘。
+ * 调用的时机见 part6：在 silentLogin 之后执行，以便用 token 拉取服务端资料。
  */
-app.maybeFirstVisitProfileModal = function() {
-  if (typeof wx === 'undefined') {
+app.profileModalServerCheckInFlight = false;
+app.trySkipFirstVisitProfileFromServer = function() {
+  if (app.profileModalServerCheckInFlight) {
     return;
   }
-  try {
-    if (wx.getStorageSync(app.PROFILE_PROMPT_STORAGE_KEY) === '1') {
-      return;
-    }
-  } catch (e0) {}
-  /** 本地已有此前授权保存的微信资料时不再弹窗询问 */
-  var cachedWx =
-    typeof app.readCachedWeChatUserInfo === 'function'
-      ? app.readCachedWeChatUserInfo()
-      : null;
-  if (cachedWx && cachedWx.nickName) {
-    try {
-      wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
-    } catch (eCached) {}
+  if (
+    !roomApi ||
+    typeof roomApi.meRatingOptions !== 'function' ||
+    !authApi.getSessionToken ||
+    !authApi.getSessionToken()
+  ) {
+    app.scheduleFirstVisitProfileModal();
     return;
   }
-  if (typeof wx.showModal !== 'function') {
+  app.profileModalServerCheckInFlight = true;
+  wx.request(
+    Object.assign(roomApi.meRatingOptions(), {
+      success: function (res) {
+        app.profileModalServerCheckInFlight = false;
+        if (res.statusCode !== 200 || !res.data) {
+          app.scheduleFirstVisitProfileModal();
+          return;
+        }
+        var d = res.data;
+        if (d && typeof d === 'string') {
+          try {
+            d = JSON.parse(d);
+          } catch (pe) {
+            d = null;
+          }
+        }
+        if (!d) {
+          app.scheduleFirstVisitProfileModal();
+          return;
+        }
+        var nick = typeof d.nickname === 'string' && d.nickname.trim();
+        var av =
+          typeof d.avatarUrl === 'string' && d.avatarUrl.trim();
+        if (nick && av) {
+          try {
+            wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
+          } catch (eMark) {}
+          var ui = {
+            nickName: String(d.nickname).trim(),
+            avatarUrl: av,
+            gender: typeof d.gender === 'number' ? d.gender : 0
+          };
+          if (typeof app.saveCachedWeChatUserInfo === 'function') {
+            app.saveCachedWeChatUserInfo(ui);
+          }
+          if (typeof app.persistLocalNickname === 'function') {
+            app.persistLocalNickname(ui);
+          }
+          if (typeof app.loadMyNetworkAvatar === 'function') {
+            app.loadMyNetworkAvatar(av);
+          }
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+          return;
+        }
+        app.scheduleFirstVisitProfileModal();
+      },
+      fail: function () {
+        app.profileModalServerCheckInFlight = false;
+        app.scheduleFirstVisitProfileModal();
+      }
+    })
+  );
+};
+
+app.scheduleFirstVisitProfileModal = function() {
+  if (typeof wx === 'undefined' || typeof wx.showModal !== 'function') {
     return;
   }
   setTimeout(function () {
@@ -1673,7 +1726,8 @@ app.maybeFirstVisitProfileModal = function() {
       confirmText: '授权',
       cancelText: '暂不',
       success: function (modalRes) {
-        if (!modalRes.confirm) {
+        /** 点「暂」或取消：与文案「仅询问一次」一致，持久化后不再首访弹窗 */
+        if (!modalRes.confirm || modalRes.cancel) {
           try {
             wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
           } catch (e1) {}
@@ -1683,6 +1737,9 @@ app.maybeFirstVisitProfileModal = function() {
           if (typeof wx.showToast === 'function') {
             wx.showToast({ title: '当前环境不支持授权', icon: 'none' });
           }
+          try {
+            wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
+          } catch (eGup) {}
           return;
         }
         wx.getUserProfile({
@@ -1714,6 +1771,10 @@ app.maybeFirstVisitProfileModal = function() {
             } catch (e2) {}
           },
           fail: function () {
+            /** 用户拒绝/关闭微信授权，视为与「暂」同：不再首访弹「完善资料」 */
+            try {
+              wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
+            } catch (eFail) {}
             if (typeof wx.showToast === 'function') {
               wx.showToast({ title: '未授权', icon: 'none' });
             }
@@ -1722,6 +1783,33 @@ app.maybeFirstVisitProfileModal = function() {
       }
     });
   }, 450);
+};
+
+app.maybeFirstVisitProfileModal = function() {
+  if (typeof wx === 'undefined') {
+    return;
+  }
+  try {
+    if (wx.getStorageSync(app.PROFILE_PROMPT_STORAGE_KEY) === '1') {
+      return;
+    }
+  } catch (e0) {}
+  /** 本地已有此前授权保存的微信资料时不再弹窗询问 */
+  var cachedWx =
+    typeof app.readCachedWeChatUserInfo === 'function'
+      ? app.readCachedWeChatUserInfo()
+      : null;
+  if (cachedWx && cachedWx.nickName) {
+    try {
+      wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
+    } catch (eCached) {}
+    return;
+  }
+  if (authApi.getSessionToken && authApi.getSessionToken()) {
+    app.trySkipFirstVisitProfileFromServer();
+  } else {
+    app.scheduleFirstVisitProfileModal();
+  }
 }
 
 themes.setTuanMoeUnlockedFromServer(false);

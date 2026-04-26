@@ -79,11 +79,11 @@ defaultAvatars.preloadAll(function () {
 });
 
 app.draw();
-app.maybeFirstVisitProfileModal();
 
 /**
  * 先完成一次静默登录再处理分享进房，避免与 joinOnlineAsGuest 内 ensureSession 并发两次 wx.login，
  * 减少「请先完成登录」误报；无分享参数时与普通首屏 silentLogin 等价。
+ * 首访「完善资料」在登录后触发，以便用 token 请求 /api/me/rating 判断是否已有资料。
  */
 authApi.silentLogin(null, function () {
   if (deferredOnlineInviteQuery) {
@@ -92,6 +92,9 @@ authApi.silentLogin(null, function () {
     if (typeof app.tryLaunchOnlineInvite === 'function') {
       app.tryLaunchOnlineInvite(q);
     }
+  }
+  if (typeof app.maybeFirstVisitProfileModal === 'function') {
+    app.maybeFirstVisitProfileModal();
   }
 });
 setTimeout(function () {
