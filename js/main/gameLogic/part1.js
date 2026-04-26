@@ -1827,6 +1827,17 @@ app.pieceSkinModalAnimRafId = null;
 /** 分页与当前选中（catalog 全局下标） */
 app.pieceSkinModalPage = 0;
 app.pieceSkinModalPendingIdx = 0;
+/** 当前选中的卡片段（与后端分页时 pendingIdx 配套，用于兑换/穿戴） */
+app.pieceSkinModalPendingEntry = null;
+/** 杂货铺 GET /api/me/shop/catalog?page&size 成功后的目录状态 */
+app.shopCatalogServerPaged = false;
+app.shopCatalogTotal = 0;
+app.shopCatalogOrderItemCodes = [];
+app.shopCatalogPageEntries = [];
+/** 杂货铺：在商品网格内按下，用于 touchEnd 区分滑动翻页与点选 */
+app.pieceShopGridTouchArmed = false;
+app.pieceShopGridTouchX = 0;
+app.pieceShopGridTouchY = 0;
 app.pieceSkinRedeemInFlight = false;
 /** 杂货铺：双击穿戴，首击 catalog 下标与时间戳 */
 app.pieceSkinWearDblIdx = -1;
@@ -1878,6 +1889,10 @@ app.historyListTouchStartY = 0;
 app.historyPeakEloCached = 0;
 /** GET /api/me/game-history 返回的 items；与本地人机记录合并展示 */
 app.historyServerItems = [];
+/** 服务端是否还有下一页（offset=historyServerItems.length 继续拉） */
+app.historyListHasMore = false;
+/** 触底加载下一页中 */
+app.historyListLoadingMore = false;
 /** 已登录时拉取 rating + game-history 完成前为 true，列表区显示加载态 */
 app.historyListLoading = false;
 /** 切换战绩筛选胶囊时拉取列表，列表区显示加载态 */
@@ -2350,10 +2365,10 @@ app.historyPageUiFromTheme = function(th) {
     statStroke: S ? S.stroke : 'rgba(92, 75, 58, 0.14)',
     statShadow:
       id === 'mint'
-        ? 'rgba(12, 52, 64, 0.1)'
+        ? 'rgba(12, 52, 64, 0.06)'
         : id === 'ink'
-          ? 'rgba(28, 22, 16, 0.11)'
-          : 'rgba(60, 48, 38, 0.12)',
+          ? 'rgba(28, 22, 16, 0.07)'
+          : 'rgba(60, 48, 38, 0.08)',
     statDivider: S ? S.statusSep : 'rgba(92, 75, 58, 0.12)',
     tabBg:
       id === 'mint'
@@ -2372,29 +2387,29 @@ app.historyPageUiFromTheme = function(th) {
           : 'rgba(255, 254, 251, 1)',
     rowG1:
       id === 'mint'
-        ? 'rgba(248, 252, 251, 0.99)'
+        ? 'rgba(252, 253, 253, 0.99)'
         : id === 'ink'
-          ? 'rgba(252, 248, 244, 0.99)'
-          : 'rgba(255, 250, 242, 0.99)',
+          ? 'rgba(254, 252, 250, 0.99)'
+          : 'rgba(255, 252, 248, 0.99)',
     rowG2:
       id === 'mint'
-        ? 'rgba(218, 234, 230, 0.96)'
+        ? 'rgba(235, 244, 242, 0.98)'
         : id === 'ink'
-          ? 'rgba(228, 218, 206, 0.96)'
-          : 'rgba(238, 228, 214, 0.97)',
+          ? 'rgba(244, 238, 230, 0.98)'
+          : 'rgba(250, 244, 236, 0.98)',
     rowStroke: S ? S.stroke : 'rgba(92, 75, 58, 0.13)',
     rowShadow:
       id === 'mint'
-        ? 'rgba(10, 45, 55, 0.14)'
+        ? 'rgba(10, 45, 55, 0.07)'
         : id === 'ink'
-          ? 'rgba(22, 18, 14, 0.16)'
-          : 'rgba(38, 28, 18, 0.2)',
+          ? 'rgba(22, 18, 14, 0.08)'
+          : 'rgba(38, 28, 18, 0.1)',
     rowFoot1:
       id === 'mint'
-        ? 'rgba(20, 55, 62, 0.04)'
+        ? 'rgba(20, 55, 62, 0.02)'
         : id === 'ink'
-          ? 'rgba(40, 32, 24, 0.06)'
-          : 'rgba(72, 56, 40, 0.06)',
+          ? 'rgba(40, 32, 24, 0.03)'
+          : 'rgba(72, 56, 40, 0.03)',
     win: winC,
     lose: loseC,
     draw: drawC,

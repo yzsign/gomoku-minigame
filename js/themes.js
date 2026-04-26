@@ -511,8 +511,8 @@ function applyLoveSkillEquippedFromServer(equipped) {
   saveLoveBoardSkillId(equipped ? 'love' : null);
 }
 
-/** 杂货铺列表（双列 4 行，每页 8 格） */
-var PIECE_SKINS_PER_PAGE = 8;
+/** 杂货铺列表（双列 3 行，每页 6 格；多页时左滑下一页、右滑上一页） */
+var PIECE_SKINS_PER_PAGE = 6;
 
 /**
  * 「团团萌肤」是否已解锁：由服务端 users.piece_skin_tuan_moe_unlocked 决定，
@@ -651,6 +651,111 @@ function getShopCategory(entry) {
     return SHOP_CATEGORY_THEME;
   }
   return SHOP_CATEGORY_PIECE_SKIN;
+}
+
+/**
+ * 客户端列表 id → GET /api/me/shop/catalog 的 orderItemCodes 中的 itemCode（dagger/love 与 client_row_id 不同名）。
+ */
+function shopOrderItemCodeFromClientId(clientId) {
+  if (clientId === 'dagger_skill') {
+    return 'dagger';
+  }
+  if (clientId === 'love_skill') {
+    return 'love';
+  }
+  return clientId;
+}
+
+/**
+ * 将单条 DTO 转为与 getPieceSkinCatalog 同结构的 entry（与 redeem / 装备逻辑共用）。
+ * @param {{ itemCode: string, shopCategory: string, redeemMode: string, displayLabel?: string, clientRowId?: string|null, consumableKind?: string|null, priceAmount?: number } } d
+ */
+function catalogEntryFromShopItemDto(d) {
+  if (!d || !d.itemCode) {
+    return null;
+  }
+  var code = d.itemCode;
+  var id = d.clientRowId || code;
+  var label = d.displayLabel || id;
+  var priceFromDto =
+    typeof d.priceAmount === 'number' && !isNaN(d.priceAmount) && d.priceAmount >= 0
+      ? Math.max(0, Math.floor(d.priceAmount))
+      : null;
+  var cat = d.shopCategory;
+  if (cat === SHOP_CATEGORY_CONSUMABLE || cat === 'consumable') {
+    var ck = d.consumableKind || (code === 'love' ? 'love' : 'dagger');
+    var rowId = d.clientRowId || (ck === 'love' ? 'love_skill' : 'dagger_skill');
+    var defCost = ck === 'love' ? CONSUMABLE_LOVE_COST_POINTS : CONSUMABLE_DAGGER_COST_POINTS;
+    var cost = priceFromDto != null ? priceFromDto : pointsCostFromShopCatalog(code, defCost);
+    return {
+      id: rowId,
+      kind: 'consumable',
+      consumableKind: ck,
+      shopCategory: SHOP_CATEGORY_CONSUMABLE,
+      locked: false,
+      label: label,
+      rowStatus: 'points',
+      costPoints: cost
+    };
+  }
+  if (cat === SHOP_CATEGORY_THEME || cat === 'theme') {
+    var tid = code;
+    var mintOk = isPieceSkinUnlockedOnServer('mint');
+    var inkOk = isPieceSkinUnlockedOnServer('ink');
+    var thOk = tid === 'mint' ? mintOk : tid === 'ink' ? inkOk : false;
+    var defT = THEME_SHOP_COST_POINTS;
+    var costT = priceFromDto != null ? priceFromDto : pointsCostFromShopCatalog(tid, defT);
+    return {
+      kind: 'theme',
+      shopCategory: SHOP_CATEGORY_THEME,
+      id: tid,
+      locked: !thOk,
+      label: label,
+      rowStatus: thOk ? 'owned' : 'points',
+      costPoints: thOk ? 0 : costT
+    };
+  }
+  if (code === 'basic') {
+    return {
+      id: 'basic',
+      shopCategory: SHOP_CATEGORY_PIECE_SKIN,
+      locked: false,
+      label: label,
+      rowStatus: 'owned'
+    };
+  }
+  if (code === 'tuan_moe') {
+    var tuanOk = isTuanMoeUnlocked();
+    return {
+      id: 'tuan_moe',
+      shopCategory: SHOP_CATEGORY_PIECE_SKIN,
+      locked: !tuanOk,
+      label: label,
+      rowStatus: tuanOk ? 'owned' : 'locked',
+      unlockHint: tuanOk ? undefined : tuanMoeLockedUnlockHint()
+    };
+  }
+  if (code === 'qingtao_libai') {
+    var qingOk = isPieceSkinUnlockedOnServer('qingtao_libai');
+    var defQ = PIECE_SKIN_QINGTAO_LIBAI_COST_POINTS;
+    var costQ = priceFromDto != null ? priceFromDto : pointsCostFromShopCatalog('qingtao_libai', defQ);
+    return {
+      id: 'qingtao_libai',
+      shopCategory: SHOP_CATEGORY_PIECE_SKIN,
+      locked: !qingOk,
+      label: label,
+      rowStatus: qingOk ? 'owned' : 'points',
+      costPoints: qingOk ? 0 : costQ
+    };
+  }
+  return {
+    id: id,
+    shopCategory: SHOP_CATEGORY_PIECE_SKIN,
+    locked: true,
+    label: label,
+    rowStatus: 'locked',
+    costPoints: priceFromDto != null ? priceFromDto : 0
+  };
 }
 
 function getPieceSkinCatalog() {
@@ -981,6 +1086,8 @@ var themesExports = {
   applyDaggerSkillEquippedFromServer: applyDaggerSkillEquippedFromServer,
   applyLoveSkillEquippedFromServer: applyLoveSkillEquippedFromServer,
   getShopCategory: getShopCategory,
+  shopOrderItemCodeFromClientId: shopOrderItemCodeFromClientId,
+  catalogEntryFromShopItemDto: catalogEntryFromShopItemDto,
   applyShopCatalogFromServerPayload: applyShopCatalogFromServerPayload,
   getPieceSkinCatalog: getPieceSkinCatalog,
   getPieceSkinCatalogLabel: getPieceSkinCatalogLabel,

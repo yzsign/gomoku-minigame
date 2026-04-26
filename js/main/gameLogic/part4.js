@@ -1110,7 +1110,7 @@ app.stopHistoryMomentum = function() {
 
 /** 战绩列表惯性帧：指数减速，触边停住 */
 app.tickHistoryScrollMomentum = function() {
-  if (app.screen !== 'history' || app.historyListLoading) {
+  if (app.screen !== 'history' || app.historyListLoading || app.historyTabLoading) {
     app.stopHistoryMomentum();
     return;
   }
@@ -1130,6 +1130,9 @@ app.tickHistoryScrollMomentum = function() {
     app.historyScrollY = nextY;
   }
   app.historyScrollVel *= Math.exp(-dt / 240);
+  if (typeof app.maybeFetchHistoryAppend === 'function') {
+    app.maybeFetchHistoryAppend();
+  }
   app.draw();
   if (Math.abs(app.historyScrollVel) < 0.014) {
     app.stopHistoryMomentum();
@@ -1347,6 +1350,132 @@ app.hideHistoryNativeLoading = function() {
 }
 
 /**
+ * 每页条数：按战绩页列表可视高度与行高估算，并限制在服务端上限内。
+ */
+app.computeHistoryListLimit = function() {
+  if (
+    typeof app.getHistoryPageLayout !== 'function' ||
+    typeof app.historyListRowHeightRpx !== 'function'
+  ) {
+    return 30;
+  }
+  var Lh = app.getHistoryPageLayout();
+  var rowH = app.historyListRowHeightRpx();
+  var rowGap = app.historyListRowGapRpx
+    ? app.historyListRowGapRpx()
+    : app.rpx(9);
+  var unit = rowH + rowGap;
+  if (unit < 1) {
+    unit = 1;
+  }
+  /** 可视行数 + 1 行余量（部分行在裁切区时仍触发加载） */
+  var n = Math.floor(Lh.listH / unit) + 1;
+  if (n < 5) {
+    n = 5;
+  }
+  if (n > 100) {
+    n = 100;
+  }
+  return n;
+}
+
+/**
+ * 触底或首屏未填满时加载下一页（与 offset=historyServerItems.length 配合）。
+ */
+app.fetchHistoryListAppend = function() {
+  if (!authApi.getSessionToken || !authApi.getSessionToken()) {
+    return;
+  }
+  if (app.historyListLoading || app.historyTabLoading) {
+    return;
+  }
+  if (app.historyListLoadingMore) {
+    return;
+  }
+  if (!app.historyListHasMore) {
+    return;
+  }
+  var rf = null;
+  if (app.historyFilterTab === 1) {
+    rf = 'WIN';
+  } else if (app.historyFilterTab === 2) {
+    rf = 'LOSS';
+  }
+  var limit = app.computeHistoryListLimit();
+  var offset = app.historyServerItems.length;
+  app.historyListLoadingMore = true;
+  app.draw();
+  if (typeof wx === 'undefined' || !wx.request) {
+    app.historyListLoadingMore = false;
+    return;
+  }
+  wx.request(
+    Object.assign(roomApi.meGameHistoryOptions(limit, offset, rf), {
+      complete: function() {
+        app.historyListLoadingMore = false;
+        app.draw();
+      },
+      success: function(res) {
+        if (res.statusCode === 200 && res.data) {
+          var body = res.data;
+          if (body && typeof body === 'string') {
+            try {
+              body = JSON.parse(body);
+            } catch (eH) {
+              body = null;
+            }
+          }
+          if (body && Array.isArray(body.items)) {
+            var prev = app.historyServerItems || [];
+            app.historyServerItems = prev.concat(body.items);
+            if (typeof body.hasMore === 'boolean') {
+              app.historyListHasMore = body.hasMore;
+            } else {
+              app.historyListHasMore = body.items.length >= limit;
+            }
+            /** 首屏内容仍不足一屏且仍有更多：继续补页 */
+            setTimeout(function() {
+              if (!app.historyListHasMore || app.screen !== 'history') {
+                return;
+              }
+              var sm = app.getHistoryListScrollMetrics();
+              if (sm.maxScroll <= app.rpx(4)) {
+                app.fetchHistoryListAppend();
+              }
+            }, 0);
+          }
+        }
+      },
+      fail: function() {}
+    })
+  );
+}
+
+/**
+ * 列表滚至底部附近时拉取下一页。
+ */
+app.maybeFetchHistoryAppend = function() {
+  if (app.screen !== 'history') {
+    return;
+  }
+  if (app.historyListLoading || app.historyTabLoading || app.historyListLoadingMore) {
+    return;
+  }
+  if (!app.historyListHasMore) {
+    return;
+  }
+  if (!authApi.getSessionToken || !authApi.getSessionToken()) {
+    return;
+  }
+  var sm = app.getHistoryListScrollMetrics();
+  var threshold = app.rpx(100);
+  var rem = sm.maxScroll - app.historyScrollY;
+  if (rem <= threshold) {
+    app.fetchHistoryListAppend();
+  }
+}
+
+/**
  * 按当前 historyFilterTab 请求 /api/me/game-history（全部不传 result，胜利/失败传 WIN|LOSS）。
  */
 app.fetchHistoryListForCurrentFilter = function() {
@@ -1362,14 +1491,16 @@ app.fetchHistoryListForCurrentFilter = function() {
     rf = 'LOSS';
   }
   app.historyTabLoading = true;
+  app.historyListHasMore = false;
   app.draw();
   if (typeof wx === 'undefined' || !wx.request) {
     app.historyTabLoading = false;
     app.draw();
     return;
   }
+  var limit = app.computeHistoryListLimit();
   wx.request(
-    Object.assign(roomApi.meGameHistoryOptions(50, 0, rf), {
+    Object.assign(roomApi.meGameHistoryOptions(limit, 0, rf), {
       complete: function() {
         app.historyTabLoading = false;
         app.draw();
@@ -1387,11 +1518,26 @@ app.fetchHistoryListForCurrentFilter = function() {
           }
           if (body && Array.isArray(body.items)) {
             app.historyServerItems = body.items;
+            if (typeof body.hasMore === 'boolean') {
+              app.historyListHasMore = body.hasMore;
+            } else {
+              app.historyListHasMore = body.items.length >= limit;
+            }
+            setTimeout(function() {
+              if (!app.historyListHasMore || app.screen !== 'history') {
+                return;
+              }
+              var sm = app.getHistoryListScrollMetrics();
+              if (sm.maxScroll <= app.rpx(4)) {
+                app.fetchHistoryListAppend();
+              }
+            }, 0);
           }
         }
       },
       fail: function() {
         app.historyServerItems = [];
+        app.historyListHasMore = false;
       }
     })
   );
@@ -1411,6 +1557,8 @@ app.openHistoryScreen = function() {
   app.loadPeakEloFromStorage();
   app.historyStatsSnapshot = null;
   app.historyServerItems = [];
+  app.historyListHasMore = false;
+  app.historyListLoadingMore = false;
   app.screen = 'history';
   app.historyLoadStartTs = 0;
   var hadToken = !!authApi.getSessionToken();
@@ -1495,13 +1643,15 @@ app.openHistoryScreen = function() {
         fail: function () {}
       })
     );
+    var lim0 = app.computeHistoryListLimit();
     wx.request(
-      Object.assign(roomApi.meGameHistoryOptions(50, 0), {
+      Object.assign(roomApi.meGameHistoryOptions(lim0, 0), {
         complete: function () {
           doneFetch();
         },
         success: function (res) {
           app.historyServerItems = [];
+          app.historyListHasMore = false;
           if (res.statusCode === 200 && res.data) {
             var body = res.data;
             if (body && typeof body === 'string') {
@@ -1513,11 +1663,26 @@ app.openHistoryScreen = function() {
             }
             if (body && Array.isArray(body.items)) {
               app.historyServerItems = body.items;
+              if (typeof body.hasMore === 'boolean') {
+                app.historyListHasMore = body.hasMore;
+              } else {
+                app.historyListHasMore = body.items.length >= lim0;
+              }
+              setTimeout(function () {
+                if (!app.historyListHasMore || app.screen !== 'history') {
+                  return;
+                }
+                var sm0 = app.getHistoryListScrollMetrics();
+                if (sm0.maxScroll <= app.rpx(4)) {
+                  app.fetchHistoryListAppend();
+                }
+              }, 0);
             }
           }
         },
         fail: function () {
           app.historyServerItems = [];
+          app.historyListHasMore = false;
         }
       })
     );
@@ -1811,9 +1976,9 @@ app.drawHistory = function() {
   var sh = L.statsH;
   var sr = app.rpx(20);
   app.ctx.save();
-  app.ctx.shadowColor = H ? H.statShadow : 'rgba(60, 48, 38, 0.12)';
-  app.ctx.shadowBlur = app.rpx(18);
-  app.ctx.shadowOffsetY = app.rpx(6);
+  app.ctx.shadowColor = H ? H.statShadow : 'rgba(60, 48, 38, 0.08)';
+  app.ctx.shadowBlur = app.rpx(10);
+  app.ctx.shadowOffsetY = app.rpx(3);
   var statG = app.ctx.createLinearGradient(sx, sy, sx, sy + sh);
   statG.addColorStop(0, H ? H.statG0 : '#fff9f0');
   statG.addColorStop(1, H ? H.statG1 : '#fff3e4');
@@ -1900,8 +2065,8 @@ app.drawHistory = function() {
   app.roundRect(tx, ty, tw, thh, tr);
   app.ctx.clip();
   var tabSheen = app.ctx.createLinearGradient(tx, ty, tx, ty + thh * 0.55);
-  tabSheen.addColorStop(0, 'rgba(255, 255, 255, 0.45)');
-  tabSheen.addColorStop(0.5, 'rgba(255, 255, 255, 0.08)');
+  tabSheen.addColorStop(0, 'rgba(255, 255, 255, 0.18)');
+  tabSheen.addColorStop(0.5, 'rgba(255, 255, 255, 0.04)');
   tabSheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
   app.ctx.fillStyle = tabSheen;
   app.ctx.fillRect(tx, ty, tw, thh);
@@ -2038,35 +2203,40 @@ app.drawHistory = function() {
       var rx = L.padX;
       var rw = app.W - L.padX * 2;
       app.ctx.save();
-      app.ctx.shadowColor = H ? H.rowShadow : 'rgba(38, 28, 18, 0.2)';
-      app.ctx.shadowBlur = app.rpx(20);
-      app.ctx.shadowOffsetY = app.rpx(7);
+      app.ctx.shadowColor = H ? H.rowShadow : 'rgba(32, 26, 20, 0.08)';
+      app.ctx.shadowBlur = app.rpx(6);
+      app.ctx.shadowOffsetY = app.rpx(2);
       app.ctx.shadowOffsetX = 0;
+      /** 列表行：淡阴影 + 上下两色微渐变，减轻「厚卡片」立体感 */
       var cardFill = app.ctx.createLinearGradient(rx, ry, rx, ry + rowH);
-      cardFill.addColorStop(0, H ? H.rowG0 : 'rgba(255, 254, 251, 1)');
-      cardFill.addColorStop(0.48, H ? H.rowG1 : 'rgba(255, 250, 242, 0.99)');
-      cardFill.addColorStop(1, H ? H.rowG2 : 'rgba(238, 228, 214, 0.97)');
+      if (H) {
+        cardFill.addColorStop(0, H.rowG0);
+        cardFill.addColorStop(1, H.rowG2);
+      } else {
+        cardFill.addColorStop(0, 'rgba(255, 254, 251, 1)');
+        cardFill.addColorStop(1, 'rgba(246, 240, 232, 0.98)');
+      }
       app.ctx.fillStyle = cardFill;
       app.roundRect(rx, ry, rw, rowH, cardR);
       app.ctx.fill();
       app.ctx.shadowBlur = 0;
       app.ctx.shadowOffsetY = 0;
-      app.ctx.strokeStyle = H ? H.rowStroke : 'rgba(92, 75, 58, 0.13)';
+      app.ctx.strokeStyle = H ? H.rowStroke : 'rgba(92, 75, 58, 0.11)';
       app.ctx.lineWidth = Math.max(1, app.rpx(1));
       app.roundRect(rx + 0.5, ry + 0.5, rw - 1, rowH - 1, cardR - 0.5);
       app.ctx.stroke();
       app.ctx.save();
       app.roundRect(rx, ry, rw, rowH, cardR);
       app.ctx.clip();
-      var rowSheen = app.ctx.createLinearGradient(rx, ry, rx, ry + rowH * 0.52);
-      rowSheen.addColorStop(0, 'rgba(255, 255, 255, 0.42)');
-      rowSheen.addColorStop(0.45, 'rgba(255, 255, 255, 0.08)');
+      var rowSheen = app.ctx.createLinearGradient(rx, ry, rx, ry + rowH * 0.38);
+      rowSheen.addColorStop(0, 'rgba(255, 255, 255, 0.1)');
+      rowSheen.addColorStop(0.45, 'rgba(255, 255, 255, 0.03)');
       rowSheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
       app.ctx.fillStyle = rowSheen;
-      app.ctx.fillRect(rx, ry, rw, rowH * 0.52);
-      var rowFoot = app.ctx.createLinearGradient(rx, ry + rowH * 0.4, rx, ry + rowH);
+      app.ctx.fillRect(rx, ry, rw, rowH * 0.38);
+      var rowFoot = app.ctx.createLinearGradient(rx, ry + rowH * 0.58, rx, ry + rowH);
       rowFoot.addColorStop(0, 'rgba(72, 56, 40, 0)');
-      rowFoot.addColorStop(1, H ? H.rowFoot1 : 'rgba(72, 56, 40, 0.06)');
+      rowFoot.addColorStop(1, H ? H.rowFoot1 : 'rgba(72, 56, 40, 0.028)');
       app.ctx.fillStyle = rowFoot;
       app.ctx.fillRect(rx, ry, rw, rowH);
       app.ctx.restore();
@@ -2421,9 +2591,32 @@ app.cycleThemeNext = function() {
   app.draw();
 }
 
+/**
+ * 用 orderItemCodes（服务端顺序）将当前穿戴映射为全局下标与页；无则回退本地 getPieceSkinCatalog 顺序。
+ */
 app.syncPieceSkinModalSelectionFromCurrent = function() {
-  var cat = themes.getPieceSkinCatalog();
   var per = themes.PIECE_SKINS_PER_PAGE;
+  var keyFromId =
+    typeof themes.shopOrderItemCodeFromClientId === 'function'
+      ? themes.shopOrderItemCodeFromClientId
+      : function (iid) {
+          return iid;
+        };
+  var order = app.shopCatalogOrderItemCodes;
+  if (order && order.length) {
+    var kSkin = keyFromId(app.pieceSkinId);
+    var kTheme = app.themeId;
+    var idxSkin = order.indexOf(kSkin);
+    var idxTh = kTheme ? order.indexOf(kTheme) : -1;
+    var pick = idxSkin >= 0 ? idxSkin : idxTh >= 0 ? idxTh : 0;
+    app.pieceSkinModalPendingIdx = pick;
+    app.pieceSkinModalPage = Math.floor(pick / per);
+    if (typeof app.refreshPieceSkinModalPendingEntry === 'function') {
+      app.refreshPieceSkinModalPendingEntry();
+    }
+    return;
+  }
+  var cat = themes.getPieceSkinCatalog();
   var pi = -1;
   var ti = -1;
   var i;
@@ -2441,9 +2634,137 @@ app.syncPieceSkinModalSelectionFromCurrent = function() {
       pi = i;
     }
   }
-  var pick = pi >= 0 ? pi : ti >= 0 ? ti : 0;
-  app.pieceSkinModalPendingIdx = pick;
-  app.pieceSkinModalPage = Math.floor(pick / per);
+  var pick2 = pi >= 0 ? pi : ti >= 0 ? ti : 0;
+  app.pieceSkinModalPendingIdx = pick2;
+  app.pieceSkinModalPage = Math.floor(pick2 / per);
+  if (typeof app.refreshPieceSkinModalPendingEntry === 'function') {
+    app.refreshPieceSkinModalPendingEntry();
+  }
+}
+
+app.refreshPieceSkinModalPendingEntry = function() {
+  var g = app.pieceSkinModalPendingIdx;
+  if (g < 0) {
+    app.pieceSkinModalPendingEntry = null;
+    return;
+  }
+  if (app.shopCatalogServerPaged && app.shopCatalogPageEntries) {
+    var st = app.pieceSkinModalPage * themes.PIECE_SKINS_PER_PAGE;
+    var loc = g - st;
+    if (loc >= 0 && loc < app.shopCatalogPageEntries.length) {
+      app.pieceSkinModalPendingEntry = app.shopCatalogPageEntries[loc];
+    } else {
+      app.pieceSkinModalPendingEntry = null;
+    }
+    return;
+  }
+  var c = themes.getPieceSkinCatalog();
+  app.pieceSkinModalPendingEntry = c[g] || null;
+}
+
+app.getShopCatalogItemTotal = function() {
+  if (app.shopCatalogServerPaged && app.shopCatalogTotal > 0) {
+    return app.shopCatalogTotal;
+  }
+  return themes.getPieceSkinCatalog().length;
+}
+
+app.getPieceSkinModalPageEntries = function() {
+  if (app.shopCatalogServerPaged && app.shopCatalogPageEntries) {
+    return app.shopCatalogPageEntries;
+  }
+  var full = themes.getPieceSkinCatalog();
+  var per = themes.PIECE_SKINS_PER_PAGE;
+  var p = app.pieceSkinModalPage;
+  return full.slice(p * per, p * per + per);
+}
+
+/** 当前「页内」在 shopCatalogPageEntries 中的偏移得到 entry（gIdx 为全局下标） */
+app.getCatalogEntryAtGlobalIndex = function(gIdx) {
+  if (gIdx < 0) {
+    return null;
+  }
+  if (app.shopCatalogServerPaged && app.shopCatalogPageEntries) {
+    var st = app.pieceSkinModalPage * themes.PIECE_SKINS_PER_PAGE;
+    var loc = gIdx - st;
+    if (loc >= 0 && loc < app.shopCatalogPageEntries.length) {
+      return app.shopCatalogPageEntries[loc];
+    }
+    return null;
+  }
+  var c = themes.getPieceSkinCatalog();
+  return c[gIdx] || null;
+}
+
+/**
+ * 拉取杂货铺一页（与 pieceSkinModalPage 一致由调用方维护；本函数不修改页码）。
+ * @param {number} page 从 0 起
+ * @param {function(boolean?)} onDone err 为 true 表示失败
+ */
+app.fetchShopCatalogForModalPage = function(page, onDone) {
+  var per = themes.PIECE_SKINS_PER_PAGE;
+  if (typeof wx === 'undefined' || typeof wx.request !== 'function') {
+    if (onDone) {
+      onDone(true);
+    }
+    return;
+  }
+  wx.request(
+    Object.assign(roomApi.meShopCatalogPageOptions(page, per), {
+      success: function(res) {
+        if (res.statusCode !== 200 || !res.data) {
+          if (onDone) {
+            onDone(true);
+          }
+          return;
+        }
+        var d = res.data;
+        if (d && typeof d === 'string') {
+          try {
+            d = JSON.parse(d);
+          } catch (eParse) {
+            d = null;
+          }
+        }
+        if (!d || !Array.isArray(d.items) || typeof d.total !== 'number') {
+          if (onDone) {
+            onDone(true);
+          }
+          return;
+        }
+        var orderCodes = d.orderItemCodes;
+        if (Array.isArray(orderCodes) && orderCodes.length) {
+          app.shopCatalogOrderItemCodes = orderCodes;
+        }
+        app.shopCatalogTotal = d.total;
+        app.shopCatalogServerPaged = true;
+        var rows = d.items;
+        var ents = [];
+        var ri;
+        for (ri = 0; ri < rows.length; ri++) {
+          var ent =
+            typeof themes.catalogEntryFromShopItemDto === 'function'
+              ? themes.catalogEntryFromShopItemDto(rows[ri])
+              : null;
+          if (ent) {
+            ents.push(ent);
+          }
+        }
+        app.shopCatalogPageEntries = ents;
+        if (typeof app.refreshPieceSkinModalPendingEntry === 'function') {
+          app.refreshPieceSkinModalPendingEntry();
+        }
+        if (onDone) {
+          onDone(false);
+        }
+      },
+      fail: function() {
+        if (onDone) {
+          onDone(true);
+        }
+      }
+    })
+  );
 }
 
 app.ensureShopConsumableDaggerPreview = function() {
@@ -2490,28 +2811,72 @@ app.openPieceSkinModal = function() {
   if (app.pieceSkinModalVisible) {
     return;
   }
+  app.pieceShopGridTouchArmed = false;
   app.pieceSkinWearDblIdx = -1;
+  app.pieceSkinModalPendingEntry = null;
   app.stopPieceSkinModalAnim();
-  app.syncPieceSkinModalSelectionFromCurrent();
-  app.syncMeRatingIfAuthed(function () {
-    if (typeof app.ensureShopConsumableDaggerPreview === 'function') {
-      app.ensureShopConsumableDaggerPreview();
+  if (typeof wx !== 'undefined' && typeof wx.showLoading === 'function') {
+    wx.showLoading({ title: '加载中…', mask: true });
+  }
+  function openModalContinue() {
+    app.syncMeRatingIfAuthed(function() {
+      if (typeof app.ensureShopConsumableDaggerPreview === 'function') {
+        app.ensureShopConsumableDaggerPreview();
+      }
+      if (typeof app.ensureShopConsumableLovePreview === 'function') {
+        app.ensureShopConsumableLovePreview();
+      }
+      app.pieceSkinModalVisible = true;
+      app.pieceSkinModalAnim = 0;
+      app.runPieceSkinModalOpenAnim();
+      app.draw();
+    });
+  }
+  function afterFirstPage(err) {
+    if (typeof wx !== 'undefined' && typeof wx.hideLoading === 'function') {
+      wx.hideLoading();
     }
-    if (typeof app.ensureShopConsumableLovePreview === 'function') {
-      app.ensureShopConsumableLovePreview();
+    if (err) {
+      app.shopCatalogServerPaged = false;
+      if (typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
+        wx.showToast({ title: '使用本地商品目录', icon: 'none' });
+      }
     }
-    app.pieceSkinModalVisible = true;
-    app.pieceSkinModalAnim = 0;
-    app.runPieceSkinModalOpenAnim();
-    app.draw();
-  });
+    app.syncPieceSkinModalSelectionFromCurrent();
+    var tp = app.pieceSkinModalPage;
+    if (app.shopCatalogServerPaged && tp > 0) {
+      if (typeof wx !== 'undefined' && typeof wx.showLoading === 'function') {
+        wx.showLoading({ title: '加载中…', mask: true });
+      }
+      app.fetchShopCatalogForModalPage(tp, function(e2) {
+        if (typeof wx !== 'undefined' && typeof wx.hideLoading === 'function') {
+          wx.hideLoading();
+        }
+        if (e2) {
+          if (typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
+            wx.showToast({ title: '该页加载失败', icon: 'none' });
+          }
+        }
+        openModalContinue();
+      });
+    } else {
+      openModalContinue();
+    }
+  }
+  app.fetchShopCatalogForModalPage(0, afterFirstPage);
 }
 
 app.closePieceSkinModal = function() {
   if (!app.pieceSkinModalVisible) {
     return;
   }
+  app.pieceShopGridTouchArmed = false;
+  app.pieceSkinModalPendingEntry = null;
   app.pieceSkinWearDblIdx = -1;
+  app.shopCatalogServerPaged = false;
+  app.shopCatalogPageEntries = [];
+  app.shopCatalogOrderItemCodes = [];
+  app.shopCatalogTotal = 0;
   app.runPieceSkinModalCloseAnim();
 }
 
@@ -2606,11 +2971,14 @@ app.getPieceSkinModalLayout = function() {
   var cellH = app.rpx(220);
   var cellGapX = app.rpx(24);
   var cellGapY = app.rpx(32);
-  var gridBlockW = cellW * 2 + cellGapX;
-  var gridH = cellH * 4 + cellGapY * 3;
+  var gridCols = 2;
+  var gridRows = 3;
+  var gridBlockW = cellW * gridCols + cellGapX * (gridCols - 1);
+  var gridH = cellH * gridRows + cellGapY * (gridRows - 1);
+  var pageDotsH = app.rpx(44);
   /** 标题区 + 与网格间距 */
   var headerBlock = app.rpx(88);
-  var h = pad + headerBlock + gridH + pad;
+  var h = pad + headerBlock + gridH + pageDotsH + pad;
   var cx = app.W / 2;
   var cy = app.H * 0.5;
   var x0 = cx - w / 2;
@@ -2619,10 +2987,16 @@ app.getPieceSkinModalLayout = function() {
   var gridX0 = x0 + pad + (gridInnerW - gridBlockW) / 2;
   var gridY0 = y0 + pad + headerBlock;
   var titleCy = y0 + pad + app.rpx(24);
-  var cat = themes.getPieceSkinCatalog();
+  var pageDotR = app.rpx(6);
+  var pageDotGap = app.rpx(10);
+  var pageDotsCy = gridY0 + gridH + app.rpx(22);
+  var totalItems =
+    typeof app.getShopCatalogItemTotal === 'function'
+      ? app.getShopCatalogItemTotal()
+      : themes.getPieceSkinCatalog().length;
   var pageCount = Math.max(
     1,
-    Math.ceil(cat.length / themes.PIECE_SKINS_PER_PAGE)
+    Math.ceil(totalItems / themes.PIECE_SKINS_PER_PAGE)
   );
   return {
     cx: cx,
@@ -2641,7 +3015,13 @@ app.getPieceSkinModalLayout = function() {
     cellH: cellH,
     cellGapX: cellGapX,
     cellGapY: cellGapY,
+    gridCols: gridCols,
+    gridRows: gridRows,
+    gridH: gridH,
     pageCount: pageCount,
+    pageDotsCy: pageDotsCy,
+    pageDotR: pageDotR,
+    pageDotGap: pageDotGap,
     closeR: app.rpx(36)
   };
 }
@@ -2680,17 +3060,74 @@ app.hitPieceSkinModalPanel = function(tx, ty) {
   );
 }
 
+/** 当前页商品区外接矩形（逻辑坐标，用于滑动翻页命中） */
+app.hitPieceSkinModalGridContentArea = function(tx, ty) {
+  var L = app.getPieceSkinModalLayout();
+  var p = app.pieceSkinModalTouchToLogical(tx, ty);
+  var gc = L.gridCols != null ? L.gridCols : 2;
+  var gr = L.gridRows != null ? L.gridRows : 3;
+  var bw =
+    L.cellW * gc + (gc > 0 ? L.cellGapX * (gc - 1) : 0);
+  var bh =
+    L.cellH * gr + (gr > 0 ? L.cellGapY * (gr - 1) : 0);
+  return (
+    p.x >= L.gridX0 &&
+    p.x <= L.gridX0 + bw &&
+    p.y >= L.gridY0 &&
+    p.y <= L.gridY0 + bh
+  );
+}
+
+/** 底部分页点：左起第 n 页，未命中返回 -1 */
+app.hitPieceSkinModalPageDotIndex = function(tx, ty) {
+  var L = app.getPieceSkinModalLayout();
+  var pc = L.pageCount;
+  if (pc <= 1) {
+    return -1;
+  }
+  var p = app.pieceSkinModalTouchToLogical(tx, ty);
+  var r = L.pageDotR != null ? L.pageDotR : app.rpx(6);
+  var gap = L.pageDotGap != null ? L.pageDotGap : app.rpx(10);
+  var cy =
+    L.pageDotsCy != null
+      ? L.pageDotsCy
+      : L.gridY0 +
+        (L.gridH != null
+          ? L.gridH
+          : L.cellH * (L.gridRows != null ? L.gridRows : 3) +
+            L.cellGapY * ((L.gridRows != null ? L.gridRows : 3) - 1)) +
+        app.rpx(22);
+  var totalW = pc * (2 * r) + (pc - 1) * gap;
+  var startX = L.cx - totalW / 2 + r;
+  var hitR = r + app.rpx(10);
+  var di;
+  for (di = 0; di < pc; di++) {
+    var dcx = startX + di * (2 * r + gap);
+    var dx = p.x - dcx;
+    var dy = p.y - cy;
+    if (dx * dx + dy * dy <= hitR * hitR) {
+      return di;
+    }
+  }
+  return -1;
+}
+
 app.hitPieceSkinModalGridCatalogIndex = function(tx, ty) {
   var L = app.getPieceSkinModalLayout();
   var p = app.pieceSkinModalTouchToLogical(tx, ty);
-  var cat = themes.getPieceSkinCatalog();
   var per = themes.PIECE_SKINS_PER_PAGE;
   var start = app.pieceSkinModalPage * per;
+  var tot =
+    typeof app.getShopCatalogItemTotal === 'function'
+      ? app.getShopCatalogItemTotal()
+      : themes.getPieceSkinCatalog().length;
+  var gc = L.gridCols != null ? L.gridCols : 2;
+  var gr = L.gridRows != null ? L.gridRows : 3;
   var row;
   var col;
-  for (row = 0; row < 4; row++) {
-    for (col = 0; col < 2; col++) {
-      var slot = row * 2 + col;
+  for (row = 0; row < gr; row++) {
+    for (col = 0; col < gc; col++) {
+      var slot = row * gc + col;
       var gx =
         L.gridX0 + col * (L.cellW + L.cellGapX);
       var gy = L.gridY0 + row * (L.cellH + L.cellGapY);
@@ -2701,7 +3138,7 @@ app.hitPieceSkinModalGridCatalogIndex = function(tx, ty) {
         p.y <= gy + L.cellH
       ) {
         var gIdx = start + slot;
-        if (gIdx >= cat.length) {
+        if (gIdx >= tot) {
           return -1;
         }
         return gIdx;
@@ -2729,21 +3166,29 @@ app.pieceSkinModalPointsRedeemButtonRect = function(gx, gy, cellW, cellH) {
 app.hitPieceSkinModalRedeemButton = function(tx, ty) {
   var L = app.getPieceSkinModalLayout();
   var p = app.pieceSkinModalTouchToLogical(tx, ty);
-  var cat = themes.getPieceSkinCatalog();
   var per = themes.PIECE_SKINS_PER_PAGE;
   var start = app.pieceSkinModalPage * per;
+  var tot =
+    typeof app.getShopCatalogItemTotal === 'function'
+      ? app.getShopCatalogItemTotal()
+      : themes.getPieceSkinCatalog().length;
+  var gc = L.gridCols != null ? L.gridCols : 2;
+  var gr = L.gridRows != null ? L.gridRows : 3;
   var row;
   var col;
-  for (row = 0; row < 4; row++) {
-    for (col = 0; col < 2; col++) {
-      var slot = row * 2 + col;
+  for (row = 0; row < gr; row++) {
+    for (col = 0; col < gc; col++) {
+      var slot = row * gc + col;
       var gx = L.gridX0 + col * (L.cellW + L.cellGapX);
       var gy = L.gridY0 + row * (L.cellH + L.cellGapY);
       var gIdx = start + slot;
-      if (gIdx >= cat.length) {
+      if (gIdx >= tot) {
         continue;
       }
-      var ent = cat[gIdx];
+      var ent =
+        typeof app.getCatalogEntryAtGlobalIndex === 'function'
+          ? app.getCatalogEntryAtGlobalIndex(gIdx)
+          : themes.getPieceSkinCatalog()[gIdx];
       if (
         !ent ||
         ent.rowStatus !== 'points' ||
@@ -2764,6 +3209,159 @@ app.hitPieceSkinModalRedeemButton = function(tx, ty) {
     }
   }
   return -1;
+}
+
+/**
+ * 杂货铺 touchEnd：分页点、左/右滑翻页、点选/兑换/双击穿戴。
+ * @returns {boolean} 已处理则 true（应阻止其它 home 逻辑）
+ */
+app.handlePieceSkinModalTouchEnd = function(t) {
+  if (!t || !app.pieceSkinModalVisible) {
+    return false;
+  }
+  var ex = t.clientX;
+  var ey = t.clientY;
+  var dotI = app.hitPieceSkinModalPageDotIndex(ex, ey);
+  if (dotI >= 0) {
+    var L0 = app.getPieceSkinModalLayout();
+    if (app.pieceSkinModalPage !== dotI && dotI < L0.pageCount) {
+      app.pieceSkinModalPage = dotI;
+      if (app.shopCatalogServerPaged && typeof app.fetchShopCatalogForModalPage === 'function') {
+        app.fetchShopCatalogForModalPage(dotI, function(errDot) {
+          if (errDot && typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
+            wx.showToast({ title: '加载失败', icon: 'none' });
+          }
+          try {
+            app.draw();
+          } catch (err0) {
+            try {
+              console.error('handlePieceSkinModalTouchEnd page dot', err0);
+            } catch (e0) {}
+          }
+        });
+      } else {
+        try {
+          app.draw();
+        } catch (err0b) {
+          try {
+            console.error('handlePieceSkinModalTouchEnd page dot', err0b);
+          } catch (e0b) {}
+        }
+      }
+    }
+    app.pieceShopGridTouchArmed = false;
+    return true;
+  }
+  var wasArmed = app.pieceShopGridTouchArmed;
+  app.pieceShopGridTouchArmed = false;
+  var L = app.getPieceSkinModalLayout();
+  var slop = app.rpx(56);
+  if (wasArmed) {
+    var dx = ex - app.pieceShopGridTouchX;
+    var dy = ey - app.pieceShopGridTouchY;
+    var minSwipe = app.rpx(36);
+    if (
+      L.pageCount > 1 &&
+      Math.abs(dx) > minSwipe &&
+      Math.abs(dx) > Math.abs(dy) * 0.65
+    ) {
+      if (dx < 0) {
+        app.pieceSkinModalPage = Math.min(
+          L.pageCount - 1,
+          app.pieceSkinModalPage + 1
+        );
+      } else {
+        app.pieceSkinModalPage = Math.max(0, app.pieceSkinModalPage - 1);
+      }
+      var np = app.pieceSkinModalPage;
+      if (app.shopCatalogServerPaged && typeof app.fetchShopCatalogForModalPage === 'function') {
+        app.fetchShopCatalogForModalPage(np, function(errSw) {
+          if (errSw && typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
+            wx.showToast({ title: '加载失败', icon: 'none' });
+          }
+          try {
+            app.draw();
+          } catch (err) {
+            try {
+              console.error('handlePieceSkinModalTouchEnd page swipe', err);
+            } catch (e1) {}
+          }
+        });
+      } else {
+        try {
+          app.draw();
+        } catch (err2) {
+          try {
+            console.error('handlePieceSkinModalTouchEnd page swipe', err2);
+          } catch (e1b) {}
+        }
+      }
+      return true;
+    }
+    if (dx * dx + dy * dy > slop * slop) {
+      return true;
+    }
+  }
+  if (!wasArmed) {
+    return false;
+  }
+  var redeemHit = app.hitPieceSkinModalRedeemButton(ex, ey);
+  if (redeemHit >= 0) {
+    app.pieceSkinModalPendingIdx = redeemHit;
+    app.pieceSkinModalPendingEntry =
+      typeof app.getCatalogEntryAtGlobalIndex === 'function'
+        ? app.getCatalogEntryAtGlobalIndex(redeemHit)
+        : null;
+    app.redeemPieceSkinWithPoints();
+    return true;
+  }
+  var cg = app.hitPieceSkinModalGridCatalogIndex(ex, ey);
+  if (cg >= 0) {
+    app.pieceSkinModalPendingIdx = cg;
+    var entPick =
+      typeof app.getCatalogEntryAtGlobalIndex === 'function'
+        ? app.getCatalogEntryAtGlobalIndex(cg)
+        : themes.getPieceSkinCatalog()[cg];
+    app.pieceSkinModalPendingEntry = entPick || null;
+    if (
+      entPick &&
+      entPick.rowStatus === 'points' &&
+      entPick.costPoints &&
+      entPick.costPoints > 0 &&
+      themes.getShopCategory(entPick) !== themes.SHOP_CATEGORY_CONSUMABLE
+    ) {
+      try {
+        app.draw();
+      } catch (err2) {
+        try {
+          console.error('handlePieceSkinModalTouchEnd points card', err2);
+        } catch (e2) {}
+      }
+      return true;
+    }
+    var now = Date.now();
+    var dblMs =
+      app.PIECE_SKIN_WEAR_DBL_MS != null ? app.PIECE_SKIN_WEAR_DBL_MS : 450;
+    if (
+      app.pieceSkinWearDblIdx === cg &&
+      now - app.pieceSkinWearDblAt <= dblMs
+    ) {
+      app.pieceSkinWearDblIdx = -1;
+      app.applyPieceSkinWear();
+      return true;
+    }
+    app.pieceSkinWearDblIdx = cg;
+    app.pieceSkinWearDblAt = now;
+    try {
+      app.draw();
+    } catch (err3) {
+      try {
+        console.error('handlePieceSkinModalTouchEnd select', err3);
+      } catch (e3) {}
+    }
+    return true;
+  }
+  return false;
 }
 
 /** @returns {{ text: string, fill: string }} */
@@ -2805,8 +3403,11 @@ app.pieceSkinModalCardStatusStyle = function(entry, th) {
  * 仅由积分卡「兑换」按钮触发；点选格子其它区域不会调用本函数。
  */
 app.redeemPieceSkinWithPoints = function() {
-  var cat = themes.getPieceSkinCatalog();
-  var entry = cat[app.pieceSkinModalPendingIdx];
+  var entry = app.pieceSkinModalPendingEntry;
+  if (!entry) {
+    var cat = themes.getPieceSkinCatalog();
+    entry = cat[app.pieceSkinModalPendingIdx];
+  }
   if (!entry) {
     return;
   }
@@ -2975,8 +3576,11 @@ app.redeemPieceSkinWithPoints = function() {
 
 /** 佩戴已拥有皮肤或棋盘主题，或对未解锁项提示；积分兑换请用 redeemPieceSkinWithPoints（仅按钮） */
 app.applyPieceSkinWear = function() {
-  var cat = themes.getPieceSkinCatalog();
-  var entry = cat[app.pieceSkinModalPendingIdx];
+  var entry = app.pieceSkinModalPendingEntry;
+  if (!entry) {
+    var cat = themes.getPieceSkinCatalog();
+    entry = cat[app.pieceSkinModalPendingIdx];
+  }
   if (!entry) {
     return;
   }

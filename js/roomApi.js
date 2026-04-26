@@ -142,10 +142,28 @@ function meRatingOptions() {
   };
 }
 
-/** GET /api/me/shop/catalog：杂货铺商品与有效积分价（可不登录；有 token 则带上） */
+/** GET /api/me/shop/catalog：全量（无参），与旧版一致，供价表覆盖 */
 function meShopCatalogOptions() {
   return {
     url: GOMOKU_API_BASE + '/api/me/shop/catalog',
+    method: 'GET',
+    header: withAuthHeaders({})
+  };
+}
+
+/**
+ * GET /api/me/shop/catalog?page&size：后端分页，供杂货铺弹窗
+ * @param {number} page 从 0 起
+ * @param {number} size 每页条数
+ */
+function meShopCatalogPageOptions(page, size) {
+  return {
+    url:
+      GOMOKU_API_BASE +
+      '/api/me/shop/catalog?page=' +
+      encodeURIComponent(page) +
+      '&size=' +
+      encodeURIComponent(size),
     method: 'GET',
     header: withAuthHeaders({})
   };
@@ -240,6 +258,9 @@ function meGameHistoryOptions(limit, offset, result) {
     offset !== undefined && offset !== null ? Number(offset) : 0;
   if (isNaN(lim) || lim < 1) {
     lim = 50;
+  }
+  if (lim > 100) {
+    lim = 100;
   }
   if (isNaN(off) || off < 0) {
     off = 0;
@@ -606,6 +627,7 @@ module.exports = {
   roomApiRandomBotProfileOptions: roomApiRandomBotProfileOptions,
   meRatingOptions: meRatingOptions,
   meShopCatalogOptions: meShopCatalogOptions,
+  meShopCatalogPageOptions: meShopCatalogPageOptions,
   mePveGameOptions: mePveGameOptions,
   meAdminStatusOptions: meAdminStatusOptions,
   adminDailyPuzzleCreateOptions: adminDailyPuzzleCreateOptions,

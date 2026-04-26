@@ -472,8 +472,15 @@ app.drawPieceSkinModalOverlay = function(th) {
   var x = L.x0;
   var y = L.y0;
   var pad = L.pad != null ? L.pad : L.innerPad;
-  var cat = themes.getPieceSkinCatalog();
+  var pageArr =
+    typeof app.getPieceSkinModalPageEntries === 'function'
+      ? app.getPieceSkinModalPageEntries()
+      : themes.getPieceSkinCatalog();
   var per = themes.PIECE_SKINS_PER_PAGE;
+  var tot =
+    typeof app.getShopCatalogItemTotal === 'function'
+      ? app.getShopCatalogItemTotal()
+      : themes.getPieceSkinCatalog().length;
   var baseClassic = themes.getTheme('classic');
 
   app.ctx.save();
@@ -527,13 +534,22 @@ app.drawPieceSkinModalOverlay = function(th) {
   app.ctx.stroke();
 
   var start = app.pieceSkinModalPage * per;
+  var gr = L.gridRows != null ? L.gridRows : 3;
+  var gc = L.gridCols != null ? L.gridCols : 2;
   var row;
   var col;
-  for (row = 0; row < 4; row++) {
-    for (col = 0; col < 2; col++) {
-      var slot = row * 2 + col;
+  for (row = 0; row < gr; row++) {
+    for (col = 0; col < gc; col++) {
+      var slot = row * gc + col;
       var gidx = start + slot;
-      if (gidx >= cat.length) {
+      if (gidx >= tot) {
+        continue;
+      }
+      if (slot < 0 || slot >= pageArr.length) {
+        continue;
+      }
+      var entDraw = pageArr[slot];
+      if (!entDraw) {
         continue;
       }
       var gx = L.gridX0 + col * (L.cellW + L.cellGapX);
@@ -543,11 +559,54 @@ app.drawPieceSkinModalOverlay = function(th) {
         gy,
         L.cellW,
         L.cellH,
-        cat[gidx],
+        entDraw,
         gidx,
         baseClassic,
         th
       );
+    }
+  }
+
+  var pc = L.pageCount;
+  if (pc > 1) {
+    var dotR = L.pageDotR != null ? L.pageDotR : app.rpx(6);
+    var dGap = L.pageDotGap != null ? L.pageDotGap : app.rpx(10);
+    var dotCy =
+      L.pageDotsCy != null
+        ? L.pageDotsCy
+        : L.gridY0 +
+          (L.gridH != null
+            ? L.gridH
+            : L.cellH * 3 + L.cellGapY * 2) +
+          app.rpx(22);
+    var totalDotsW = pc * (2 * dotR) + (pc - 1) * dGap;
+    var dot0X = L.cx - totalDotsW / 2 + dotR;
+    var dmi;
+    for (dmi = 0; dmi < pc; dmi++) {
+      var dcx = dot0X + dmi * (2 * dotR + dGap);
+      var active = dmi === app.pieceSkinModalPage;
+      app.ctx.beginPath();
+      app.ctx.arc(
+        app.snapPx(dcx),
+        app.snapPx(dotCy),
+        app.snapPx(dotR),
+        0,
+        Math.PI * 2
+      );
+      if (active) {
+        if (U) {
+          app.ctx.fillStyle = U.title || 'rgba(74, 61, 50, 0.95)';
+        } else {
+          app.ctx.fillStyle = 'rgba(74, 61, 50, 0.88)';
+        }
+        app.ctx.fill();
+      } else {
+        app.ctx.strokeStyle = U
+          ? U.muted || 'rgba(130, 118, 102, 0.55)'
+          : 'rgba(120, 105, 90, 0.5)';
+        app.ctx.lineWidth = app.rpx(1.75);
+        app.ctx.stroke();
+      }
     }
   }
 
@@ -4571,41 +4630,13 @@ wx.onTouchStart(function (e) {
       app.closePieceSkinModal();
       return;
     }
-    var redeemHit = app.hitPieceSkinModalRedeemButton(x, y);
-    if (redeemHit >= 0) {
-      app.pieceSkinModalPendingIdx = redeemHit;
-      app.redeemPieceSkinWithPoints();
-      return;
-    }
-    var cg = app.hitPieceSkinModalGridCatalogIndex(x, y);
-    if (cg >= 0) {
-      app.pieceSkinModalPendingIdx = cg;
-      var catPick = themes.getPieceSkinCatalog();
-      var entPick = catPick[cg];
-      if (
-        entPick &&
-        entPick.rowStatus === 'points' &&
-        entPick.costPoints &&
-        entPick.costPoints > 0 &&
-        themes.getShopCategory(entPick) !== themes.SHOP_CATEGORY_CONSUMABLE
-      ) {
-        app.draw();
-        return;
-      }
-      var now = Date.now();
-      var dblMs =
-        app.PIECE_SKIN_WEAR_DBL_MS != null ? app.PIECE_SKIN_WEAR_DBL_MS : 450;
-      if (
-        app.pieceSkinWearDblIdx === cg &&
-        now - app.pieceSkinWearDblAt <= dblMs
-      ) {
-        app.pieceSkinWearDblIdx = -1;
-        app.applyPieceSkinWear();
-        return;
-      }
-      app.pieceSkinWearDblIdx = cg;
-      app.pieceSkinWearDblAt = now;
-      app.draw();
+    if (
+      typeof app.hitPieceSkinModalGridContentArea === 'function' &&
+      app.hitPieceSkinModalGridContentArea(x, y)
+    ) {
+      app.pieceShopGridTouchArmed = true;
+      app.pieceShopGridTouchX = x;
+      app.pieceShopGridTouchY = y;
       return;
     }
     if (!app.hitPieceSkinModalPanel(x, y)) {
@@ -5210,6 +5241,9 @@ if (typeof wx.onTouchMove === 'function') {
     if (app.historyScrollY < 0) {
       app.historyScrollY = 0;
     }
+    if (typeof app.maybeFetchHistoryAppend === 'function') {
+      app.maybeFetchHistoryAppend();
+    }
     app.draw();
   });
 }
@@ -5221,6 +5255,16 @@ if (typeof wx.onTouchEnd === 'function') {
       t &&
       typeof app.onHomeFriendListTouchEnd === 'function' &&
       app.onHomeFriendListTouchEnd(t.clientX, t.clientY)
+    ) {
+      return;
+    }
+
+    if (
+      t &&
+      app.screen === 'home' &&
+      app.pieceSkinModalVisible &&
+      typeof app.handlePieceSkinModalTouchEnd === 'function' &&
+      app.handlePieceSkinModalTouchEnd(t)
     ) {
       return;
     }
@@ -5419,6 +5463,9 @@ if (typeof wx.onTouchEnd === 'function') {
       } else {
         app.historyScrollVel = 0;
         app.scheduleHistoryScrollbarFadeRedraw();
+      }
+      if (typeof app.maybeFetchHistoryAppend === 'function') {
+        app.maybeFetchHistoryAppend();
       }
     }
     if (app.screen === 'home' && app.homeDrawerTabPressed) {
@@ -5651,6 +5698,9 @@ if (typeof wx.onTouchCancel === 'function') {
       app._spectatorPopoverScrollTouchId = null;
     }
     app._spectatorPopoverTouchStartedInPanel = null;
+    if (app.pieceShopGridTouchArmed) {
+      app.pieceShopGridTouchArmed = false;
+    }
     if (app.screen === 'history') {
       app.historyScrollTouchId = null;
       app.stopHistoryMomentum();
