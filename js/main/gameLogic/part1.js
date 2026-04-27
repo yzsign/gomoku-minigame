@@ -2626,6 +2626,20 @@ app.friendListHomeUiFromTheme = function(th) {
           ? 'rgba(74, 66, 58, 0.34)'
           : 'rgba(200, 188, 172, 0.78)',
     watchPillText: th.btnPrimary != null ? th.btnPrimary : winTitle,
+    /** 行内「邀请」：绿字（观战仍用 watchPillText / 主题主色） */
+    invitePillText:
+      id === 'mint'
+        ? '#00695c'
+        : id === 'ink'
+          ? '#2e7d32'
+          : '#1b5e20',
+    /** 行内「邀请」药丸描边：绿色系，与 invitePillText 同调 */
+    invitePillStroke:
+      id === 'mint'
+        ? 'rgba(0, 121, 107, 0.38)'
+        : id === 'ink'
+          ? 'rgba(46, 125, 50, 0.36)'
+          : 'rgba(27, 94, 32, 0.4)',
     watchPillInnerTop:
       id === 'mint'
         ? 'rgba(255, 255, 255, 0.42)'
@@ -3695,6 +3709,7 @@ app.disconnectOnline = function() {
     app.screen = 'game';
     app.showResultOverlay = false;
   }
+  app._pvpInviteJoinInProgress = false;
 }
 
 app.clearOnlineOpponentProfile = function() {

@@ -15,6 +15,11 @@ module.exports = function registerUserSocialSocket(app, deps) {
   app._incomingFriendModalOpen = false;
   app._incomingRoomInviteQueue = [];
   app._incomingRoomInviteModalOpen = false;
+  /**
+   * 好友 WS 邀请：已点「加入」至对局 WS onOpen（或加入失败 / disconnectOnline）。
+   * 此期间新邀请直接 decline 不入队；disconnectOnline 会先清掉再于 join 流程内恢复。
+   */
+  app._pvpInviteJoinInProgress = false;
 
   var MAX_RECONNECT_MS = 60000;
   var BASE_RECONNECT_MS = 800;
@@ -189,12 +194,53 @@ module.exports = function registerUserSocialSocket(app, deps) {
     if (!roomId || fromUserId == null) {
       return;
     }
+    if (app._pvpInviteJoinInProgress) {
+      declineSinglePvpInviteSilent(fromUserId, roomId);
+      return;
+    }
     app._incomingRoomInviteQueue.push({
       roomId: roomId,
       fromUserId: fromUserId,
       fromNickname: payload.fromNickname
     });
     pumpIncomingRoomInviteModal();
+  }
+
+  function declineSinglePvpInviteSilent(fromUserId, roomIdRaw) {
+    if (
+      !roomApi ||
+      typeof roomApi.socialPvpInviteDeclineOptions !== 'function' ||
+      fromUserId == null ||
+      roomIdRaw == null
+    ) {
+      return;
+    }
+    var rid = String(roomIdRaw).replace(/^\s+|\s+$/g, '');
+    if (!rid) {
+      return;
+    }
+    wx.request(
+      Object.assign(roomApi.socialPvpInviteDeclineOptions(fromUserId, rid), {
+        dataType: 'json'
+      })
+    );
+  }
+
+  /**
+   * 对队列中尚未弹窗的邀请逐一 decline（静默失败）；并清空队列。
+   * 当前正在处理的邀请已在 shift 后不在队列中。
+   */
+  function declineAllQueuedRoomInvitesSilent() {
+    var q = app._incomingRoomInviteQueue;
+    var rest = q.slice(0);
+    q.length = 0;
+    for (var i = 0; i < rest.length; i++) {
+      var item = rest[i];
+      if (!item || item.fromUserId == null || !item.roomId) {
+        continue;
+      }
+      declineSinglePvpInviteSilent(item.fromUserId, item.roomId);
+    }
   }
 
   function pumpIncomingRoomInviteModal() {
@@ -237,14 +283,18 @@ module.exports = function registerUserSocialSocket(app, deps) {
       cancelText: '拒绝',
       success: function(res) {
         if (res.confirm) {
+          app._pvpInviteJoinInProgress = true;
+          declineAllQueuedRoomInvitesSilent();
           if (typeof app.joinOnlineAsGuest === 'function') {
             app.joinOnlineAsGuest(String(inv.roomId));
+          } else {
+            app._pvpInviteJoinInProgress = false;
           }
         } else if (
-          res.cancel &&
           roomApi &&
           typeof roomApi.socialPvpInviteDeclineOptions === 'function'
         ) {
+          /** 拒绝、点蒙层关闭等凡未点「加入」均 decline，避免房主无反馈 */
           wx.request(
             Object.assign(
               roomApi.socialPvpInviteDeclineOptions(inv.fromUserId, inv.roomId),

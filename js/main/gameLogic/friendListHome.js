@@ -24,7 +24,7 @@ module.exports = function registerFriendListHome(app, deps) {
   var FRIEND_LIST_WATCH_BTN_HEIGHT_TRIM_RPX = 6;
   /** 相对行右缘再左移（约 10px，分两次各 5） */
   var FRIEND_LIST_WATCH_BTN_SHIFT_LEFT_RPX = 10;
-  /** 行内「邀请」药丸宽（rpx），与观战按钮同排布；仅 online 且非 inGame 时显示（PRD §4.4） */
+  /** 行内「邀请」药丸宽（rpx），与观战同尺寸与主题（watchPill*）；仅 online 且非 inGame 时显示（PRD §4.4） */
   var FRIEND_LIST_INVITE_BTN_RPX = 72;
   /** 判定横向滑动 vs 竖向滚动（px²） */
   var FRIEND_LIST_SWIPE_DECIDE_PX2 = 8 * 8;
@@ -1250,71 +1250,15 @@ module.exports = function registerFriendListHome(app, deps) {
   }
 
   /**
-   * 行内「邀请」药丸：主色绿渐变，与首页随机匹配主按钮同系。
+   * 行内右侧药丸（观战 / 邀请）：与 friendListHomeUiFromTheme 的 watchPill* 一致。
    */
-  function drawFriendListInvitePill(wRect, FL) {
-    var wbx = wRect.x;
-    var wby = wRect.y;
-    var wbw = wRect.w;
-    var wbh = wRect.h;
-    var wbr = Math.min(wbh * 0.5, wbw * 0.5, app.rpx(10));
-    var strokeW = Math.max(1, app.rpx(1.25));
-    var strokeC =
-      FL && FL.watchPillStroke
-        ? FL.watchPillStroke
-        : 'rgba(27, 94, 32, 0.35)';
-    app.ctx.save();
-    var fillStyle = '#43a047';
-    try {
-      if (app.ctx.createLinearGradient) {
-        var grad = app.ctx.createLinearGradient(
-          wbx,
-          wby,
-          wbx,
-          wby + wbh
-        );
-        grad.addColorStop(0, '#66bb6a');
-        grad.addColorStop(1, '#2e7d32');
-        fillStyle = grad;
-      }
-    } catch (eGr) {
-      fillStyle = '#43a047';
-    }
-    if (typeof app.roundRect === 'function') {
-      app.ctx.fillStyle = fillStyle;
-      app.roundRect(wbx, wby, wbw, wbh, wbr);
-      app.ctx.fill();
-      app.roundRect(wbx, wby, wbw, wbh, wbr);
-      app.ctx.strokeStyle = strokeC;
-      app.ctx.lineWidth = strokeW;
-      app.ctx.stroke();
-    } else {
-      app.ctx.fillStyle = fillStyle;
-      app.ctx.fillRect(wbx, wby, wbw, wbh);
-      app.ctx.strokeStyle = strokeC;
-      app.ctx.lineWidth = strokeW;
-      app.ctx.strokeRect(wbx, wby, wbw, wbh);
-    }
-    app.ctx.fillStyle = '#ffffff';
-    app.ctx.font =
-      '600 ' +
-      app.rpx(20) +
-      'px "PingFang SC","Hiragino Sans GB",sans-serif';
-    app.ctx.textAlign = 'center';
-    app.ctx.textBaseline = 'middle';
-    app.ctx.fillText(
-      '邀请',
-      app.snapPx(wbx + wbw * 0.5),
-      app.snapPx(wby + wbh * 0.5 + app.rpx(0.5))
-    );
-    app.ctx.textAlign = 'left';
-    app.ctx.restore();
-  }
-
-  /**
-   * 行内「观战」药丸：与 friendListHomeUiFromTheme 的 watchPill* 一致；文字与「游戏中」同字号、snapPx 居中。
-   */
-  function drawFriendListWatchPill(wRect, FL) {
+  function drawFriendListRowActionPill(
+    wRect,
+    FL,
+    labelText,
+    labelColorOverride,
+    strokeColorOverride
+  ) {
     var wbx = wRect.x;
     var wby = wRect.y;
     var wbw = wRect.w;
@@ -1328,16 +1272,26 @@ module.exports = function registerFriendListHome(app, deps) {
       FL && FL.watchPillG1
         ? FL.watchPillG1
         : 'rgba(234, 244, 236, 0.96)';
-    var strokeC =
-      FL && FL.watchPillStroke
-        ? FL.watchPillStroke
-        : 'rgba(46, 125, 50, 0.24)';
-    var labelC =
-      FL && FL.watchPillText
-        ? FL.watchPillText
-        : FL && FL.online
-          ? FL.online
-          : '#2e7d32';
+    var strokeC;
+    if (typeof strokeColorOverride === 'string' && strokeColorOverride.length) {
+      strokeC = strokeColorOverride;
+    } else {
+      strokeC =
+        FL && FL.watchPillStroke
+          ? FL.watchPillStroke
+          : 'rgba(46, 125, 50, 0.24)';
+    }
+    var labelC;
+    if (typeof labelColorOverride === 'string' && labelColorOverride.length) {
+      labelC = labelColorOverride;
+    } else {
+      labelC =
+        FL && FL.watchPillText
+          ? FL.watchPillText
+          : FL && FL.online
+            ? FL.online
+            : '#2e7d32';
+    }
     var shade =
       FL && FL.watchPillShade
         ? FL.watchPillShade
@@ -1416,12 +1370,31 @@ module.exports = function registerFriendListHome(app, deps) {
     app.ctx.textAlign = 'center';
     app.ctx.textBaseline = 'middle';
     app.ctx.fillText(
-      '观战',
+      labelText,
       app.snapPx(wbx + wbw * 0.5),
       app.snapPx(wby + wbh * 0.5 + app.rpx(0.5))
     );
     app.ctx.textAlign = 'left';
     app.ctx.restore();
+  }
+
+  function drawFriendListInvitePill(wRect, FL) {
+    var green =
+      FL && FL.invitePillText
+        ? FL.invitePillText
+        : '#2e7d32';
+    var strokeGreen =
+      FL && FL.invitePillStroke
+        ? FL.invitePillStroke
+        : 'rgba(46, 125, 50, 0.34)';
+    drawFriendListRowActionPill(wRect, FL, '邀请', green, strokeGreen);
+  }
+
+  /**
+   * 行内「观战」药丸：与邀请共用 watchPill* 主题；文字与「游戏中」同字号、snapPx 居中。
+   */
+  function drawFriendListWatchPill(wRect, FL) {
+    drawFriendListRowActionPill(wRect, FL, '观战');
   }
 
   function getFriendListSwipeActionRects(L, panelX, yRow) {

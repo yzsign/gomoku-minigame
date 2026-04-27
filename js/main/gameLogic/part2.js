@@ -203,6 +203,7 @@ function puzzleFriendInviteShareMessageOpts(title, roomId) {
 
 app.startOnlineSocket = function() {
   if (!app.onlineRoomId || !app.onlineToken) {
+    app._pvpInviteJoinInProgress = false;
     return;
   }
   app.onlineSocketConnectGen++;
@@ -242,12 +243,14 @@ app.startOnlineSocket = function() {
     }
   });
   if (!app.socketTask || !app.socketTask.onOpen) {
+    app._pvpInviteJoinInProgress = false;
     return;
   }
   app.socketTask.onOpen(function () {
     if (myGen !== app.onlineSocketConnectGen) {
       return;
     }
+    app._pvpInviteJoinInProgress = false;
     app.onlineWsConnected = true;
     app.onlineWsEverOpened = true;
     app.onlineReconnectAttempt = 0;
@@ -803,16 +806,22 @@ app.startOnlineFriendWatchFromPeer = function (peerUserId) {
 
 app.joinOnlineAsGuest = function(roomId) {
   if (!roomId) {
+    app._pvpInviteJoinInProgress = false;
     return;
   }
   app.onlineInviteConsumed = true;
   authApi.ensureSession(function (sessionOk, errHint) {
     if (!sessionOk) {
       app.onlineInviteConsumed = false;
+      app._pvpInviteJoinInProgress = false;
       wx.showToast({ title: errHint || '请先完成登录', icon: 'none' });
       return;
     }
+    var restorePvpInviteJoinGate = app._pvpInviteJoinInProgress;
     app.disconnectOnline();
+    if (restorePvpInviteJoinGate) {
+      app._pvpInviteJoinInProgress = true;
+    }
     wx.showLoading({ title: '加入房间…', mask: true });
     wx.request(
       Object.assign(roomApi.roomApiJoinOptions(roomId), {
@@ -820,6 +829,7 @@ app.joinOnlineAsGuest = function(roomId) {
       wx.hideLoading();
         if (res.statusCode !== 200 || !res.data) {
         app.onlineInviteConsumed = false;
+        app._pvpInviteJoinInProgress = false;
         var msg = '无法加入';
         if (res.statusCode === 401) {
           msg = '请先登录';
@@ -902,6 +912,7 @@ app.joinOnlineAsGuest = function(roomId) {
     fail: function () {
       wx.hideLoading();
       app.onlineInviteConsumed = false;
+      app._pvpInviteJoinInProgress = false;
       wx.showToast({ title: '网络请求失败', icon: 'none' });
     }
   })
