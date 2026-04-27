@@ -5,7 +5,6 @@ module.exports = function register(app, deps) {
   var gomoku = deps.gomoku;
   var render = deps.render;
   var themes = deps.themes;
-  var doodles = deps.doodles;
   var roomApi = deps.roomApi;
   var authApi = deps.authApi;
   var defaultAvatars = deps.defaultAvatars;
@@ -312,7 +311,28 @@ app.startOnlineSocket = function() {
   });
 }
 
-app.startOnlineAsHost = function() {
+/**
+ * 创建好友房并作为房主进房（底层实现）。
+ *
+ * - **首页「好友对战」**：请只调 {@link app.startOnlineAsHostFromHome}，等价于本函数传入 {@code null}，
+ *   建房后进房并 {@link wx.shareAppMessage}，不请求 /api/social/pvp-invites。
+ * - **好友列表行内「邀请」**：传入 {@code skipWeChatInviteShare: true} 与 {@code notifyPeerUserId}；
+ *   仅 WS 推送邀请，不调起微信分享。若显式 {@code skipWeChatInviteShare} 但缺少 peerId，会 Toast 提示。
+ *
+ *  safeguard：只要解析出合法 {@code notifyPeerUserId}，一律视为列表邀请路径，禁止再走微信分享。
+ *
+ * @param {{ notifyPeerUserId?: number, skipWeChatInviteShare?: boolean }|null|undefined} [opts]
+ */
+app.startOnlineAsHost = function (opts) {
+  var notifyPeerUserId = 0;
+  if (opts && opts.notifyPeerUserId != null) {
+    var n = Number(opts.notifyPeerUserId);
+    if (!isNaN(n) && n > 0) {
+      notifyPeerUserId = n;
+    }
+  }
+  var friendListInviteExplicit = !!(opts && opts.skipWeChatInviteShare);
+  var skipWeChatShare = friendListInviteExplicit || notifyPeerUserId > 0;
   app.homeDrawerOpen = false;
   authApi.ensureSession(function (sessionOk, errHint) {
     if (!sessionOk) {
@@ -353,16 +373,57 @@ app.startOnlineAsHost = function() {
       }
       app.startOnlineSocket();
       app.draw();
-      if (typeof wx.shareAppMessage === 'function') {
-        wx.shareAppMessage({
-          title: '五子棋 房号 ' + app.onlineRoomId,
-          query: 'roomId=' + app.onlineRoomId + '&online=1'
-        });
-      } else {
+      if (notifyPeerUserId > 0) {
+        wx.request(
+          Object.assign(
+            roomApi.socialPvpInvitePushOptions(
+              notifyPeerUserId,
+              app.onlineRoomId
+            ),
+            {
+              success: function (res) {
+                if (res.statusCode !== 200 && typeof wx.showToast === 'function') {
+                  var msg = '邀请发送失败';
+                  var d = res.data;
+                  if (d && typeof d === 'object' && d.message) {
+                    msg = String(d.message);
+                  }
+                  wx.showToast({
+                    title: msg.length > 18 ? msg.slice(0, 18) + '…' : msg,
+                    icon: 'none'
+                  });
+                }
+              },
+              fail: function () {
+                if (typeof wx.showToast === 'function') {
+                  wx.showToast({ title: '邀请发送失败', icon: 'none' });
+                }
+              }
+            }
+          )
+        );
+      } else if (
+        friendListInviteExplicit &&
+        notifyPeerUserId <= 0 &&
+        typeof wx.showToast === 'function'
+      ) {
         wx.showToast({
-          title: '请点右上角菜单转发给好友',
+          title: '无法识别好友，请刷新好友列表后重试',
           icon: 'none'
         });
+      }
+      if (!skipWeChatShare) {
+        if (typeof wx.shareAppMessage === 'function') {
+          wx.shareAppMessage({
+            title: '五子棋 房号 ' + app.onlineRoomId,
+            query: 'roomId=' + app.onlineRoomId + '&online=1'
+          });
+        } else {
+          wx.showToast({
+            title: '请点右上角菜单转发给好友',
+            icon: 'none'
+          });
+        }
       }
     },
     fail: function () {
@@ -372,7 +433,14 @@ app.startOnlineAsHost = function() {
   })
     );
   });
-}
+};
+
+/**
+ * 首页大卡「好友对战」唯一推荐入口：建房 + 进房 + 微信分享（不受好友列表 WS 邀请逻辑影响）。
+ */
+app.startOnlineAsHostFromHome = function () {
+  app.startOnlineAsHost(null);
+};
 
 /**
  * 残局管理页：按当前编辑盘面创建好友房，房主观战，好友执白加入。
@@ -1325,7 +1393,7 @@ app.hasHomeMascotMediaLoaded = function(box) {
   var sheet = app.homeMascotSheetImg;
   var n = app.MASCOT_SHEET_FRAME_COUNT;
   if (sheet && sheet.width > 0 && sheet.height > 0 && n >= 1) {
-    var fw = sheet.width / n;
+    var fw = Math.floor(sheet.width / n);
     if (fw > 0) {
       return true;
     }
@@ -1334,8 +1402,7 @@ app.hasHomeMascotMediaLoaded = function(box) {
 }
 
 /**
- * 首页吉祥物：优先雪碧图逐帧；否则静态 GIF（多为首帧）或 PNG。
- * 均未加载成功则不绘制（无矢量兜底图）。
+ * 首页吉祥物：优先雪碧图逐帧；否则静态 GIF（多为首帧）或 PNG。均未加载成功则不绘制。
  */
 app.drawHomeMascotAsset = function(cx, cy, box) {
   var sheet = app.homeMascotSheetImg;
@@ -1349,7 +1416,7 @@ app.drawHomeMascotAsset = function(cx, cy, box) {
   ) {
     var iw = sheet.width;
     var ih = sheet.height;
-    var fw = iw / n;
+    var fw = Math.floor(iw / n);
     if (fw > 0 && ih > 0) {
       var frame =
         n > 1
@@ -1490,18 +1557,47 @@ app.loadHomeUiAssets = function() {
     nextRel();
   }
 
-  function loadMascotWithPrefix(prefix) {
+  /** 主包 images/ui 与分包目录同名时，仅用 images/ui/ 会解析到主包导致大图 404；先尝试 subpackages 全路径 */
+  function loadMascotFromCandidatePaths() {
     loadPhase = 2;
     remaining = 2;
     bindFirstMatch(
-      [prefix + 'home-mascot.png', prefix + 'home-mascot.gif'],
+      [
+        'subpackages/res-mascot/images/ui/home-mascot.png',
+        'images/ui/home-mascot.png',
+        'subpackages/res-mascot/images/ui/home-mascot.gif',
+        'images/ui/home-mascot.gif',
+      ],
       function (im) {
         app.homeMascotImg = im;
       }
     );
-    bind(prefix + 'home-mascot-sheet.png', function (im) {
-      app.homeMascotSheetImg = im;
-    });
+    bindFirstMatch(
+      [
+        'subpackages/res-mascot/images/ui/home-mascot-sheet.png',
+        'images/ui/home-mascot-sheet.png',
+      ],
+      function (im) {
+        app.homeMascotSheetImg = im;
+      }
+    );
+  }
+
+  function loadMascotMainPackagePathsOnly() {
+    loadPhase = 2;
+    remaining = 2;
+    bindFirstMatch(
+      ['images/ui/home-mascot.png', 'images/ui/home-mascot.gif'],
+      function (im) {
+        app.homeMascotImg = im;
+      }
+    );
+    bindFirstMatch(
+      ['images/ui/home-mascot-sheet.png'],
+      function (im) {
+        app.homeMascotSheetImg = im;
+      }
+    );
   }
 
   function startMascotAssetsAfterSubpackage() {
@@ -1509,14 +1605,14 @@ app.loadHomeUiAssets = function() {
       wx.loadSubpackage({
         name: app.HOME_SUBPACKAGE_NAME,
         success: function () {
-          loadMascotWithPrefix(app.MASCOT_SUBPKG_PREFIX);
+          loadMascotFromCandidatePaths();
         },
         fail: function () {
-          loadMascotWithPrefix('images/ui/');
-        }
+          loadMascotMainPackagePathsOnly();
+        },
       });
     } else {
-      loadMascotWithPrefix(app.MASCOT_SUBPKG_PREFIX);
+      loadMascotFromCandidatePaths();
     }
   }
 
@@ -1606,10 +1702,10 @@ app.drawHomeNavBar = function(th) {
 }
 
 /**
- * 侧栏仅管理员可见，且只有「残局管理」（左缘侧滑或点头像下方图标打开）。
+ * 侧栏仅管理员可见，且只有「残局管理」（左缘侧滑或点汉堡打开）；受 showAdminPuzzleButton 总开关控制。
  */
 app.getHomeDrawerRows = function() {
-  if (!app.userIsAdmin) {
+  if (!app.userIsAdmin || !app.showAdminPuzzleButton) {
     return [];
   }
   return [{ label: '残局管理', kind: 'admin_puzzle' }];

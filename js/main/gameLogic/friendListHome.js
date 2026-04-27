@@ -24,6 +24,8 @@ module.exports = function registerFriendListHome(app, deps) {
   var FRIEND_LIST_WATCH_BTN_HEIGHT_TRIM_RPX = 6;
   /** 相对行右缘再左移（约 10px，分两次各 5） */
   var FRIEND_LIST_WATCH_BTN_SHIFT_LEFT_RPX = 10;
+  /** 行内「邀请」药丸宽（rpx），与观战按钮同排布；仅 online 且非 inGame 时显示（PRD §4.4） */
+  var FRIEND_LIST_INVITE_BTN_RPX = 72;
   /** 判定横向滑动 vs 竖向滚动（px²） */
   var FRIEND_LIST_SWIPE_DECIDE_PX2 = 8 * 8;
   /** 抠图或 contain 策略变更时递增，使缓存失效 */
@@ -1179,6 +1181,134 @@ module.exports = function registerFriendListHome(app, deps) {
       y >= r.y &&
       y <= r.y + r.h
     );
+  }
+
+  /**
+   * 行级邀请：与 PRD §4.4 一致；观战列表不展示。
+   */
+  function friendListRowShowInviteBtn(isSpectatorListUi, fr) {
+    if (isSpectatorListUi || !fr) {
+      return false;
+    }
+    var pid = fr.peerUserId != null ? Number(fr.peerUserId) : 0;
+    if (!pid || isNaN(pid) || pid <= 0) {
+      return false;
+    }
+    if (friendRowInGame(fr) || !friendRowIsOnline(fr)) {
+      return false;
+    }
+    if (fr._spectatorInRoom) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * 好友列表行内「邀请」专用：建房 + /api/social/pvp-invites/push（用户 WS）。
+   * 与首页大卡 {@link app.startOnlineAsHostFromHome} 的微信分享链路严格区分。
+   */
+  function startOnlineInviteFromFriendListRow(peerUserId) {
+    if (typeof app.startOnlineAsHost !== 'function') {
+      return;
+    }
+    app.startOnlineAsHost({
+      notifyPeerUserId: peerUserId,
+      skipWeChatInviteShare: true
+    });
+  }
+
+  function getFriendListInviteBtnLayout(L, panelX, yRow, offRow) {
+    var rowPad = app.rpx(8);
+    var rowHCell = L.rowH - app.rpx(4);
+    var btnW = app.rpx(FRIEND_LIST_INVITE_BTN_RPX);
+    var trim = app.rpx(FRIEND_LIST_WATCH_BTN_HEIGHT_TRIM_RPX);
+    var btnH = Math.max(
+      app.rpx(26),
+      rowHCell * 0.5 - trim
+    );
+    var yBtn = yRow + (rowHCell - btnH) * 0.5;
+    var o = offRow > 0 ? offRow : 0;
+    var contentW = L.w - rowPad * 2;
+    var x0 =
+      panelX +
+      rowPad +
+      contentW -
+      btnW -
+      o -
+      app.rpx(FRIEND_LIST_WATCH_BTN_SHIFT_LEFT_RPX);
+    return { x: x0, y: yBtn, w: btnW, h: btnH };
+  }
+
+  function friendListHitInvite(x, y, L, panelX, yRow, offRow) {
+    var r = getFriendListInviteBtnLayout(L, panelX, yRow, offRow);
+    return (
+      x >= r.x &&
+      x <= r.x + r.w &&
+      y >= r.y &&
+      y <= r.y + r.h
+    );
+  }
+
+  /**
+   * 行内「邀请」药丸：主色绿渐变，与首页随机匹配主按钮同系。
+   */
+  function drawFriendListInvitePill(wRect, FL) {
+    var wbx = wRect.x;
+    var wby = wRect.y;
+    var wbw = wRect.w;
+    var wbh = wRect.h;
+    var wbr = Math.min(wbh * 0.5, wbw * 0.5, app.rpx(10));
+    var strokeW = Math.max(1, app.rpx(1.25));
+    var strokeC =
+      FL && FL.watchPillStroke
+        ? FL.watchPillStroke
+        : 'rgba(27, 94, 32, 0.35)';
+    app.ctx.save();
+    var fillStyle = '#43a047';
+    try {
+      if (app.ctx.createLinearGradient) {
+        var grad = app.ctx.createLinearGradient(
+          wbx,
+          wby,
+          wbx,
+          wby + wbh
+        );
+        grad.addColorStop(0, '#66bb6a');
+        grad.addColorStop(1, '#2e7d32');
+        fillStyle = grad;
+      }
+    } catch (eGr) {
+      fillStyle = '#43a047';
+    }
+    if (typeof app.roundRect === 'function') {
+      app.ctx.fillStyle = fillStyle;
+      app.roundRect(wbx, wby, wbw, wbh, wbr);
+      app.ctx.fill();
+      app.roundRect(wbx, wby, wbw, wbh, wbr);
+      app.ctx.strokeStyle = strokeC;
+      app.ctx.lineWidth = strokeW;
+      app.ctx.stroke();
+    } else {
+      app.ctx.fillStyle = fillStyle;
+      app.ctx.fillRect(wbx, wby, wbw, wbh);
+      app.ctx.strokeStyle = strokeC;
+      app.ctx.lineWidth = strokeW;
+      app.ctx.strokeRect(wbx, wby, wbw, wbh);
+    }
+    app.ctx.fillStyle = '#ffffff';
+    app.ctx.font =
+      '600 ' +
+      app.rpx(20) +
+      'px "PingFang SC","Hiragino Sans GB",sans-serif';
+    app.ctx.textAlign = 'center';
+    app.ctx.textBaseline = 'middle';
+    app.ctx.fillText(
+      '邀请',
+      app.snapPx(wbx + wbw * 0.5),
+      app.snapPx(wby + wbh * 0.5 + app.rpx(0.5))
+    );
+    app.ctx.textAlign = 'left';
+    app.ctx.restore();
   }
 
   /**
@@ -3123,6 +3253,31 @@ module.exports = function registerFriendListHome(app, deps) {
           }
           return true;
         }
+        if (
+          friendListRowShowInviteBtn(
+            !!app._gameSpectatorFilter && app.isPvpOnline,
+            fList
+          ) &&
+          friendListHitInvite(x, y, L, panelX, yRowH, oPreSwipe) &&
+          typeof app.startOnlineAsHost === 'function'
+        ) {
+          if (hadListHoriz) {
+            var wFI = getFriendListSwipeActionWidths().total;
+            if (oPreSwipe < wFI * 0.5) {
+              friendListCloseSwipe();
+            } else if (pkSnap) {
+              app.friendListRowSwipe = { peerKey: pkSnap, offset: wFI };
+            }
+          } else {
+            friendListCloseSwipe();
+          }
+          app.closeHomeFriendList();
+          startOnlineInviteFromFriendListRow(fList.peerUserId);
+          if (typeof app.draw === 'function') {
+            app.draw();
+          }
+          return true;
+        }
         var rPadG = app.rpx(8);
         var rLeftG = panelX + rPadG;
         var rWG = L.w - rPadG * 2;
@@ -3174,6 +3329,18 @@ module.exports = function registerFriendListHome(app, deps) {
           typeof app.startOnlineFriendWatchFromPeer === 'function'
         ) {
           app.startOnlineFriendWatchFromPeer(fTap.peerUserId);
+          return true;
+        }
+        if (
+          friendListRowShowInviteBtn(
+            !!app._gameSpectatorFilter && app.isPvpOnline,
+            fTap
+          ) &&
+          friendListHitInvite(x, y, L, panelX, yRowTap, offTap) &&
+          typeof app.startOnlineAsHost === 'function'
+        ) {
+          app.closeHomeFriendList();
+          startOnlineInviteFromFriendListRow(fTap.peerUserId);
           return true;
         }
         if (typeof app.openHomeFriendChatMode === 'function') {
@@ -4434,13 +4601,18 @@ module.exports = function registerFriendListHome(app, deps) {
         var nameY = showStatusLine
           ? yRow + L.rowH * 0.36
           : yRow + L.rowH * 0.5;
+        var showInvBtn = friendListRowShowInviteBtn(isSpectatorListUi, fr);
         var watchReserve =
           frInGame && !frSpectatorInRoom
             ? app.rpx(FRIEND_LIST_WATCH_BTN_RPX) + app.rpx(8)
             : 0;
+        var inviteReserve = showInvBtn
+          ? app.rpx(FRIEND_LIST_INVITE_BTN_RPX) + app.rpx(8)
+          : 0;
+        var rightPillReserve = Math.max(watchReserve, inviteReserve);
         var nameMaxPx = Math.max(
           app.rpx(48),
-          L.w - app.rpx(16) - (nameX - panelX) - app.rpx(6) - watchReserve
+          L.w - app.rpx(16) - (nameX - panelX) - app.rpx(6) - rightPillReserve
         );
         while (
           nameStr.length > 0 &&
@@ -4555,6 +4727,15 @@ module.exports = function registerFriendListHome(app, deps) {
             app.snapPx(nameX),
             app.snapPx(yRow + L.rowH * 0.7)
           );
+        }
+        if (showInvBtn) {
+          var invRect = getFriendListInviteBtnLayout(
+            L,
+            panelX,
+            yRow,
+            offRow
+          );
+          drawFriendListInvitePill(invRect, FL);
         }
         app.ctx.restore();
         app.ctx.restore();

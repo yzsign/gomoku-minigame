@@ -640,7 +640,12 @@ app.ensureHomeMascotAnimLoop = function() {
 
 /** 管理员：顶栏下方左侧小按钮（图标），点击打开侧栏 */
 app.getHomeDrawerTabLayout = function() {
-  if (!app.userIsAdmin || app.screen !== 'home' || app.homeDrawerOpen) {
+  if (
+    !app.userIsAdmin ||
+    !app.showAdminPuzzleButton ||
+    app.screen !== 'home' ||
+    app.homeDrawerOpen
+  ) {
     return null;
   }
   var nav = app.getHomeNavBarLayout();
@@ -2838,9 +2843,6 @@ app.openPieceSkinModal = function() {
     }
     if (err) {
       app.shopCatalogServerPaged = false;
-      if (typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
-        wx.showToast({ title: '使用本地商品目录', icon: 'none' });
-      }
     }
     app.syncPieceSkinModalSelectionFromCurrent();
     var tp = app.pieceSkinModalPage;

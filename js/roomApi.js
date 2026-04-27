@@ -609,6 +609,38 @@ function socialFriendSendMessageOptions(peerUserId, text) {
   };
 }
 
+/** POST /api/social/pvp-invites/push — 房主向好友用户 WS 推送对局邀请 */
+function socialPvpInvitePushOptions(peerUserId, roomId) {
+  return {
+    url: GOMOKU_API_BASE + '/api/social/pvp-invites/push',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify({
+      peerUserId: peerUserId != null ? Number(peerUserId) : 0,
+      roomId: roomId != null ? String(roomId) : ''
+    }),
+    dataType: 'json'
+  };
+}
+
+/** POST /api/social/pvp-invites/decline — 被邀请人拒绝，通知房主 */
+function socialPvpInviteDeclineOptions(inviterUserId, roomId) {
+  return {
+    url: GOMOKU_API_BASE + '/api/social/pvp-invites/decline',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify({
+      inviterUserId: inviterUserId != null ? Number(inviterUserId) : 0,
+      roomId: roomId != null ? String(roomId) : ''
+    }),
+    dataType: 'json'
+  };
+}
+
 /** 用户级 WS：/ws/user?sessionToken=（与 /ws/gomoku 并列） */
 function userWebSocketUrl(sessionToken) {
   var token = sessionToken ? String(sessionToken) : '';
@@ -661,6 +693,8 @@ module.exports = {
   socialFriendDeleteOptions: socialFriendDeleteOptions,
   socialFriendRemarkOptions: socialFriendRemarkOptions,
   socialFriendSendMessageOptions: socialFriendSendMessageOptions,
+  socialPvpInvitePushOptions: socialPvpInvitePushOptions,
+  socialPvpInviteDeclineOptions: socialPvpInviteDeclineOptions,
   userWebSocketUrl: userWebSocketUrl,
   wsUrlFromApiBase: wsUrlFromApiBase
 };

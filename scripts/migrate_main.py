@@ -71,7 +71,6 @@ STATE_NAMES = [
     "historyFilterTab",
     "pieceSkinModalPage",
     "pieceSkinModalAnim",
-    "MASCOT_SUBPKG_PREFIX",
     "HOME_SUBPACKAGE_NAME",
     "onlineOppFetchInFlight",
     "onlineOppAvatarImg",

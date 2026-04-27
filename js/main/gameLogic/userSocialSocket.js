@@ -13,6 +13,8 @@ module.exports = function registerUserSocialSocket(app, deps) {
   app.userSocialReconnectAttempt = 0;
   app._incomingFriendRequestQueue = [];
   app._incomingFriendModalOpen = false;
+  app._incomingRoomInviteQueue = [];
+  app._incomingRoomInviteModalOpen = false;
 
   var MAX_RECONNECT_MS = 60000;
   var BASE_RECONNECT_MS = 800;
@@ -147,7 +149,124 @@ module.exports = function registerUserSocialSocket(app, deps) {
     }
     if (data.type === 'FRIEND_DM_INCOMING') {
       handleFriendDmIncoming(data.payload);
+      return;
     }
+    if (data.type === 'ROOM_INVITE_INCOMING') {
+      handleRoomInviteIncomingPayload(data.payload);
+      return;
+    }
+    if (data.type === 'ROOM_INVITE_DECLINED') {
+      handleRoomInviteDeclinedPayload(data.payload);
+    }
+  }
+
+  function handleRoomInviteDeclinedPayload(payload) {
+    if (typeof wx.showToast !== 'function') {
+      return;
+    }
+    wx.showToast({ title: '对方已拒绝邀请', icon: 'none' });
+  }
+
+  function handleRoomInviteIncomingPayload(payload) {
+    if (!payload) {
+      return;
+    }
+    if (typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch (eR) {
+        return;
+      }
+    }
+    var roomId =
+      payload.roomId != null ? String(payload.roomId).replace(/^\s+|\s+$/g, '') : '';
+    var fromUserId =
+      payload.fromUserId != null
+        ? payload.fromUserId
+        : payload.from_user_id != null
+          ? payload.from_user_id
+          : null;
+    if (!roomId || fromUserId == null) {
+      return;
+    }
+    app._incomingRoomInviteQueue.push({
+      roomId: roomId,
+      fromUserId: fromUserId,
+      fromNickname: payload.fromNickname
+    });
+    pumpIncomingRoomInviteModal();
+  }
+
+  function pumpIncomingRoomInviteModal() {
+    if (app._incomingFriendModalOpen || app._incomingRoomInviteModalOpen) {
+      return;
+    }
+    if (!app._incomingRoomInviteQueue.length) {
+      return;
+    }
+    var inv = app._incomingRoomInviteQueue.shift();
+    if (!inv || !inv.roomId) {
+      pumpIncomingRoomInviteModal();
+      return;
+    }
+    app._incomingRoomInviteModalOpen = true;
+    var nick =
+      typeof inv.fromNickname === 'string' && inv.fromNickname.trim()
+        ? inv.fromNickname.trim()
+        : '好友';
+    if (typeof wx.showModal !== 'function') {
+      app._incomingRoomInviteModalOpen = false;
+      pumpIncomingFriendModal();
+      pumpIncomingRoomInviteModal();
+      return;
+    }
+    var roomInviteModalFinished = false;
+    function finishRoomInviteModal() {
+      if (roomInviteModalFinished) {
+        return;
+      }
+      roomInviteModalFinished = true;
+      app._incomingRoomInviteModalOpen = false;
+      pumpIncomingFriendModal();
+      pumpIncomingRoomInviteModal();
+    }
+    wx.showModal({
+      title: '对局邀请',
+      content: nick + ' 邀请你进行五子棋对局，是否加入房间？',
+      confirmText: '加入',
+      cancelText: '拒绝',
+      success: function(res) {
+        if (res.confirm) {
+          if (typeof app.joinOnlineAsGuest === 'function') {
+            app.joinOnlineAsGuest(String(inv.roomId));
+          }
+        } else if (
+          res.cancel &&
+          roomApi &&
+          typeof roomApi.socialPvpInviteDeclineOptions === 'function'
+        ) {
+          wx.request(
+            Object.assign(
+              roomApi.socialPvpInviteDeclineOptions(inv.fromUserId, inv.roomId),
+              {
+                dataType: 'json',
+                fail: function() {
+                  if (typeof wx.showToast === 'function') {
+                    wx.showToast({ title: '网络异常', icon: 'none' });
+                  }
+                }
+              }
+            )
+          );
+        }
+      },
+      fail: function() {
+        finishRoomInviteModal();
+      },
+      complete: function() {
+        finishRoomInviteModal();
+      }
+    });
   }
 
   function handleFriendDmIncoming(payload) {
@@ -203,7 +322,7 @@ module.exports = function registerUserSocialSocket(app, deps) {
   }
 
   function pumpIncomingFriendModal() {
-    if (app._incomingFriendModalOpen) {
+    if (app._incomingFriendModalOpen || app._incomingRoomInviteModalOpen) {
       return;
     }
     if (!app._incomingFriendRequestQueue.length) {
@@ -265,6 +384,7 @@ module.exports = function registerUserSocialSocket(app, deps) {
             complete: function() {
               app._incomingFriendModalOpen = false;
               pumpIncomingFriendModal();
+              pumpIncomingRoomInviteModal();
             }
           })
         );
@@ -272,6 +392,7 @@ module.exports = function registerUserSocialSocket(app, deps) {
       fail: function() {
         app._incomingFriendModalOpen = false;
         pumpIncomingFriendModal();
+        pumpIncomingRoomInviteModal();
       }
     });
   }

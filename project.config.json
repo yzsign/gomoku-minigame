@@ -1,7 +1,12 @@
 {
   "description": "团团五子棋微信小游戏",
   "packOptions": {
-    "ignore": [],
+    "ignore": [
+      { "type": "folder", "value": "docs" },
+      { "type": "folder", "value": "scripts" },
+      { "type": "file", "value": "audio/LICENSE.txt" },
+      { "type": "glob", "value": "**/*.md" }
+    ],
     "include": []
   },
   "setting": {
@@ -9,10 +14,10 @@
     "es6": true,
     "enhance": false,
     "postcss": true,
-    "minified": false,
+    "minified": true,
     "compileWorklet": false,
     "uglifyFileName": false,
-    "uploadWithSourceMap": true,
+    "uploadWithSourceMap": false,
     "packNpmManually": false,
     "packNpmRelationList": [],
     "minifyWXSS": true,

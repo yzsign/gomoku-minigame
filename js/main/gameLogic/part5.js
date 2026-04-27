@@ -4711,6 +4711,7 @@ wx.onTouchStart(function (e) {
   if (
     app.screen === 'home' &&
     app.userIsAdmin &&
+    app.showAdminPuzzleButton &&
     !app.homeDrawerOpen &&
     !app.ratingCardVisible &&
     !app.checkinModalVisible &&
@@ -5511,7 +5512,11 @@ if (typeof wx.onTouchEnd === 'function') {
         app.draw();
         if (endHit === pb) {
           if (pb === 'pvp') {
-            app.startOnlineAsHost();
+            if (typeof app.startOnlineAsHostFromHome === 'function') {
+              app.startOnlineAsHostFromHome();
+            } else {
+              app.startOnlineAsHost(null);
+            }
             return;
           }
           if (pb === 'pve') {
@@ -5664,7 +5669,7 @@ if (typeof wx.onTouchEnd === 'function') {
       dx > app.rpx(56) &&
       Math.abs(dy) < app.rpx(72)
     ) {
-      if (!app.userIsAdmin) {
+      if (!app.userIsAdmin || !app.showAdminPuzzleButton) {
         return;
       }
       app.homeDrawerOpen = true;

@@ -787,8 +787,9 @@ app.showMyRatingModal = function() {
   );
 }
 
-/** 同步微信头像昵称后刷新信息看板（仅本人卡） */
-app.refetchMyRatingCardPayloadAndRedraw = function() {
+/** 同步微信头像昵称后刷新信息看板（仅本人卡）；opts.showSyncedToast 默认 true */
+app.refetchMyRatingCardPayloadAndRedraw = function(opts) {
+  opts = opts || {};
   if (!app.ratingCardVisible || !authApi.getSessionToken()) {
     if (typeof app.draw === 'function') {
       app.draw();
@@ -822,12 +823,17 @@ app.refetchMyRatingCardPayloadAndRedraw = function() {
         app.applyMyGenderFromRatingPayload(d);
         if (typeof d.avatarUrl === 'string' && d.avatarUrl.trim()) {
           app.loadMyNetworkAvatar(d.avatarUrl.trim());
+        } else {
+          app.myNetworkAvatarImg = null;
         }
         app.fillRatingCardFromApiData(d, {
           showSyncProfileBtn: true,
           usePayloadNickname: true
         });
-        if (typeof wx.showToast === 'function') {
+        if (
+          opts.showSyncedToast !== false &&
+          typeof wx.showToast === 'function'
+        ) {
           wx.showToast({ title: '已同步', icon: 'success' });
         }
         if (typeof app.draw === 'function') {
@@ -858,8 +864,15 @@ app.syncMyProfileFromWeChat = function() {
     return;
   }
   if (typeof wx.getUserProfile !== 'function') {
+    if (typeof app.applyGuestProfileAfterWeChatDeclined === 'function') {
+      app.applyGuestProfileAfterWeChatDeclined(function () {
+        if (typeof app.refetchMyRatingCardPayloadAndRedraw === 'function') {
+          app.refetchMyRatingCardPayloadAndRedraw({ showSyncedToast: false });
+        }
+      });
+    }
     if (typeof wx.showToast === 'function') {
-      wx.showToast({ title: '当前环境不支持', icon: 'none' });
+      wx.showToast({ title: '已使用默认资料', icon: 'none' });
     }
     return;
   }
@@ -934,8 +947,15 @@ app.syncMyProfileFromWeChat = function() {
         });
         return;
       }
+      if (typeof app.applyGuestProfileAfterWeChatDeclined === 'function') {
+        app.applyGuestProfileAfterWeChatDeclined(function () {
+          if (typeof app.refetchMyRatingCardPayloadAndRedraw === 'function') {
+            app.refetchMyRatingCardPayloadAndRedraw({ showSyncedToast: false });
+          }
+        });
+      }
       if (typeof wx.showToast === 'function') {
-        wx.showToast({ title: '未授权', icon: 'none' });
+        wx.showToast({ title: '已使用默认资料', icon: 'none' });
       }
     }
   });

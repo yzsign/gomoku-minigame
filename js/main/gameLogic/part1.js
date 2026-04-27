@@ -131,6 +131,54 @@ app.readCachedWeChatUserInfo = function() {
   }
 };
 
+/** 未授权微信资料：5～7 位字母与数字随机组合（a-z、A-Z、0-9） */
+app.GUEST_NICKNAME_CHARS =
+  'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+app.generateRandomGuestDisplayName = function() {
+  var chars = app.GUEST_NICKNAME_CHARS;
+  var len = Math.floor(Math.random() * 3) + 5;
+  var out = '';
+  for (var i = 0; i < len; i++) {
+    out += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return out;
+};
+
+/**
+ * 拒绝或未授权微信头像昵称：使用本地默认头像、随机昵称，并静默登录同步到服务端（avatarUrl 置空以去掉库里的网络头像）。
+ */
+app.applyGuestProfileAfterWeChatDeclined = function(onDone) {
+  app.myNetworkAvatarImg = null;
+  var guestNick = app.generateRandomGuestDisplayName();
+  var guestGender = Math.random() < 0.5 ? 1 : 2;
+  var ui = {
+    nickName: guestNick,
+    avatarUrl: '',
+    gender: guestGender
+  };
+  app.persistLocalNickname(ui);
+  authApi.silentLogin(
+    {
+      nickName: guestNick,
+      clearAvatar: true,
+      gender: guestGender
+    },
+    function (ok) {
+      app.myProfileAvatarFetched = false;
+      if (typeof app.tryFetchMyProfileAvatar === 'function') {
+        app.tryFetchMyProfileAvatar();
+      }
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
+      if (typeof onDone === 'function') {
+        onDone(ok);
+      }
+    }
+  );
+};
+
 app.persistLocalNickname = function(userInfo) {
   if (userInfo) {
     defaultAvatars.setGenderFromUserInfo(userInfo);
@@ -1661,22 +1709,23 @@ app.trySkipFirstVisitProfileFromServer = function() {
         var nick = typeof d.nickname === 'string' && d.nickname.trim();
         var av =
           typeof d.avatarUrl === 'string' && d.avatarUrl.trim();
-        if (nick && av) {
+        if (nick) {
           try {
             wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
           } catch (eMark) {}
           var ui = {
             nickName: String(d.nickname).trim(),
-            avatarUrl: av,
+            avatarUrl: av || '',
             gender: typeof d.gender === 'number' ? d.gender : 0
           };
-          if (typeof app.saveCachedWeChatUserInfo === 'function') {
+          if (av && typeof app.saveCachedWeChatUserInfo === 'function') {
             app.saveCachedWeChatUserInfo(ui);
           }
           if (typeof app.persistLocalNickname === 'function') {
             app.persistLocalNickname(ui);
           }
-          if (typeof app.loadMyNetworkAvatar === 'function') {
+          app.myNetworkAvatarImg = null;
+          if (av && typeof app.loadMyNetworkAvatar === 'function') {
             app.loadMyNetworkAvatar(av);
           }
           if (typeof app.draw === 'function') {
@@ -1731,6 +1780,9 @@ app.scheduleFirstVisitProfileModal = function() {
           try {
             wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
           } catch (e1) {}
+          if (typeof app.applyGuestProfileAfterWeChatDeclined === 'function') {
+            app.applyGuestProfileAfterWeChatDeclined();
+          }
           return;
         }
         if (typeof wx.getUserProfile !== 'function') {
@@ -1740,6 +1792,9 @@ app.scheduleFirstVisitProfileModal = function() {
           try {
             wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
           } catch (eGup) {}
+          if (typeof app.applyGuestProfileAfterWeChatDeclined === 'function') {
+            app.applyGuestProfileAfterWeChatDeclined();
+          }
           return;
         }
         wx.getUserProfile({
@@ -1775,8 +1830,11 @@ app.scheduleFirstVisitProfileModal = function() {
             try {
               wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
             } catch (eFail) {}
+            if (typeof app.applyGuestProfileAfterWeChatDeclined === 'function') {
+              app.applyGuestProfileAfterWeChatDeclined();
+            }
             if (typeof wx.showToast === 'function') {
-              wx.showToast({ title: '未授权', icon: 'none' });
+              wx.showToast({ title: '已使用默认资料', icon: 'none' });
             }
           }
         });
@@ -2831,6 +2889,8 @@ app.reviewHubData = null;
 
 /** openid 管理员：侧栏「残局管理」入口（由 /api/me/admin-status 设置） */
 app.userIsAdmin = false;
+/** 为 true 时显示侧栏与「残局管理」行；为 false 时隐藏入口（不挡已进入 admin_puzzle 的会话恢复） */
+app.showAdminPuzzleButton = false;
 /** 首页管理员悬浮按钮按下态 */
 app.homeDrawerTabPressed = false;
 /** 管理页草稿棋盘；与 app.board 同引用 */
@@ -3339,11 +3399,9 @@ app.homeMascotSheetImg = null;
 app.MASCOT_SHEET_FRAME_COUNT = 41;
 app.MASCOT_SHEET_FPS = 8;
 /** 修改首页 PNG 或路径时递增，避免热重载仍认为「已加载」而跳过 */
-app.HOME_UI_ASSETS_REV = 49;
-/** 吉祥物资源所在分包（见 game.json）；wx.loadSubpackage 成功后再加载大图 */
+app.HOME_UI_ASSETS_REV = 51;
+/** 吉祥物资源所在分包（见 game.json）；具体路径见 part2 loadMascotFromCandidatePaths */
 app.HOME_SUBPACKAGE_NAME = 'res-mascot';
-/** 分包内吉祥物路径前缀；失败时回退主包 images/ui/ */
-app.MASCOT_SUBPKG_PREFIX = 'subpackages/res-mascot/images/ui/';
 app.homeUiAssetsAppliedRev = -1;
 app.homeUiAssetsLoadInFlight = false;
 
@@ -3882,6 +3940,8 @@ app.tryFetchMyProfileAvatar = function() {
         app.applyMyGenderFromRatingPayload(d);
         if (d && typeof d.avatarUrl === 'string' && d.avatarUrl.trim()) {
           app.loadMyNetworkAvatar(d.avatarUrl.trim());
+        } else {
+          app.myNetworkAvatarImg = null;
         }
         app.draw();
       },
@@ -5264,6 +5324,9 @@ app.applyOnlineState = function(data) {
     app.screen = 'game';
     app.showResultOverlay = false;
     app.onlineResultOverlaySticky = false;
+    if (typeof wx !== 'undefined' && typeof wx.hideToast === 'function') {
+      wx.hideToast();
+    }
     if (typeof app.stopResultTuanPointsAnim === 'function') {
       app.stopResultTuanPointsAnim();
     }

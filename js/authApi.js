@@ -103,7 +103,9 @@ function silentLoginPerform(optionalProfile, onDone) {
         if (optionalProfile.nickName) {
           data.nickname = optionalProfile.nickName;
         }
-        if (optionalProfile.avatarUrl) {
+        if (optionalProfile.clearAvatar) {
+          data.avatarUrl = '';
+        } else if (optionalProfile.avatarUrl) {
           data.avatarUrl = optionalProfile.avatarUrl;
         }
         if (typeof optionalProfile.gender === 'number') {
@@ -113,6 +115,8 @@ function silentLoginPerform(optionalProfile, onDone) {
       if (typeof data.gender !== 'number') {
         data.gender = defaultAvatars.getWeChatGenderForApi();
       }
+      // 若工具里勾选「不校验合法域名、web-view、TLS 版本与 HTTPS 证书」，
+      // 控制台会在此请求附近出现系统提示；真机/提审以公众平台配置的 request 合法域名为准。
       wx.request({
         url: roomApi.GOMOKU_API_BASE + '/api/auth/silent-login',
         method: 'POST',
