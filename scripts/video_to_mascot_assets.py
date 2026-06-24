@@ -1,6 +1,7 @@
 # 从 MP4 导出吉祥物：高分辨率去黑底 → 缩放入库 → 写 GIF + 横向雪碧图。
 # 依赖: pip install Pillow opencv-python-headless
 # 用法: py -3 scripts/video_to_mascot_assets.py [可选: 视频路径]
+# 无参数时依次尝试（相对 minigame 仓库根）: resours/Video 23.mp4 → resources/ → UI/
 from __future__ import annotations
 
 import importlib.util
@@ -32,6 +33,23 @@ def load_remove_module():
     return mod
 
 
+def resolve_default_video(base: str) -> str:
+    """
+    base = gomoku-minigame 根目录（scripts 的上一级）。
+    优先 resours/（仓库现有目录名）→ resources/ → UI/（旧约定）。
+    """
+    candidates = [
+        os.path.join(base, "..", "resours", "Video 23.mp4"),
+        os.path.join(base, "..", "resources", "Video 23.mp4"),
+        os.path.join(base, "..", "UI", "Video 23.mp4"),
+    ]
+    for p in candidates:
+        n = os.path.normpath(p)
+        if os.path.isfile(n):
+            return n
+    return os.path.normpath(candidates[0])
+
+
 def main() -> None:
     rm = load_remove_module()
     base = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
@@ -39,11 +57,10 @@ def main() -> None:
     os.makedirs(root, exist_ok=True)
 
     video = (
-        sys.argv[1]
+        os.path.normpath(sys.argv[1])
         if len(sys.argv) > 1
-        else os.path.join(os.path.dirname(__file__), "..", "..", "UI", "Video 23.mp4")
+        else resolve_default_video(base)
     )
-    video = os.path.normpath(video)
     if not os.path.isfile(video):
         print("missing video", video, file=sys.stderr)
         sys.exit(1)

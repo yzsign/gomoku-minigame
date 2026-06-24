@@ -661,14 +661,13 @@ function drawBoard(ctx, layout, theme) {
     ctx.fillStyle = boardGrad;
     ctx.fillRect(bx, by, boardW, boardH);
   }
-  ctx.strokeStyle = b.line;
-  /* 竖线 x+0.5、横线 y+0.5；檀木可用 gridLineWidth 略加粗 */
   var gridLw =
     typeof b.gridLineWidth === 'number' && b.gridLineWidth > 0
       ? b.gridLineWidth
       : 1;
-  ctx.lineWidth = gridLw;
   var span = (n - 1) * cell;
+  ctx.strokeStyle = b.line;
+  ctx.lineWidth = gridLw;
   for (i = 0; i < n; i++) {
     var vx = ox + i * cell + 0.5;
     ctx.beginPath();
@@ -683,14 +682,12 @@ function drawBoard(ctx, layout, theme) {
     ctx.lineTo(ox + span, hy);
     ctx.stroke();
   }
-
   var stars = [[3, 3], [3, 11], [11, 3], [11, 11], [7, 7]];
   ctx.fillStyle = b.star;
   for (i = 0; i < stars.length; i++) {
     var sx = stars[i][0];
     var sy = stars[i][1];
     ctx.beginPath();
-    /* 星位略小，避免与高饱和线色抢对比 */
     ctx.arc(
       snapLogical(ox + sx * cell),
       snapLogical(oy + sy * cell),
@@ -710,6 +707,8 @@ function drawBoard(ctx, layout, theme) {
         ? 'rgba(26, 52, 74, 0.34)'
         : theme.id === 'ink'
           ? 'rgba(42, 38, 34, 0.3)'
+          : theme.id === 'cyberpunk'
+            ? 'rgba(48, 56, 68, 0.5)'
           : 'rgba(0, 0, 0, 0.16)';
   ctx.lineWidth = 1;
   ctx.stroke();
@@ -741,6 +740,8 @@ function drawBoardCoordinateLabels(ctx, layout, theme) {
         ? 'rgba(26, 52, 74, 0.68)'
         : theme && theme.id === 'ink'
           ? 'rgba(42, 38, 34, 0.72)'
+          : theme && theme.id === 'cyberpunk'
+            ? 'rgba(175, 190, 208, 0.82)'
           : 'rgba(0, 0, 0, 0.55)';
   ctx.save();
   ctx.font =

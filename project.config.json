@@ -2,10 +2,22 @@
   "description": "团团五子棋微信小游戏",
   "packOptions": {
     "ignore": [
-      { "type": "folder", "value": "docs" },
-      { "type": "folder", "value": "scripts" },
-      { "type": "file", "value": "audio/LICENSE.txt" },
-      { "type": "glob", "value": "**/*.md" }
+      {
+        "value": "docs",
+        "type": "folder"
+      },
+      {
+        "value": "scripts",
+        "type": "folder"
+      },
+      {
+        "value": "audio/LICENSE.txt",
+        "type": "file"
+      },
+      {
+        "value": "**/*.md",
+        "type": "glob"
+      }
     ],
     "include": []
   },

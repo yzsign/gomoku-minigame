@@ -457,6 +457,54 @@ app.drawPieceSkinModalOneCard = function(rx, ry, rw, rh, entry, gidx, baseClassi
   }
 }
 
+/**
+ * 杂货铺单页商品栅格；offsetX 为整页横向平移（翻页动画）。
+ */
+app.drawPieceSkinModalProductGrid = function(
+  offsetX,
+  pageIdx,
+  pageArr,
+  L,
+  tot,
+  per,
+  baseClassic,
+  th
+) {
+  var gr = L.gridRows != null ? L.gridRows : 3;
+  var gc = L.gridCols != null ? L.gridCols : 2;
+  var start = pageIdx * per;
+  var row;
+  var col;
+  for (row = 0; row < gr; row++) {
+    for (col = 0; col < gc; col++) {
+      var slot = row * gc + col;
+      var gidx = start + slot;
+      if (gidx >= tot) {
+        continue;
+      }
+      if (slot < 0 || !pageArr || slot >= pageArr.length) {
+        continue;
+      }
+      var entDraw = pageArr[slot];
+      if (!entDraw) {
+        continue;
+      }
+      var gx = L.gridX0 + col * (L.cellW + L.cellGapX) + offsetX;
+      var gy = L.gridY0 + row * (L.cellH + L.cellGapY);
+      app.drawPieceSkinModalOneCard(
+        gx,
+        gy,
+        L.cellW,
+        L.cellH,
+        entDraw,
+        gidx,
+        baseClassic,
+        th
+      );
+    }
+  }
+};
+
 app.drawPieceSkinModalOverlay = function(th) {
   if (!app.pieceSkinModalVisible) {
     return;
@@ -533,38 +581,63 @@ app.drawPieceSkinModalOverlay = function(th) {
   app.ctx.lineTo(app.snapPx(x + L.w - pad), app.snapPx(sepY));
   app.ctx.stroke();
 
-  var start = app.pieceSkinModalPage * per;
   var gr = L.gridRows != null ? L.gridRows : 3;
   var gc = L.gridCols != null ? L.gridCols : 2;
-  var row;
-  var col;
-  for (row = 0; row < gr; row++) {
-    for (col = 0; col < gc; col++) {
-      var slot = row * gc + col;
-      var gidx = start + slot;
-      if (gidx >= tot) {
-        continue;
-      }
-      if (slot < 0 || slot >= pageArr.length) {
-        continue;
-      }
-      var entDraw = pageArr[slot];
-      if (!entDraw) {
-        continue;
-      }
-      var gx = L.gridX0 + col * (L.cellW + L.cellGapX);
-      var gy = L.gridY0 + row * (L.cellH + L.cellGapY);
-      app.drawPieceSkinModalOneCard(
-        gx,
-        gy,
-        L.cellW,
-        L.cellH,
-        entDraw,
-        gidx,
-        baseClassic,
-        th
-      );
-    }
+  var gridSlideW =
+    L.cellW * gc + (gc > 0 ? L.cellGapX * Math.max(0, gc - 1) : 0);
+  var clipH =
+    L.gridH != null
+      ? L.gridH
+      : L.cellH * gr + L.cellGapY * Math.max(0, gr - 1);
+  var slideFrom = app.pieceSkinPageSlideFromEntries;
+  if (slideFrom != null) {
+    var su = app.pieceSkinPageSlideProgress;
+    var sdir = app.pieceSkinPageSlideDir > 0 ? 1 : -1;
+    var oldOff = sdir > 0 ? -su * gridSlideW : su * gridSlideW;
+    var newOff = sdir > 0 ? (1 - su) * gridSlideW : -(1 - su) * gridSlideW;
+    var fromPg = app.pieceSkinPageSlideFromPage;
+    var clipPad = app.rpx(6);
+    app.ctx.save();
+    app.ctx.beginPath();
+    app.ctx.rect(
+      app.snapPx(L.gridX0 - clipPad),
+      app.snapPx(L.gridY0 - clipPad),
+      app.snapPx(gridSlideW + 2 * clipPad),
+      app.snapPx(clipH + 2 * clipPad)
+    );
+    app.ctx.clip();
+    app.drawPieceSkinModalProductGrid(
+      oldOff,
+      fromPg,
+      slideFrom,
+      L,
+      tot,
+      per,
+      baseClassic,
+      th
+    );
+    app.drawPieceSkinModalProductGrid(
+      newOff,
+      app.pieceSkinModalPage,
+      pageArr,
+      L,
+      tot,
+      per,
+      baseClassic,
+      th
+    );
+    app.ctx.restore();
+  } else {
+    app.drawPieceSkinModalProductGrid(
+      0,
+      app.pieceSkinModalPage,
+      pageArr,
+      L,
+      tot,
+      per,
+      baseClassic,
+      th
+    );
   }
 
   var pc = L.pageCount;
@@ -582,9 +655,13 @@ app.drawPieceSkinModalOverlay = function(th) {
     var totalDotsW = pc * (2 * dotR) + (pc - 1) * dGap;
     var dot0X = L.cx - totalDotsW / 2 + dotR;
     var dmi;
+    var dotActivePage =
+      app.pieceSkinShopCatalogLoadingTargetPage != null
+        ? app.pieceSkinShopCatalogLoadingTargetPage
+        : app.pieceSkinModalPage;
     for (dmi = 0; dmi < pc; dmi++) {
       var dcx = dot0X + dmi * (2 * dotR + dGap);
-      var active = dmi === app.pieceSkinModalPage;
+      var active = dmi === dotActivePage;
       app.ctx.beginPath();
       app.ctx.arc(
         app.snapPx(dcx),
@@ -1040,6 +1117,30 @@ app.draw = function() {
     app.drawReplay();
     if (typeof app.drawFriendListGlobalChrome === 'function') {
       app.drawFriendListGlobalChrome();
+    }
+    return;
+  }
+
+  /**
+   * 结算全屏层盖住棋局：无需再画棋盘/棋子/底栏等，可显著减轻卡顿（胜利烟花 RAF 仍调 draw，此处开销最大）。
+   */
+  if (
+    app.screen === 'game' &&
+    app.showResultOverlay &&
+    (app.gameOver || app.onlineResultOverlaySticky)
+  ) {
+    app.layout = app.computeLayout();
+    var thFast = app.getUiTheme();
+    app.drawResultOverlay();
+    app.drawRatingCardOverlay(thFast);
+    if (typeof app.drawFriendListGlobalChrome === 'function') {
+      app.drawFriendListGlobalChrome();
+    }
+    if (
+      typeof app.drawSpectatorPopover === 'function' &&
+      app.spectatorPopoverOpen
+    ) {
+      app.drawSpectatorPopover(app.ctx);
     }
     return;
   }
@@ -1997,11 +2098,13 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
   var rBar = app.rpx(12);
   var barIconFg = th.btnGhostText || '#3a3836';
   ctx.save();
-  if (th.id === 'ink' || th.id === 'mint') {
+  if (th.id === 'ink' || th.id === 'mint' || th.id === 'cyberpunk') {
     ctx.shadowColor =
-      th.id === 'mint'
-        ? 'rgba(20, 52, 62, 0.06)'
-        : 'rgba(50, 42, 34, 0.06)';
+      th.id === 'cyberpunk'
+        ? 'rgba(0, 0, 0, 0.1)'
+        : th.id === 'mint'
+          ? 'rgba(20, 52, 62, 0.06)'
+          : 'rgba(50, 42, 34, 0.06)';
     ctx.shadowBlur = app.rpx(5);
     ctx.shadowOffsetY = app.rpx(1);
   } else {
@@ -2017,6 +2120,9 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
     /** 与 mint.bg[2] 乳白青釉底一致，弱化「悬浮卡片」 */
     ctx.fillStyle = 'rgba(241, 247, 245, 0.96)';
     ctx.strokeStyle = 'rgba(28, 58, 70, 0.11)';
+  } else if (th.id === 'cyberpunk') {
+    ctx.fillStyle = 'rgba(32, 36, 44, 0.96)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
   } else {
     ctx.fillStyle = '#ffffff';
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
@@ -2031,11 +2137,13 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
   var divTop = L.y0 + app.rpx(9);
   var divBot = L.y0 + L.barH - app.rpx(9);
   ctx.strokeStyle =
-    th.id === 'ink'
-      ? 'rgba(72, 66, 58, 0.14)'
-      : th.id === 'mint'
-        ? 'rgba(28, 58, 70, 0.12)'
-        : 'rgba(0, 0, 0, 0.08)';
+    th.id === 'cyberpunk'
+      ? 'rgba(255, 255, 255, 0.1)'
+      : th.id === 'ink'
+        ? 'rgba(72, 66, 58, 0.14)'
+        : th.id === 'mint'
+          ? 'rgba(28, 58, 70, 0.12)'
+          : 'rgba(0, 0, 0, 0.08)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   var divI;
@@ -2139,7 +2247,9 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
       ? th.subtitle || '#585046'
       : th.id === 'mint'
         ? th.subtitle || '#3a5862'
-        : '#3a3836';
+        : th.id === 'cyberpunk'
+          ? th.subtitle || '#7a96ac'
+          : '#3a3836';
   var i;
   for (i = 0; i < cols.length; i++) {
     var col = cols[i];
@@ -2186,6 +2296,17 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
       );
       ctx.fill();
     }
+    if (i === 1 && undoActive && th.id === 'cyberpunk') {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+      app.roundRect(
+        colLeft + app.rpx(3),
+        L.y0 + app.rpx(4),
+        L.colW - app.rpx(6),
+        L.barH - app.rpx(8),
+        app.rpx(8)
+      );
+      ctx.fill();
+    }
     if (!pveBarOnly && i === 2 && drawOk && app.onlineDrawPending && th.id === 'ink') {
       ctx.fillStyle = 'rgba(88, 78, 68, 0.1)';
       app.roundRect(
@@ -2199,6 +2320,17 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
     }
     if (!pveBarOnly && i === 2 && drawOk && app.onlineDrawPending && th.id === 'mint') {
       ctx.fillStyle = 'rgba(28, 72, 84, 0.09)';
+      app.roundRect(
+        colLeft + app.rpx(3),
+        L.y0 + app.rpx(4),
+        L.colW - app.rpx(6),
+        L.barH - app.rpx(8),
+        app.rpx(8)
+      );
+      ctx.fill();
+    }
+    if (!pveBarOnly && i === 2 && drawOk && app.onlineDrawPending && th.id === 'cyberpunk') {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
       app.roundRect(
         colLeft + app.rpx(3),
         L.y0 + app.rpx(4),
@@ -4296,6 +4428,22 @@ wx.onTouchStart(function (e) {
   app.lastTouchDownX = x;
   app.lastTouchDownY = y;
 
+  if (app.privacyConsentVisible) {
+    if (
+      typeof app.handlePrivacyConsentTouchStart === 'function' &&
+      app.handlePrivacyConsentTouchStart(x, y)
+    ) {
+      return;
+    }
+    if (
+      typeof app.handlePrivacyConsentTouch === 'function' &&
+      app.handlePrivacyConsentTouch(x, y)
+    ) {
+      return;
+    }
+    return;
+  }
+
   if (app.screen === 'admin_puzzle') {
     if (typeof app.onHomeFriendListTouchStart === 'function' &&
         app.onHomeFriendListTouchStart(x, y, e)) {
@@ -4334,6 +4482,9 @@ wx.onTouchStart(function (e) {
         }
         app.ratingCardVisible = false;
         app.ratingCardData = null;
+        if (typeof app.destroyRatingCardSyncProfileNativeBtn === 'function') {
+          app.destroyRatingCardSyncProfileNativeBtn();
+        }
         app.draw();
         return;
       }
@@ -4365,8 +4516,11 @@ wx.onTouchStart(function (e) {
         typeof app.hitRatingCardSyncProfile === 'function' &&
         app.hitRatingCardSyncProfile(x, y)
       ) {
-        if (typeof app.syncMyProfileFromWeChat === 'function') {
-          app.syncMyProfileFromWeChat();
+        if (
+          !app.ratingCardSyncProfileNativeBtn &&
+          typeof app.onRatingCardProfileSyncTap === 'function'
+        ) {
+          app.onRatingCardProfileSyncTap();
         }
         return;
       }
@@ -4376,6 +4530,9 @@ wx.onTouchStart(function (e) {
         }
         app.ratingCardVisible = false;
         app.ratingCardData = null;
+        if (typeof app.destroyRatingCardSyncProfileNativeBtn === 'function') {
+          app.destroyRatingCardSyncProfileNativeBtn();
+        }
         app.draw();
         return;
       }
@@ -4453,6 +4610,9 @@ wx.onTouchStart(function (e) {
       }
       app.ratingCardVisible = false;
       app.ratingCardData = null;
+      if (typeof app.destroyRatingCardSyncProfileNativeBtn === 'function') {
+        app.destroyRatingCardSyncProfileNativeBtn();
+      }
       app.draw();
       return;
     }
@@ -4484,8 +4644,11 @@ wx.onTouchStart(function (e) {
       typeof app.hitRatingCardSyncProfile === 'function' &&
       app.hitRatingCardSyncProfile(x, y)
     ) {
-      if (typeof app.syncMyProfileFromWeChat === 'function') {
-        app.syncMyProfileFromWeChat();
+      if (
+        !app.ratingCardSyncProfileNativeBtn &&
+        typeof app.onRatingCardProfileSyncTap === 'function'
+      ) {
+        app.onRatingCardProfileSyncTap();
       }
       return;
     }
@@ -4495,6 +4658,9 @@ wx.onTouchStart(function (e) {
       }
       app.ratingCardVisible = false;
       app.ratingCardData = null;
+      if (typeof app.destroyRatingCardSyncProfileNativeBtn === 'function') {
+        app.destroyRatingCardSyncProfileNativeBtn();
+      }
       app.draw();
       return;
     }
@@ -4632,7 +4798,9 @@ wx.onTouchStart(function (e) {
     }
     if (
       typeof app.hitPieceSkinModalGridContentArea === 'function' &&
-      app.hitPieceSkinModalGridContentArea(x, y)
+      app.hitPieceSkinModalGridContentArea(x, y) &&
+      app.pieceSkinPageSlideRafId == null &&
+      app.pieceSkinShopCatalogLoadingTargetPage == null
     ) {
       app.pieceShopGridTouchArmed = true;
       app.pieceShopGridTouchX = x;
@@ -4868,15 +5036,6 @@ wx.onTouchStart(function (e) {
         wx.showToast({ title: '暂无法查看对手资料', icon: 'none' });
       }
     }
-    return;
-  }
-
-  if (
-    app.screen !== 'home' &&
-    app.themeScreenShowsStyleEntry() &&
-    app.hitThemeEntry(x, y)
-  ) {
-    app.cycleThemeNext();
     return;
   }
 
@@ -5252,6 +5411,14 @@ if (typeof wx.onTouchMove === 'function') {
 if (typeof wx.onTouchEnd === 'function') {
   wx.onTouchEnd(function (e) {
     var t = e.changedTouches && e.changedTouches[0];
+    if (
+      t &&
+      app.privacyConsentVisible &&
+      typeof app.handlePrivacyConsentTouchEnd === 'function' &&
+      app.handlePrivacyConsentTouchEnd(t.clientX, t.clientY)
+    ) {
+      return;
+    }
     if (
       t &&
       typeof app.onHomeFriendListTouchEnd === 'function' &&
@@ -5748,9 +5915,16 @@ if (typeof wx.onShow === 'function') {
         app.restartUserSocialSocket();
       }
       app.loadHomeUiAssets();
-      setTimeout(function () {
-        app.tryFetchMyProfileAvatar();
-      }, 500);
+      function fetchAvatarIfAllowed() {
+        setTimeout(function () {
+          app.tryFetchMyProfileAvatar();
+        }, 500);
+      }
+      if (typeof app.ensurePrivacyAuthorized === 'function') {
+        app.ensurePrivacyAuthorized(fetchAvatarIfAllowed, function () {});
+      } else {
+        fetchAvatarIfAllowed();
+      }
       setTimeout(function () {
         if (typeof app.refreshAdminStatus === 'function') {
           app.refreshAdminStatus();

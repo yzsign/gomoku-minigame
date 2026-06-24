@@ -1,7 +1,8 @@
 /**
- * 界面风格：柔和渐变底 / 深色主按钮 / 高对比标题（棋院质感；青瓷 / 水墨为解锁主题，全屏与匹配页跟随后台所选）
+ * 界面风格：柔和渐变底 / 深色主按钮 / 高对比标题（棋院质感；青瓷 / 水墨为解锁；赛博 cyberpunk 可切换）
  * 设计稿宽度 750rpx（与 main 中 rpx() 一致）。
- * 檀木 classic 与青瓷 mint、水墨 ink 各有一套色板，互不覆盖。
+ * 檀木 classic、赛博 cyberpunk 与青瓷 mint、水墨 ink 各有一套色板，互不覆盖。
+ * 本地无记录或需回退时默认檀木，避免冷启动先闪深色再随服务端纠偏。
  */
 var STORAGE_KEY = 'gomoku_theme_id';
 /** 棋盘技能槽 Q（短剑）：与后端 user_equipped_cosmetics.BOARD_SKILL item_id dagger 一致 */
@@ -177,6 +178,60 @@ var THEMES = {
     },
     status: '#3a3632',
     hint: '#7a7268'
+  },
+  /**
+   * 深色界面（id 仍为 cyberpunk 以兼容存储 / 后端）：克制色板，与檀木同属默认可切换。
+   */
+  cyberpunk: {
+    id: 'cyberpunk',
+    name: '赛博',
+    bg: ['#12161c', '#151a22', '#0e1117'],
+    title: '#e8eaed',
+    subtitle: '#8b96a8',
+    muted: '#6b7585',
+    homeCards: ['#3d4f63', '#4a5a6e', '#5c6b7d'],
+    homePve: '#4a5d72',
+    homeFriend: '#5a6d82',
+    btnPrimary: '#5a7a94',
+    btnPrimaryStroke: 'rgba(255, 255, 255, 0.22)',
+    btnShadow: 'rgba(0, 0, 0, 0.38)',
+    btnGhostFill: 'rgba(28, 32, 40, 0.94)',
+    btnGhostStroke: 'rgba(255, 255, 255, 0.16)',
+    btnGhostText: '#a8b4c4',
+    pageIndicator: '#7a8fa3',
+    result: {
+      defaultEnd: '#121820',
+      win: { bg: 'rgba(76, 140, 96, 0.22)', title: '#7ccd93' },
+      lose: { bg: 'rgba(160, 72, 88, 0.2)', title: '#e89aa8' },
+      draw: { bg: 'rgba(95, 108, 128, 0.2)', title: '#aeb8c8' },
+      sub: '#8b96a8',
+      secondaryFill: 'rgba(255, 255, 255, 0.06)',
+      secondaryStroke: 'rgba(255, 255, 255, 0.2)',
+      secondaryText: '#c4ced8'
+    },
+    board: {
+      g0: '#1a1f28',
+      g1: '#252b36',
+      line: 'rgba(255, 255, 255, 0.18)',
+      star: '#c5ccd6',
+      gridLineWidth: 1
+    },
+    pieces: {
+      black: {
+        g0: '#4a4e52',
+        gm: '#222428',
+        g1: '#060608',
+        stroke: 'rgba(255, 255, 255, 0.14)'
+      },
+      white: {
+        g0: '#fffffc',
+        gm: '#e8eef0',
+        g1: '#c8d4dc',
+        stroke: '#7a8694'
+      }
+    },
+    status: '#a8b4c4',
+    hint: '#7a8494'
   }
 };
 
@@ -628,9 +683,9 @@ function pointsCostFromShopCatalog(itemCode, fallback) {
   return fallback;
 }
 
-/** 首页循环切换：檀木 + 已解锁的棋盘风格 */
+/** 首页循环切换：檀木 → 赛博（默认可用）→ 已解锁青瓷 / 水墨 */
 function getThemeIdsForCycling() {
-  var ids = ['classic'];
+  var ids = ['classic', 'cyberpunk'];
   if (isPieceSkinUnlockedOnServer('mint')) {
     ids.push('mint');
   }
@@ -987,8 +1042,8 @@ function getTheme(id) {
 }
 
 function clampThemeIdToUnlocked(id) {
-  if (id === 'classic') {
-    return 'classic';
+  if (id === 'classic' || id === 'cyberpunk') {
+    return THEMES[id] ? id : 'classic';
   }
   if ((id === 'mint' || id === 'ink') && THEMES[id] && isPieceSkinUnlockedOnServer(id)) {
     return id;
@@ -1003,6 +1058,9 @@ function loadSavedThemeId() {
       if (v === 'classic') {
         return 'classic';
       }
+      if (v === 'cyberpunk' && THEMES.cyberpunk) {
+        return 'cyberpunk';
+      }
       if ((v === 'mint' || v === 'ink') && THEMES[v]) {
         if (isPieceSkinUnlockedOnServer(v)) {
           return v;
@@ -1014,6 +1072,11 @@ function loadSavedThemeId() {
       }
     }
   } catch (e) {}
+  try {
+    if (typeof wx !== 'undefined' && wx.setStorageSync) {
+      wx.setStorageSync(STORAGE_KEY, 'classic');
+    }
+  } catch (e3) {}
   return 'classic';
 }
 
@@ -1025,7 +1088,7 @@ function saveThemeId(id) {
     if (!isPieceSkinUnlockedOnServer(id)) {
       return;
     }
-  } else if (id !== 'classic') {
+  } else if (id !== 'classic' && id !== 'cyberpunk') {
     return;
   }
   try {
@@ -1052,6 +1115,14 @@ function applyThemeIdFromServer(id) {
         wx.setStorageSync(STORAGE_KEY, 'classic');
       }
     } catch (e) {}
+    return;
+  }
+  if (tid === 'cyberpunk' && THEMES.cyberpunk) {
+    try {
+      if (typeof wx !== 'undefined' && wx.setStorageSync) {
+        wx.setStorageSync(STORAGE_KEY, 'cyberpunk');
+      }
+    } catch (e2) {}
     return;
   }
   if ((tid === 'mint' || tid === 'ink') && isPieceSkinUnlockedOnServer(tid)) {

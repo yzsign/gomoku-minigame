@@ -145,6 +145,82 @@ app.generateRandomGuestDisplayName = function() {
   return out;
 };
 
+/** 是否为未授权微信资料时生成的 5～7 位随机游客名 */
+app.isRandomGuestDisplayName = function(name) {
+  if (name == null || typeof name !== 'string') {
+    return false;
+  }
+  var s = String(name).trim();
+  if (s.length < 5 || s.length > 7) {
+    return false;
+  }
+  if (/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(s)) {
+    return false;
+  }
+  var chars = app.GUEST_NICKNAME_CHARS;
+  var i;
+  for (i = 0; i < s.length; i++) {
+    if (chars.indexOf(s.charAt(i)) < 0) {
+      return false;
+    }
+  }
+  return true;
+};
+
+/**
+ * 信息看板（本人）：优先真实微信昵称；否则展示随机游客名。
+ */
+app.ratingCardNicknameLineForMe = function(d) {
+  var list = [];
+  var cached =
+    typeof app.readCachedWeChatUserInfo === 'function'
+      ? app.readCachedWeChatUserInfo()
+      : null;
+  if (cached && cached.nickName) {
+    list.push(String(cached.nickName).trim());
+  }
+  if (typeof app.getMyDisplayName === 'function') {
+    var mine = app.getMyDisplayName();
+    if (mine && String(mine).trim() && mine !== '我') {
+      list.push(String(mine).trim());
+    }
+  }
+  if (d && typeof d.nickname === 'string' && d.nickname.trim()) {
+    list.push(d.nickname.trim());
+  }
+  var i;
+  var n;
+  for (i = 0; i < list.length; i++) {
+    n = list[i];
+    if (n && !app.isRandomGuestDisplayName(n)) {
+      return n;
+    }
+  }
+  for (i = 0; i < list.length; i++) {
+    n = list[i];
+    if (n && app.isRandomGuestDisplayName(n)) {
+      return n;
+    }
+  }
+  return '我';
+};
+
+/** 同步微信资料成功后，立即刷新信息看板昵称行（不必等 /api/me/rating 返回） */
+app.applyRatingCardNicknameLineFromUserInfo = function(userInfo) {
+  if (!app.ratingCardVisible || !app.ratingCardData || !userInfo) {
+    return;
+  }
+  var nn =
+    userInfo.nickName != null ? String(userInfo.nickName).trim() : '';
+  if (!nn || app.isRandomGuestDisplayName(nn)) {
+    return;
+  }
+  app.ratingCardData.nicknameLine = nn;
+  if (typeof app.draw === 'function') {
+    app.draw();
+  }
+};
+
 /**
  * 拒绝或未授权微信头像昵称：使用本地默认头像、随机昵称，并静默登录同步到服务端（avatarUrl 置空以去掉库里的网络头像）。
  */
@@ -158,6 +234,9 @@ app.applyGuestProfileAfterWeChatDeclined = function(onDone) {
     gender: guestGender
   };
   app.persistLocalNickname(ui);
+  if (app.ratingCardVisible && app.ratingCardData) {
+    app.ratingCardData.nicknameLine = guestNick;
+  }
   authApi.silentLogin(
     {
       nickName: guestNick,
@@ -1026,6 +1105,16 @@ app.getPropBarUiColors = function(th) {
       pressShadow: 'rgba(31, 86, 100, 0.28)'
     };
   }
+  if (id === 'cyberpunk') {
+    return {
+      btnInnerG0: 'rgba(34, 38, 46, 0.96)',
+      btnInnerG1: 'rgba(26, 30, 38, 0.97)',
+      btnIdleBorder: 'rgba(255, 255, 255, 0.18)',
+      btnOnBorder: primary,
+      btnLetter: title,
+      pressShadow: 'rgba(0, 0, 0, 0.35)'
+    };
+  }
   if (id === 'ink') {
     return {
       btnInnerG0: 'rgba(255, 252, 248, 0.97)',
@@ -1771,7 +1860,8 @@ app.scheduleFirstVisitProfileModal = function() {
     }
     wx.showModal({
       title: '完善资料',
-      content: '是否授权微信昵称与头像用于本游戏？（仅询问一次）',
+      content:
+        '是否授权微信昵称与头像用于本游戏展示？（须已同意《隐私保护指引》；仅询问一次）',
       confirmText: '授权',
       cancelText: '暂不',
       success: function (modalRes) {
@@ -1896,6 +1986,14 @@ app.shopCatalogPageEntries = [];
 app.pieceShopGridTouchArmed = false;
 app.pieceShopGridTouchX = 0;
 app.pieceShopGridTouchY = 0;
+/** 杂货铺横向翻页：0～1，非滑动中为 0 */
+app.pieceSkinPageSlideProgress = 0;
+app.pieceSkinPageSlideRafId = null;
+app.pieceSkinPageSlideFromPage = 0;
+app.pieceSkinPageSlideFromEntries = null;
+app.pieceSkinPageSlideDir = 1;
+/** 服务端分页请求中：分页点高亮目标页（条目仍以 pieceSkinModalPage 为准） */
+app.pieceSkinShopCatalogLoadingTargetPage = null;
 app.pieceSkinRedeemInFlight = false;
 /** 杂货铺：双击穿戴，首击 catalog 下标与时间戳 */
 app.pieceSkinWearDblIdx = -1;
@@ -2334,6 +2432,37 @@ app.shopModalUiFromTheme = function(th) {
   th = th || app.getUiTheme();
   var id = th.id;
   var bg = th.bg && th.bg.length ? th.bg : ['#fff9f4', '#fff6ed', '#fffcf9'];
+  if (id === 'cyberpunk') {
+    var rib0cb =
+      th.homeCards && th.homeCards[0] ? th.homeCards[0] : th.btnPrimary;
+    return {
+      panel: bg,
+      title: th.title,
+      subtitle: th.subtitle,
+      muted: th.muted,
+      sep: 'rgba(255, 255, 255, 0.12)',
+      cardG0: 'rgba(34, 38, 46, 0.94)',
+      cardG1: 'rgba(26, 30, 38, 0.97)',
+      stroke: 'rgba(255, 255, 255, 0.16)',
+      focusStroke: th.btnPrimary,
+      focusShadow: 'rgba(0, 0, 0, 0.38)',
+      statusSep: 'rgba(255, 255, 255, 0.08)',
+      ribbon0: rib0cb,
+      ribbon1: th.btnPrimary,
+      ribbon2:
+        th.homeCards && th.homeCards[2]
+          ? th.homeCards[2]
+          : th.homeCards && th.homeCards[1]
+            ? th.homeCards[1]
+            : th.btnPrimary,
+      ribbonText: '#f0f2f5',
+      ribbonTextShadow: 'rgba(0, 0, 0, 0.35)',
+      pointsCost: '#9eb0c4',
+      redeemBtnG0:
+        th.homeCards && th.homeCards[1] ? th.homeCards[1] : th.btnPrimary,
+      redeemBtnG1: th.btnPrimary
+    };
+  }
   return {
     panel: bg,
     title: th.title,
@@ -2525,17 +2654,20 @@ app.friendListHomeUiFromTheme = function(th) {
     th.result && th.result.win && th.result.win.title
       ? th.result.win.title
       : '#2e7d32';
+  var cyber = id === 'cyberpunk';
   return {
-    backdropAlpha: id === 'ink' ? 0.52 : id === 'mint' ? 0.4 : 0.45,
+    backdropAlpha: cyber ? 0.52 : id === 'ink' ? 0.52 : id === 'mint' ? 0.4 : 0.45,
     panelG0: panelArr[0],
     panelG1: panelArr[1],
     panelG2: panelArr[2],
     panelShadow:
-      id === 'mint'
-        ? 'rgba(12, 52, 64, 0.2)'
-        : id === 'ink'
-          ? 'rgba(20, 16, 12, 0.26)'
-          : 'rgba(60, 48, 38, 0.18)',
+      cyber
+        ? 'rgba(0, 0, 0, 0.35)'
+        : id === 'mint'
+          ? 'rgba(12, 52, 64, 0.2)'
+          : id === 'ink'
+            ? 'rgba(20, 16, 12, 0.26)'
+            : 'rgba(60, 48, 38, 0.18)',
     title: th.title,
     collapse: th.muted,
     searchBg0: S ? S.cardG0 : '#fffefb',
@@ -2547,28 +2679,39 @@ app.friendListHomeUiFromTheme = function(th) {
     searchPlaceholder: th.muted,
     loading: th.muted,
     emptyTitle: th.title,
-    rowEven: H ? H.parchmentTint : 'rgba(253, 245, 230, 0.32)',
+    rowEven:
+      cyber
+        ? 'rgba(22, 30, 46, 0.97)'
+        : H
+          ? H.parchmentTint
+          : 'rgba(253, 245, 230, 0.32)',
     rowOdd:
-      id === 'mint'
-        ? 'rgba(255, 255, 255, 0.65)'
-        : id === 'ink'
-          ? 'rgba(255, 252, 248, 0.55)'
-          : 'rgba(255, 252, 246, 0.58)',
+      cyber
+        ? 'rgba(16, 22, 34, 0.97)'
+        : id === 'mint'
+          ? 'rgba(255, 255, 255, 0.65)'
+          : id === 'ink'
+            ? 'rgba(255, 252, 248, 0.55)'
+            : 'rgba(255, 252, 246, 0.58)',
     avatarFallback:
-      id === 'mint'
-        ? '#c8e0dc'
-        : id === 'ink'
-          ? '#ddd4cc'
-          : '#e0d6c8',
+      cyber
+        ? '#4a6270'
+        : id === 'mint'
+          ? '#c8e0dc'
+          : id === 'ink'
+            ? '#ddd4cc'
+            : '#e0d6c8',
     avatarChar: th.title,
     name: th.title,
     /** 好友列表未读私聊角标 */
     unreadDot:
-      id === 'mint'
+      cyber
         ? '#e53935'
-        : id === 'ink'
-          ? '#e57373'
-          : '#d32f2f',
+        : id === 'mint'
+          ? '#e53935'
+          : id === 'ink'
+            ? '#e57373'
+            : '#d32f2f',
     online: winTitle,
     offline: th.muted,
     actionHint: th.muted,
@@ -2591,28 +2734,35 @@ app.friendListHomeUiFromTheme = function(th) {
     fabShadow: th.btnShadow,
     /** 侧栏大面板渐变/子块填充：相对实色 1.0 的不透明度（越大越实） */
     panelBodyAlpha: 0.92,
+    friendListRowUseLightBase: !cyber,
     /** 好友列表 Tab：仅选中态药丸（无底层轨道） */
     tabPill:
-      id === 'mint'
-        ? 'rgba(255, 255, 255, 0.94)'
-        : id === 'ink'
-          ? 'rgba(255, 252, 248, 0.96)'
-          : 'rgba(255, 253, 248, 0.97)',
+      cyber
+        ? 'rgba(28, 36, 50, 0.92)'
+        : id === 'mint'
+          ? 'rgba(255, 255, 255, 0.94)'
+          : id === 'ink'
+            ? 'rgba(255, 252, 248, 0.96)'
+            : 'rgba(255, 253, 248, 0.97)',
     tabPillStroke:
-      id === 'mint'
-        ? 'rgba(46, 117, 134, 0.22)'
-        : id === 'ink'
-          ? 'rgba(74, 66, 58, 0.24)'
-          : 'rgba(200, 188, 172, 0.45)',
+      cyber
+        ? 'rgba(255, 255, 255, 0.2)'
+        : id === 'mint'
+          ? 'rgba(46, 117, 134, 0.22)'
+          : id === 'ink'
+            ? 'rgba(74, 66, 58, 0.24)'
+            : 'rgba(200, 188, 172, 0.45)',
     /** 行内「游戏中」与战绩胜色、online 点同源 */
     friendInGame: winTitle,
     /** 行内「观战中」：略偏青/蓝，与下棋区分 */
     friendSpectating:
-      id === 'mint'
-        ? '#00838f'
-        : id === 'ink'
-          ? '#5d6e76'
-          : '#1565c0',
+      cyber
+        ? '#1565c0'
+        : id === 'mint'
+          ? '#00838f'
+          : id === 'ink'
+            ? '#5d6e76'
+            : '#1565c0',
     /**
      * 行内「观战」药丸：与侧栏内搜索区卡片（杂货铺 S.card*）同底，主色字 + 极淡顶光，与 Tab 条气质一致。
      */
@@ -2783,40 +2933,54 @@ app.friendListHomeUiFromTheme = function(th) {
     /** 「观战人数：」标签用色（muted） */
     spectatorBadgeMuted: th.muted,
     /** 私聊顶栏：与侧栏渐变中段一致 */
-    chatHeaderBg: panelArr[1],
-    /** 私聊消息列表区（暖色 parchment，非微信灰） */
+    chatHeaderBg:
+      cyber
+        ? 'rgba(16, 22, 36, 0.99)'
+        : panelArr[1],
+    /** 私聊消息列表区（暖色 parchment / 深色主题深底） */
     chatMsgBg:
-      id === 'mint'
-        ? 'rgba(226, 241, 239, 0.96)'
-        : id === 'ink'
-          ? 'rgba(235, 229, 221, 0.96)'
-          : 'rgba(244, 236, 226, 0.96)',
+      cyber
+        ? 'rgba(12, 18, 30, 0.98)'
+        : id === 'mint'
+          ? 'rgba(226, 241, 239, 0.96)'
+          : id === 'ink'
+            ? 'rgba(235, 229, 221, 0.96)'
+            : 'rgba(244, 236, 226, 0.96)',
     /** 对方气泡：与列表药丸卡片一致 */
     chatBubbleOther:
-      id === 'mint'
-        ? 'rgba(255, 255, 255, 0.94)'
-        : id === 'ink'
-          ? 'rgba(255, 252, 248, 0.96)'
-          : 'rgba(255, 253, 248, 0.97)',
+      cyber
+        ? 'rgba(34, 44, 62, 0.94)'
+        : id === 'mint'
+          ? 'rgba(255, 255, 255, 0.94)'
+          : id === 'ink'
+            ? 'rgba(255, 252, 248, 0.96)'
+            : 'rgba(255, 253, 248, 0.97)',
     chatBubbleOtherStroke:
-      id === 'mint'
-        ? 'rgba(46, 117, 134, 0.2)'
-        : id === 'ink'
-          ? 'rgba(74, 66, 58, 0.22)'
-          : 'rgba(200, 188, 172, 0.4)',
+      cyber
+        ? 'rgba(255, 255, 255, 0.18)'
+        : id === 'mint'
+          ? 'rgba(46, 117, 134, 0.2)'
+          : id === 'ink'
+            ? 'rgba(74, 66, 58, 0.22)'
+            : 'rgba(200, 188, 172, 0.4)',
     /** 己方气泡：主题色浅铺，与杂货铺主按钮同源 */
     chatBubbleSelf:
-      id === 'mint'
-        ? 'rgba(55, 132, 146, 0.24)'
-        : id === 'ink'
-          ? 'rgba(105, 86, 68, 0.3)'
-          : 'rgba(191, 144, 99, 0.34)',
+      cyber
+        ? 'rgba(90, 122, 148, 0.22)'
+        : id === 'mint'
+          ? 'rgba(55, 132, 146, 0.24)'
+          : id === 'ink'
+            ? 'rgba(105, 86, 68, 0.3)'
+            : 'rgba(191, 144, 99, 0.34)',
+    chatBubbleSelfStroke: cyber ? 'rgba(255, 255, 255, 0.2)' : null,
     chatAvatarSelfFallback:
-      id === 'mint'
-        ? '#c5e0dc'
-        : id === 'ink'
-          ? '#cfc4b8'
-          : '#ead8c8',
+      cyber
+        ? '#3d5a68'
+        : id === 'mint'
+          ? '#c5e0dc'
+          : id === 'ink'
+            ? '#cfc4b8'
+            : '#ead8c8',
     chatCursor: th.btnPrimary,
     chatSendActive: th.btnPrimary,
     chatSendInactive: th.muted
@@ -3003,6 +3167,9 @@ app.socketTask = null;
 /** WebSocket 已 onOpen，可 send；断线后为 false，用于重连提示与拦截落子 */
 app.onlineWsConnected = false;
 app.onlineReconnectTimer = null;
+/** 对局 WS 心跳间隔（与 userSocialSocket 接近），减轻链路空闲被网关断开 */
+app.ONLINE_WS_PING_INTERVAL_MS = 25000;
+app._onlineWsPingTimer = null;
 app.onlineReconnectAttempt = 0;
 app.ONLINE_RECONNECT_BASE_MS = 800;
 app.ONLINE_RECONNECT_MAX_MS = 30000;
@@ -3404,16 +3571,30 @@ app.tuanMoePieceWhiteImg = null;
 /** 「青萄荔白」fruit1 / fruit2 */
 app.qingtaoLibaiPieceBlackImg = null;
 app.qingtaoLibaiPieceWhiteImg = null;
+/** 首页团团：`video_to_mascot_assets.py` 写出的首帧 / GIF（与雪碧同目录） */
 app.homeMascotImg = null;
-/** 横向雪碧图（分包 `subpackages/res-mascot/images/ui/home-mascot-sheet.png`） */
+/** 横向雪碧图：`home-mascot-sheet.png`，帧数见 MASCOT_SHEET_FRAME_COUNT */
 app.homeMascotSheetImg = null;
 /**
- * 雪碧图横向帧数（与分包内 home-mascot-sheet.png 一致；由 video_to_mascot_assets 导出）
+ * 雪碧图横向帧数（与分包内 home-mascot-sheet.png 一致；由 video_to_mascot_assets 导出后若帧数变化请改此值）
  */
 app.MASCOT_SHEET_FRAME_COUNT = 41;
 app.MASCOT_SHEET_FPS = 8;
-/** 修改首页 PNG 或路径时递增，避免热重载仍认为「已加载」而跳过 */
-app.HOME_UI_ASSETS_REV = 51;
+/**
+ * 雪碧横向每帧宽度（与 scripts/video_to_mascot_assets.py 的 OUT_W 一致）。
+ * 用于从 sheet.width 自动推算帧数，避免只改导出脚本却忘改 MASCOT_SHEET_FRAME_COUNT 导致吉祥物不显示。
+ */
+app.MASCOT_SHEET_CELL_W_PX = 155;
+/**
+ * 雪碧单帧宽高低于此值时不播动画（避免 72px 占位雪碧顶替真·团团），改显 home-mascot.png。
+ * 真资源由脚本导出 cell 约 155×173（见 video_to_mascot_assets.OUT_W）。
+ */
+app.MASCOT_SHEET_ANIM_MIN_FRAME_PX = 100;
+/** 静态 PNG/GIF 可展示的最小边长（避免 1×1 占位图） */
+app.MASCOT_MIN_FRAME_SIDE_PX = 28;
+app.MASCOT_MIN_STATIC_SIDE_PX = 48;
+/** 修改首页吉祥物资源或路径时递增，避免热重载仍认为「已加载」而跳过 */
+app.HOME_UI_ASSETS_REV = 57;
 /** 吉祥物资源所在分包（见 game.json）；具体路径见 part2 loadMascotFromCandidatePaths */
 app.HOME_SUBPACKAGE_NAME = 'res-mascot';
 app.homeUiAssetsAppliedRev = -1;
@@ -3531,6 +3712,7 @@ app.startOnlineBarCooldownTicker = function() {
 /* ---------- 联机：WebSocket 与房间 ---------- */
 
 app.closeSocketOnly = function() {
+  app.clearOnlineWsPingTimer();
   if (app.socketTask) {
     try {
       app.socketTask.close({});
@@ -3544,6 +3726,13 @@ app.clearOnlineReconnectTimer = function() {
   if (app.onlineReconnectTimer) {
     clearTimeout(app.onlineReconnectTimer);
     app.onlineReconnectTimer = null;
+  }
+}
+
+app.clearOnlineWsPingTimer = function() {
+  if (app._onlineWsPingTimer != null) {
+    clearInterval(app._onlineWsPingTimer);
+    app._onlineWsPingTimer = null;
   }
 }
 
@@ -3586,6 +3775,7 @@ app.scheduleOnlineReconnect = function(immediate) {
 }
 
 app.handleOnlineSocketDead = function() {
+  app.clearOnlineWsPingTimer();
   app.socketTask = null;
   app.onlineWsConnected = false;
   if (app.shouldAutoReconnectOnline()) {
@@ -3739,8 +3929,10 @@ app.loadMyNetworkAvatar = function(url) {
     app.draw();
   };
   img.onerror = function () {
-    app.myNetworkAvatarImg = null;
-    app.draw();
+    /** 不因单次加载失败清空已有头像（下载域名、CDN、灰度占位图等） */
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
   };
   img.src = url;
 }
@@ -3955,9 +4147,8 @@ app.tryFetchMyProfileAvatar = function() {
         app.applyMyGenderFromRatingPayload(d);
         if (d && typeof d.avatarUrl === 'string' && d.avatarUrl.trim()) {
           app.loadMyNetworkAvatar(d.avatarUrl.trim());
-        } else {
-          app.myNetworkAvatarImg = null;
         }
+        /** 接口未带头像时不覆盖本地已显示图（避免同步流程先 load 再拉 rating 被清空） */
         app.draw();
       },
       fail: function () {}
@@ -4838,6 +5029,31 @@ app.normalizeOnlineStoneInt = function(v, fallback) {
   return isNaN(n) ? fallback : n;
 }
 
+/**
+ * STATE 里的布尔勿用 !!raw：字符串 "false" 在 JS 中非空为 truthy，会误判为终局。
+ */
+app.normalizeOnlineBool = function(v, defaultVal) {
+  if (v === undefined || v === null) {
+    return defaultVal !== undefined ? defaultVal : false;
+  }
+  if (v === false || v === 0 || v === '0') {
+    return false;
+  }
+  if (v === true || v === 1 || v === '1') {
+    return true;
+  }
+  if (typeof v === 'string') {
+    var s = v.trim().toLowerCase();
+    if (s === 'false' || s === '') {
+      return false;
+    }
+    if (s === 'true') {
+      return true;
+    }
+  }
+  return !!v;
+}
+
 app.applyOnlineState = function(data) {
   if (!data || data.type !== 'STATE') {
     return;
@@ -4927,7 +5143,7 @@ app.applyOnlineState = function(data) {
     app.onlineDrawRequesterColor != null &&
     app.onlineDrawRequesterColor === app.pvpOnlineYourColor;
   var prevRematchRequesterColor = app.onlineRematchRequesterColor;
-  app.gameOver = !!data.gameOver;
+  app.gameOver = app.normalizeOnlineBool(data.gameOver, false);
   if (!app.gameOver) {
     app.onlineSettleSent = false;
     app.onlineGameEndReason = null;
@@ -5119,7 +5335,7 @@ app.applyOnlineState = function(data) {
         if (
           app.screen === 'game' &&
           !wasOver &&
-          !data.gameOver &&
+          !app.gameOver &&
           (data.winner === undefined || data.winner === null) &&
           prevBlack &&
           prevWhite &&
@@ -5199,7 +5415,7 @@ app.applyOnlineState = function(data) {
   if (
     prevWasMyDrawRequest &&
     !data.drawPending &&
-    !data.gameOver &&
+    !app.gameOver &&
     !drawCancelPending &&
     typeof app.startUndoRejectedFloat === 'function'
   ) {
@@ -5217,7 +5433,7 @@ app.applyOnlineState = function(data) {
     app.isPvpOnline &&
     app.screen === 'game' &&
     !wasOver &&
-    !data.gameOver &&
+    !app.gameOver &&
     typeof wx !== 'undefined' &&
     typeof wx.showModal === 'function'
   ) {

@@ -607,13 +607,27 @@ app.ensureHomeMascotAnimLoop = function() {
     app.stopHomeMascotAnimLoop();
     return;
   }
-  var frames = app.MASCOT_SHEET_FRAME_COUNT || 0;
+  var sheet = app.homeMascotSheetImg;
+  var frames =
+    sheet && sheet.width
+      ? app.mascotSheetFrameCountForImage(sheet)
+      : app.MASCOT_SHEET_FRAME_COUNT || 0;
   if (frames <= 1) {
     app.stopHomeMascotAnimLoop();
     return;
   }
-  var sheet = app.homeMascotSheetImg;
   if (!sheet || !sheet.width) {
+    app.stopHomeMascotAnimLoop();
+    return;
+  }
+  var fw = Math.floor(sheet.width / frames);
+  var animMin =
+    app.MASCOT_SHEET_ANIM_MIN_FRAME_PX != null
+      ? app.MASCOT_SHEET_ANIM_MIN_FRAME_PX
+      : 100;
+  var minSide =
+    app.MASCOT_MIN_FRAME_SIDE_PX != null ? app.MASCOT_MIN_FRAME_SIDE_PX : 28;
+  if (fw < animMin || sheet.height < minSide) {
     app.stopHomeMascotAnimLoop();
     return;
   }
@@ -773,22 +787,26 @@ app.drawHomeContentBelowPieceSkinModal = function() {
   var hl = app.getHomeLayout();
 
   var mascotBox = app.rpx(200);
-  var hasMascotMedia = app.hasHomeMascotMediaLoaded(mascotBox);
-  if (hasMascotMedia) {
+  var mascotDrawCy = hl.mascotCy;
+  if (app.hasHomeMascotMediaLoaded(mascotBox)) {
     app.ctx.save();
     app.ctx.globalAlpha = 1;
     var halo = app.ctx.createRadialGradient(
       hl.mascotCx,
-      hl.mascotCy,
+      mascotDrawCy,
       0,
       hl.mascotCx,
-      hl.mascotCy,
+      mascotDrawCy,
       app.rpx(150)
     );
     if (th.id === 'mint') {
       halo.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
       halo.addColorStop(0.45, 'rgba(175, 232, 236, 0.26)');
       halo.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    } else if (th.id === 'cyberpunk') {
+      halo.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
+      halo.addColorStop(0.48, 'rgba(255, 255, 255, 0.08)');
+      halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
     } else if (th.id === 'ink') {
       halo.addColorStop(0, 'rgba(255, 252, 245, 0.42)');
       halo.addColorStop(0.5, 'rgba(255, 220, 185, 0.14)');
@@ -801,14 +819,14 @@ app.drawHomeContentBelowPieceSkinModal = function() {
     app.ctx.fillStyle = halo;
     app.ctx.fillRect(
       hl.mascotCx - app.rpx(200),
-      hl.mascotCy - app.rpx(130),
+      mascotDrawCy - app.rpx(130),
       app.rpx(400),
       app.rpx(260)
     );
     app.ctx.restore();
   }
 
-  app.drawHomeMascotAsset(hl.mascotCx, hl.mascotCy, mascotBox);
+  app.drawHomeMascotAsset(hl.mascotCx, mascotDrawCy, mascotBox);
 
   app.drawHomeReferencePill(
     hl.cx,
@@ -2580,7 +2598,7 @@ app.drawMacaronCard = function(
   }
 }
 
-/** 「风格」按钮：按已解锁主题顺序循环切换 */
+/** 按已解锁主题顺序循环切换（杂货铺等内部逻辑可用；无 UI 入口） */
 app.cycleThemeNext = function() {
   var ids = themes.getThemeIdsForCycling();
   var i = ids.indexOf(app.themeId);
@@ -2591,8 +2609,6 @@ app.cycleThemeNext = function() {
   app.themeId = next;
   themes.saveThemeId(next);
   app.syncThemeToServerIfAuthed(next);
-  app.themeBubbleText = themes.getTheme(next).name;
-  app.startThemeBubbleFadeAnim();
   app.draw();
 }
 
@@ -2819,6 +2835,8 @@ app.openPieceSkinModal = function() {
   app.pieceShopGridTouchArmed = false;
   app.pieceSkinWearDblIdx = -1;
   app.pieceSkinModalPendingEntry = null;
+  app.pieceSkinShopCatalogLoadingTargetPage = null;
+  app.stopPieceSkinPageSlideAnim();
   app.stopPieceSkinModalAnim();
   if (typeof wx !== 'undefined' && typeof wx.showLoading === 'function') {
     wx.showLoading({ title: '加载中…', mask: true });
@@ -2875,6 +2893,8 @@ app.closePieceSkinModal = function() {
   app.pieceShopGridTouchArmed = false;
   app.pieceSkinModalPendingEntry = null;
   app.pieceSkinWearDblIdx = -1;
+  app.pieceSkinShopCatalogLoadingTargetPage = null;
+  app.stopPieceSkinPageSlideAnim();
   app.shopCatalogServerPaged = false;
   app.shopCatalogPageEntries = [];
   app.shopCatalogOrderItemCodes = [];
@@ -2899,6 +2919,90 @@ app.easeInCubicModal = function(t) {
 }
 
 app.PIECE_SKIN_MODAL_ANIM_MS = 300;
+/** 杂货铺商品栅格横向滑动时长 */
+app.PIECE_SKIN_PAGE_SLIDE_MS = 280;
+
+app.stopPieceSkinPageSlideAnim = function() {
+  if (app.pieceSkinPageSlideRafId != null) {
+    app.themeBubbleCaf(app.pieceSkinPageSlideRafId);
+    app.pieceSkinPageSlideRafId = null;
+  }
+  app.pieceSkinPageSlideFromEntries = null;
+  app.pieceSkinPageSlideProgress = 0;
+};
+
+/**
+ * 横向滑动切页（from→to）。调用前需已设 pieceSkinModalPage === toPage 且当前条目为 to 页数据；
+ * fromEntriesSnapshot 为上一页条目数组（服务端分页时传入 fetch 前的 slice；本地传 null 由函数内 slice）。
+ */
+app.startPieceSkinPageSlideAndRunAnim = function(
+  fromPage,
+  toPage,
+  fromEntriesSnapshot
+) {
+  if (fromPage === toPage) {
+    try {
+      app.draw();
+    } catch (errEq) {
+      try {
+        console.error('pieceSkinPageSlide noop draw', errEq);
+      } catch (eEq) {}
+    }
+    return;
+  }
+  app.stopPieceSkinPageSlideAnim();
+  var per = themes.PIECE_SKINS_PER_PAGE;
+  var fromArr = fromEntriesSnapshot;
+  if (fromArr == null) {
+    var full = themes.getPieceSkinCatalog();
+    fromArr = full.slice(fromPage * per, fromPage * per + per);
+  }
+  app.pieceSkinPageSlideFromPage = fromPage;
+  app.pieceSkinPageSlideFromEntries = fromArr;
+  app.pieceSkinPageSlideDir = toPage > fromPage ? 1 : -1;
+  var t0 = Date.now();
+  var dur = app.PIECE_SKIN_PAGE_SLIDE_MS;
+  function frame() {
+    if (!app.pieceSkinModalVisible) {
+      app.pieceSkinPageSlideRafId = null;
+      app.pieceSkinPageSlideFromEntries = null;
+      app.pieceSkinPageSlideProgress = 0;
+      return;
+    }
+    var u = Math.min(1, (Date.now() - t0) / dur);
+    app.pieceSkinPageSlideProgress = app.easeOutCubicModal(u);
+    try {
+      app.draw();
+    } catch (errF) {
+      try {
+        console.error('pieceSkinPageSlide draw', errF);
+      } catch (eF) {}
+    }
+    if (u < 1) {
+      app.pieceSkinPageSlideRafId = app.themeBubbleRaf(frame);
+    } else {
+      app.pieceSkinPageSlideFromEntries = null;
+      app.pieceSkinPageSlideRafId = null;
+      app.pieceSkinPageSlideProgress = 0;
+      try {
+        app.draw();
+      } catch (errEnd) {
+        try {
+          console.error('pieceSkinPageSlide end draw', errEnd);
+        } catch (eE) {}
+      }
+    }
+  }
+  app.pieceSkinPageSlideProgress = 0;
+  app.pieceSkinPageSlideRafId = app.themeBubbleRaf(frame);
+  try {
+    app.draw();
+  } catch (err0) {
+    try {
+      console.error('pieceSkinPageSlide initial draw', err0);
+    } catch (e0) {}
+  }
+}
 
 app.runPieceSkinModalOpenAnim = function() {
   app.stopPieceSkinModalAnim();
@@ -3221,34 +3325,46 @@ app.handlePieceSkinModalTouchEnd = function(t) {
   if (!t || !app.pieceSkinModalVisible) {
     return false;
   }
+  if (app.pieceSkinPageSlideRafId != null) {
+    app.pieceShopGridTouchArmed = false;
+    return true;
+  }
+  if (app.pieceSkinShopCatalogLoadingTargetPage != null) {
+    app.pieceShopGridTouchArmed = false;
+    return true;
+  }
   var ex = t.clientX;
   var ey = t.clientY;
   var dotI = app.hitPieceSkinModalPageDotIndex(ex, ey);
   if (dotI >= 0) {
     var L0 = app.getPieceSkinModalLayout();
     if (app.pieceSkinModalPage !== dotI && dotI < L0.pageCount) {
-      app.pieceSkinModalPage = dotI;
       if (app.shopCatalogServerPaged && typeof app.fetchShopCatalogForModalPage === 'function') {
+        var prevPageDot = app.pieceSkinModalPage;
+        var prevSnapDot = app.shopCatalogPageEntries.slice();
+        app.pieceSkinShopCatalogLoadingTargetPage = dotI;
         app.fetchShopCatalogForModalPage(dotI, function(errDot) {
-          if (errDot && typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
-            wx.showToast({ title: '加载失败', icon: 'none' });
-          }
-          try {
-            app.draw();
-          } catch (err0) {
+          app.pieceSkinShopCatalogLoadingTargetPage = null;
+          if (errDot) {
+            if (typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
+              wx.showToast({ title: '加载失败', icon: 'none' });
+            }
             try {
-              console.error('handlePieceSkinModalTouchEnd page dot', err0);
-            } catch (e0) {}
+              app.draw();
+            } catch (errDot0) {
+              try {
+                console.error('handlePieceSkinModalTouchEnd page dot', errDot0);
+              } catch (eD0) {}
+            }
+            return;
           }
+          app.pieceSkinModalPage = dotI;
+          app.startPieceSkinPageSlideAndRunAnim(prevPageDot, dotI, prevSnapDot);
         });
       } else {
-        try {
-          app.draw();
-        } catch (err0b) {
-          try {
-            console.error('handlePieceSkinModalTouchEnd page dot', err0b);
-          } catch (e0b) {}
-        }
+        var prevPageLocal = app.pieceSkinModalPage;
+        app.pieceSkinModalPage = dotI;
+        app.startPieceSkinPageSlideAndRunAnim(prevPageLocal, dotI, null);
       }
     }
     app.pieceShopGridTouchArmed = false;
@@ -3267,36 +3383,38 @@ app.handlePieceSkinModalTouchEnd = function(t) {
       Math.abs(dx) > minSwipe &&
       Math.abs(dx) > Math.abs(dy) * 0.65
     ) {
-      if (dx < 0) {
-        app.pieceSkinModalPage = Math.min(
-          L.pageCount - 1,
-          app.pieceSkinModalPage + 1
-        );
-      } else {
-        app.pieceSkinModalPage = Math.max(0, app.pieceSkinModalPage - 1);
+      var curP = app.pieceSkinModalPage;
+      var np =
+        dx < 0
+          ? Math.min(L.pageCount - 1, curP + 1)
+          : Math.max(0, curP - 1);
+      if (np === curP) {
+        return true;
       }
-      var np = app.pieceSkinModalPage;
       if (app.shopCatalogServerPaged && typeof app.fetchShopCatalogForModalPage === 'function') {
+        var prevSnapSw = app.shopCatalogPageEntries.slice();
+        app.pieceSkinShopCatalogLoadingTargetPage = np;
         app.fetchShopCatalogForModalPage(np, function(errSw) {
-          if (errSw && typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
-            wx.showToast({ title: '加载失败', icon: 'none' });
-          }
-          try {
-            app.draw();
-          } catch (err) {
+          app.pieceSkinShopCatalogLoadingTargetPage = null;
+          if (errSw) {
+            if (typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
+              wx.showToast({ title: '加载失败', icon: 'none' });
+            }
             try {
-              console.error('handlePieceSkinModalTouchEnd page swipe', err);
-            } catch (e1) {}
+              app.draw();
+            } catch (err) {
+              try {
+                console.error('handlePieceSkinModalTouchEnd page swipe', err);
+              } catch (e1) {}
+            }
+            return;
           }
+          app.pieceSkinModalPage = np;
+          app.startPieceSkinPageSlideAndRunAnim(curP, np, prevSnapSw);
         });
       } else {
-        try {
-          app.draw();
-        } catch (err2) {
-          try {
-            console.error('handlePieceSkinModalTouchEnd page swipe', err2);
-          } catch (e1b) {}
-        }
+        app.pieceSkinModalPage = np;
+        app.startPieceSkinPageSlideAndRunAnim(curP, np, null);
       }
       return true;
     }

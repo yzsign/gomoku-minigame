@@ -86,19 +86,45 @@ app.draw();
  * 首访「完善资料」在登录后触发，以便用 token 请求 /api/me/rating 判断是否已有资料。
  */
 authApi.silentLogin(null, function () {
-  if (deferredOnlineInviteQuery) {
-    var q = deferredOnlineInviteQuery;
-    deferredOnlineInviteQuery = null;
-    if (typeof app.tryLaunchOnlineInvite === 'function') {
-      app.tryLaunchOnlineInvite(q);
+  function afterLoginContinue() {
+    if (deferredOnlineInviteQuery) {
+      var q = deferredOnlineInviteQuery;
+      deferredOnlineInviteQuery = null;
+      if (typeof app.tryLaunchOnlineInvite === 'function') {
+        app.tryLaunchOnlineInvite(q);
+      }
     }
   }
-  if (typeof app.maybeFirstVisitProfileModal === 'function') {
-    app.maybeFirstVisitProfileModal();
+  if (typeof app.ensurePrivacyAuthorized !== 'function') {
+    afterLoginContinue();
+    if (typeof app.maybeFirstVisitProfileModal === 'function') {
+      app.maybeFirstVisitProfileModal();
+    }
+    return;
   }
+  app.ensurePrivacyAuthorized(
+    function () {
+      afterLoginContinue();
+      if (typeof app.maybeFirstVisitProfileModal === 'function') {
+        app.maybeFirstVisitProfileModal();
+      }
+    },
+    function () {
+      afterLoginContinue();
+      try {
+        wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
+      } catch (ePriv) {}
+    }
+  );
 });
 setTimeout(function () {
-  app.tryFetchMyProfileAvatar();
+  if (typeof app.ensurePrivacyAuthorized === 'function') {
+    app.ensurePrivacyAuthorized(function () {
+      app.tryFetchMyProfileAvatar();
+    }, function () {});
+  } else {
+    app.tryFetchMyProfileAvatar();
+  }
 }, 600);
 
 /** ---------- 管理员：残局编辑（openid 白名单，见 js/adminConfig.js 与 GOMOKU_ADMIN_OPENIDS） ---------- */

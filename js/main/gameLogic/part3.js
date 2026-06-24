@@ -394,6 +394,9 @@ app.drawCheckinModalOverlay = function(th) {
 
 app.drawRatingCardOverlay = function(th) {
   if (!app.ratingCardVisible || !app.ratingCardData) {
+    if (typeof app.destroyRatingCardSyncProfileNativeBtn === 'function') {
+      app.destroyRatingCardSyncProfileNativeBtn();
+    }
     return;
   }
   var d = app.ratingCardData;
@@ -639,10 +642,11 @@ app.drawRatingCardOverlay = function(th) {
   }
 
   if (d.showSyncProfileBtn) {
-    var B = app.getRatingCardSyncProfileLayout();
-    if (B) {
+    var Bsync = app.getRatingCardSyncProfileLayout();
+    /** 未授权时用微信原生按钮（可见）；已授权或检测中才画 Canvas 按钮 */
+    if (Bsync && app._ratingCardUserInfoAuthorized !== false) {
       app.ctx.fillStyle = th.btnPrimary || '#16a34a';
-      app.roundRect(B.left, B.top, B.w, B.h, app.rpx(10));
+      app.roundRect(Bsync.left, Bsync.top, Bsync.w, Bsync.h, app.rpx(10));
       app.ctx.fill();
       app.ctx.font =
         '600 13px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
@@ -651,10 +655,15 @@ app.drawRatingCardOverlay = function(th) {
       app.ctx.textBaseline = 'middle';
       app.ctx.fillText(
         '同步头像昵称',
-        app.snapPx(B.cx),
-        app.snapPx(B.cy)
+        app.snapPx(Bsync.cx),
+        app.snapPx(Bsync.cy)
       );
     }
+    if (typeof app.refreshRatingCardSyncProfileNativeBtn === 'function') {
+      app.refreshRatingCardSyncProfileNativeBtn();
+    }
+  } else if (typeof app.destroyRatingCardSyncProfileNativeBtn === 'function') {
+    app.destroyRatingCardSyncProfileNativeBtn();
   }
 
   app.ctx.restore();
@@ -671,10 +680,17 @@ app.fillRatingCardFromApiData = function(d, opts) {
   var nicknameLine = opts.nicknameLine;
   if (nicknameLine === undefined) {
     if (opts.usePayloadNickname) {
-      nicknameLine =
-        typeof d.nickname === 'string' && d.nickname.trim()
-          ? d.nickname.trim()
-          : '';
+      if (
+        opts.showSyncProfileBtn &&
+        typeof app.ratingCardNicknameLineForMe === 'function'
+      ) {
+        nicknameLine = app.ratingCardNicknameLineForMe(d);
+      } else {
+        nicknameLine =
+          typeof d.nickname === 'string' && d.nickname.trim()
+            ? d.nickname.trim()
+            : '';
+      }
     } else {
       nicknameLine = '';
     }
@@ -772,6 +788,9 @@ app.showMyRatingModal = function() {
           usePayloadNickname: true
         });
         app.ratingCardVisible = true;
+        if (typeof app.prepareRatingCardProfileSync === 'function') {
+          app.prepareRatingCardProfileSync();
+        }
         app.draw();
       },
       fail: function () {
@@ -823,9 +842,8 @@ app.refetchMyRatingCardPayloadAndRedraw = function(opts) {
         app.applyMyGenderFromRatingPayload(d);
         if (typeof d.avatarUrl === 'string' && d.avatarUrl.trim()) {
           app.loadMyNetworkAvatar(d.avatarUrl.trim());
-        } else {
-          app.myNetworkAvatarImg = null;
         }
+        /** 无 avatarUrl 时保留当前已解码网络图，避免「点同步后头像突然没了」 */
         app.fillRatingCardFromApiData(d, {
           showSyncProfileBtn: true,
           usePayloadNickname: true
@@ -850,10 +868,258 @@ app.refetchMyRatingCardPayloadAndRedraw = function(opts) {
 };
 
 /**
- * 信息看板内：用户点击「同步头像昵称」（须在触摸回调内调 wx.getUserProfile）
+ * 微信资料同步成功后的统一处理（createUserInfoButton / getUserInfo 共用）
  */
-app.profileSyncFromWeChatInFlight = false;
-app.syncMyProfileFromWeChat = function() {
+app.handleWeChatUserInfoSynced = function(userInfo, onDone) {
+  if (!userInfo || !userInfo.nickName) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '未获取到微信昵称', icon: 'none' });
+    }
+    if (typeof onDone === 'function') {
+      onDone(false);
+    }
+    return;
+  }
+  app.persistLocalNickname(userInfo);
+  app.saveCachedWeChatUserInfo(userInfo);
+  if (typeof userInfo.avatarUrl === 'string' && userInfo.avatarUrl.trim()) {
+    app.loadMyNetworkAvatar(userInfo.avatarUrl.trim());
+  }
+  app.applyRatingCardNicknameLineFromUserInfo(userInfo);
+  authApi.silentLogin(userInfo, function (ok) {
+    app.myProfileAvatarFetched = false;
+    if (typeof app.tryFetchMyProfileAvatar === 'function') {
+      app.tryFetchMyProfileAvatar();
+    }
+    if (!ok) {
+      if (typeof wx.showToast === 'function') {
+        wx.showToast({ title: '保存失败', icon: 'none' });
+      }
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
+      if (typeof onDone === 'function') {
+        onDone(false);
+      }
+      return;
+    }
+    if (typeof app.refetchMyRatingCardPayloadAndRedraw === 'function') {
+      app.refetchMyRatingCardPayloadAndRedraw();
+    } else if (typeof app.draw === 'function') {
+      app.draw();
+    }
+    if (typeof onDone === 'function') {
+      onDone(true);
+    }
+  });
+};
+
+/** 销毁信息看板「同步头像昵称」原生授权按钮 */
+app.destroyRatingCardSyncProfileNativeBtn = function() {
+  app._ratingCardSyncBtnLayoutKey = null;
+  if (app.ratingCardSyncProfileNativeBtn) {
+    try {
+      app.ratingCardSyncProfileNativeBtn.destroy();
+    } catch (eDestroy) {}
+    app.ratingCardSyncProfileNativeBtn = null;
+  }
+};
+
+/** null=检测中；true=已授权 scope.userInfo；false=需原生 UserInfoButton */
+app._ratingCardUserInfoAuthorized = null;
+
+/**
+ * 打开带「同步」按钮的信息看板时：先查授权态，未授权则挂可见原生按钮。
+ */
+app.prepareRatingCardProfileSync = function() {
+  app._ratingCardUserInfoAuthorized = null;
+  app.destroyRatingCardSyncProfileNativeBtn();
+  if (typeof app.ensurePrivacyAuthorized === 'function') {
+    app.ensurePrivacyAuthorized(function () {}, function () {});
+  }
+  if (typeof wx === 'undefined' || typeof wx.getSetting !== 'function') {
+    app._ratingCardUserInfoAuthorized = false;
+    if (typeof app.refreshRatingCardSyncProfileNativeBtn === 'function') {
+      app.refreshRatingCardSyncProfileNativeBtn();
+    }
+    return;
+  }
+  wx.getSetting({
+    success: function (res) {
+      app._ratingCardUserInfoAuthorized = !!(
+        res.authSetting && res.authSetting['scope.userInfo'] === true
+      );
+      if (typeof app.refreshRatingCardSyncProfileNativeBtn === 'function') {
+        app.refreshRatingCardSyncProfileNativeBtn();
+      }
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
+    },
+    fail: function () {
+      app._ratingCardUserInfoAuthorized = false;
+      if (typeof app.refreshRatingCardSyncProfileNativeBtn === 'function') {
+        app.refreshRatingCardSyncProfileNativeBtn();
+      }
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
+    }
+  });
+};
+
+app.showProfileSyncAuthHelpModal = function (errMsg) {
+  if (typeof wx.showModal !== 'function') {
+    return;
+  }
+  var msg = String(errMsg || '');
+  var content;
+  if (
+    msg.indexOf('privacy') >= 0 ||
+    msg.indexOf('banned') >= 0 ||
+    msg.indexOf('隐私') >= 0
+  ) {
+    content =
+      '请先在微信公众平台 → 设置 → 用户隐私保护指引 中声明「昵称、头像」，保存并审核通过后重新进入小游戏。';
+  } else {
+    content =
+      '请点击绿色「点击授权微信昵称」按钮。若微信未弹出授权框，请到小游戏右上角 ··· → 设置 → 用户信息与权限 中开启。';
+  }
+  wx.showModal({
+    title: '如何授权微信昵称',
+    content: content,
+    showCancel: false,
+    confirmText: '我知道了'
+  });
+};
+
+/** 用户拒绝或未拿到微信资料：随机游客名并刷新看板 */
+app.applyGuestProfileOnAuthDeclined = function (opts) {
+  opts = opts || {};
+  if (typeof app.applyGuestProfileAfterWeChatDeclined !== 'function') {
+    return;
+  }
+  app.applyGuestProfileAfterWeChatDeclined(function () {
+    if (
+      app.ratingCardVisible &&
+      typeof app.refetchMyRatingCardPayloadAndRedraw === 'function'
+    ) {
+      app.refetchMyRatingCardPayloadAndRedraw({
+        showSyncedToast: opts.showSyncedToast === true
+      });
+    } else if (typeof app.draw === 'function') {
+      app.draw();
+    }
+    if (
+      opts.showToast !== false &&
+      typeof wx.showToast === 'function'
+    ) {
+      wx.showToast({ title: '已使用随机昵称', icon: 'none' });
+    }
+  });
+};
+
+app.isProfileSyncPrivacyBlocked = function (errMsg) {
+  var msg = String(errMsg || '');
+  return (
+    msg.indexOf('privacy') >= 0 ||
+    msg.indexOf('banned') >= 0 ||
+    msg.indexOf('隐私') >= 0
+  );
+};
+
+/**
+ * 未授权时：可见的 wx.createUserInfoButton（用户点它才会弹出微信授权）。
+ */
+app.refreshRatingCardSyncProfileNativeBtn = function() {
+  if (
+    !app.ratingCardVisible ||
+    !app.ratingCardData ||
+    !app.ratingCardData.showSyncProfileBtn
+  ) {
+    app.destroyRatingCardSyncProfileNativeBtn();
+    return;
+  }
+  if (app._ratingCardUserInfoAuthorized === true) {
+    app.destroyRatingCardSyncProfileNativeBtn();
+    return;
+  }
+  if (app._ratingCardUserInfoAuthorized === null) {
+    return;
+  }
+  if (typeof wx === 'undefined' || typeof wx.createUserInfoButton !== 'function') {
+    return;
+  }
+  var B = app.getRatingCardSyncProfileLayout();
+  if (!B) {
+    app.destroyRatingCardSyncProfileNativeBtn();
+    return;
+  }
+  var layoutKey = [B.left, B.top, B.w, B.h].join(',');
+  if (
+    app._ratingCardSyncBtnLayoutKey === layoutKey &&
+    app.ratingCardSyncProfileNativeBtn
+  ) {
+    return;
+  }
+  app.destroyRatingCardSyncProfileNativeBtn();
+  app._ratingCardSyncBtnLayoutKey = layoutKey;
+  var btn;
+  try {
+    btn = wx.createUserInfoButton({
+      type: 'text',
+      text: '点击授权微信昵称',
+      lang: 'zh_CN',
+      withCredentials: false,
+      style: {
+        left: B.left,
+        top: B.top,
+        width: B.w,
+        height: B.h,
+        lineHeight: B.h,
+        backgroundColor: '#16a34a',
+        color: '#ffffff',
+        textAlign: 'center',
+        fontSize: 13,
+        borderRadius: typeof app.rpx === 'function' ? app.rpx(10) : 10
+      }
+    });
+  } catch (eCreate) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '无法创建授权按钮', icon: 'none' });
+    }
+    return;
+  }
+  if (btn && typeof btn.show === 'function') {
+    btn.show();
+  }
+  btn.onTap(function (res) {
+    if (app.profileSyncFromWeChatInFlight) {
+      return;
+    }
+    var errMsg = res && res.errMsg ? String(res.errMsg) : '';
+    if (errMsg.indexOf(':ok') < 0 || !res.userInfo) {
+      if (app.isProfileSyncPrivacyBlocked(errMsg)) {
+        app.showProfileSyncAuthHelpModal(errMsg);
+      }
+      app.applyGuestProfileOnAuthDeclined({ showToast: true });
+      return;
+    }
+    app._ratingCardUserInfoAuthorized = true;
+    app.profileSyncFromWeChatInFlight = true;
+    app.handleWeChatUserInfoSynced(res.userInfo, function () {
+      app.profileSyncFromWeChatInFlight = false;
+      app.destroyRatingCardSyncProfileNativeBtn();
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
+    });
+  });
+  app.ratingCardSyncProfileNativeBtn = btn;
+};
+
+/** 已授权时：Canvas 按钮点击，直接 getUserInfo */
+app.onRatingCardProfileSyncTap = function() {
   if (app.profileSyncFromWeChatInFlight) {
     return;
   }
@@ -863,102 +1129,54 @@ app.syncMyProfileFromWeChat = function() {
     }
     return;
   }
-  if (typeof wx.getUserProfile !== 'function') {
-    if (typeof app.applyGuestProfileAfterWeChatDeclined === 'function') {
-      app.applyGuestProfileAfterWeChatDeclined(function () {
-        if (typeof app.refetchMyRatingCardPayloadAndRedraw === 'function') {
-          app.refetchMyRatingCardPayloadAndRedraw({ showSyncedToast: false });
-        }
-      });
-    }
+  if (typeof wx.getUserInfo !== 'function') {
     if (typeof wx.showToast === 'function') {
-      wx.showToast({ title: '已使用默认资料', icon: 'none' });
+      wx.showToast({ title: '当前微信版本不支持', icon: 'none' });
     }
     return;
   }
   app.profileSyncFromWeChatInFlight = true;
-  wx.getUserProfile({
-    desc: '用于展示昵称与头像',
-    success: function (up) {
-      app.profileSyncFromWeChatInFlight = false;
-      if (!up || !up.userInfo) {
-        if (typeof wx.showToast === 'function') {
-          wx.showToast({ title: '未获取到资料', icon: 'none' });
-        }
-        return;
-      }
-      var ui = up.userInfo;
-      app.persistLocalNickname(ui);
-      app.saveCachedWeChatUserInfo(ui);
-      if (typeof ui.avatarUrl === 'string' && ui.avatarUrl.trim()) {
-        app.loadMyNetworkAvatar(ui.avatarUrl.trim());
-      }
-      authApi.silentLogin(ui, function (ok) {
-        app.myProfileAvatarFetched = false;
-        if (typeof app.tryFetchMyProfileAvatar === 'function') {
-          app.tryFetchMyProfileAvatar();
-        }
-        if (!ok) {
-          if (typeof wx.showToast === 'function') {
-            wx.showToast({ title: '保存失败', icon: 'none' });
-          }
-          if (typeof app.draw === 'function') {
-            app.draw();
-          }
-          return;
-        }
-        if (typeof app.refetchMyRatingCardPayloadAndRedraw === 'function') {
-          app.refetchMyRatingCardPayloadAndRedraw();
-        } else if (typeof app.draw === 'function') {
-          app.draw();
-        }
+  wx.getUserInfo({
+    lang: 'zh_CN',
+    withCredentials: false,
+    success: function (gi) {
+      app.handleWeChatUserInfoSynced(gi.userInfo, function () {
+        app.profileSyncFromWeChatInFlight = false;
       });
     },
-    fail: function () {
+    fail: function (failRes) {
       app.profileSyncFromWeChatInFlight = false;
-      var cached =
-        typeof app.readCachedWeChatUserInfo === 'function'
-          ? app.readCachedWeChatUserInfo()
-          : null;
-      if (cached && cached.nickName) {
-        app.persistLocalNickname(cached);
-        if (typeof cached.avatarUrl === 'string' && cached.avatarUrl.trim()) {
-          app.loadMyNetworkAvatar(cached.avatarUrl.trim());
-        }
-        authApi.silentLogin(cached, function (ok) {
-          app.myProfileAvatarFetched = false;
-          if (typeof app.tryFetchMyProfileAvatar === 'function') {
-            app.tryFetchMyProfileAvatar();
-          }
-          if (!ok) {
-            if (typeof wx.showToast === 'function') {
-              wx.showToast({ title: '保存失败', icon: 'none' });
-            }
-            if (typeof app.draw === 'function') {
-              app.draw();
-            }
-            return;
-          }
-          if (typeof app.refetchMyRatingCardPayloadAndRedraw === 'function') {
-            app.refetchMyRatingCardPayloadAndRedraw();
-          } else if (typeof app.draw === 'function') {
-            app.draw();
-          }
-        });
-        return;
+      app._ratingCardUserInfoAuthorized = false;
+      var failMsg = failRes && failRes.errMsg ? failRes.errMsg : '';
+      if (typeof app.prepareRatingCardProfileSync === 'function') {
+        app.prepareRatingCardProfileSync();
       }
-      if (typeof app.applyGuestProfileAfterWeChatDeclined === 'function') {
-        app.applyGuestProfileAfterWeChatDeclined(function () {
-          if (typeof app.refetchMyRatingCardPayloadAndRedraw === 'function') {
-            app.refetchMyRatingCardPayloadAndRedraw({ showSyncedToast: false });
-          }
-        });
-      }
-      if (typeof wx.showToast === 'function') {
-        wx.showToast({ title: '已使用默认资料', icon: 'none' });
+      app.applyGuestProfileOnAuthDeclined({ showToast: true });
+      if (app.isProfileSyncPrivacyBlocked(failMsg)) {
+        app.showProfileSyncAuthHelpModal(failMsg);
       }
     }
   });
+};
+
+/**
+ * 信息看板内：同步头像昵称
+ */
+app.profileSyncFromWeChatInFlight = false;
+app.syncMyProfileFromWeChat = function() {
+  if (app.ratingCardSyncProfileNativeBtn) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({
+        title: '请点击绿色「点击授权微信昵称」',
+        icon: 'none',
+        duration: 2400
+      });
+    }
+    return;
+  }
+  if (typeof app.onRatingCardProfileSyncTap === 'function') {
+    app.onRatingCardProfileSyncTap();
+  }
 };
 
 /** 将 GET /api/social/friend-status 结果合并到当前战绩卡（对手卡） */
@@ -1317,7 +1535,7 @@ app.showHistoryOpponentRatingModal = function(opponentUserId) {
   );
 }
 
-/** 各页右上角「风格」：胶囊下按钮（首页改从侧栏「界面风格」切换） */
+/** 各页右上角「风格」几何（曾用于快捷切换；已无入口绘制，保留供 hit 等兼容） */
 app.getThemeEntryLayout = function() {
   var sb = app.sys.statusBarHeight || 24;
   var safeTop =
@@ -1479,19 +1697,13 @@ app.startThemeBubbleFadeAnim = function() {
 }
 
 /**
- * 是否参与「风格」气泡/点击逻辑；右上角胶囊仅在非首页且此处为 true 时绘制。
- * 回放页不显示风格按钮（棋盘固定檀木，与界面主题切换无关）。
+ * 原：右上角「风格」快捷入口是否展示。已关闭；界面主题请在杂货铺切换。
  */
 app.themeScreenShowsStyleEntry = function() {
-  return app.screen === 'home';
-}
+  return false;
+};
 
-app.drawThemeChrome = function(th) {
-  app.drawThemeBubble(th);
-  if (app.screen !== 'home' && app.themeScreenShowsStyleEntry()) {
-    app.drawThemeEntry(th);
-  }
-}
+app.drawThemeChrome = function() {};
 
 app.hitThemeEntry = function(clientX, clientY) {
   var L = app.getThemeEntryLayout();
@@ -2647,6 +2859,14 @@ app.openResult = function() {
   app.clearWinRevealTimer();
   app.winningLineCells = null;
   if (app.isPvpOnline) {
+    /**
+     * 本局 openResult 前先清空上一局的结算缓存；否则在 POST settle 尚未返回时，
+     * tryStartResultTuanPointsAnimFromSettle 会误用上一次的 callerActivityPointsDelta（如 +10）。
+     */
+    app.lastSettleRating = null;
+    if (typeof app.stopResultTuanPointsAnim === 'function') {
+      app.stopResultTuanPointsAnim();
+    }
     /** 和棋/认输等终局后 winner 与「逃跑胜」不一致时，不得以 online_opponent_left 盖住服务端结果 */
     var keepOppLeftKind =
       app.resultKind === 'online_opponent_left' &&
@@ -3089,7 +3309,8 @@ function drawResultWinFireworks(app, ctx) {
     var t = age / BURST_LIFE;
     var ease = 1 - Math.pow(1 - t, 1.75);
     var maxR = Math.min(W, H) * (0.1 + 0.08 * frand(seed + 31));
-    var np = 34;
+    /** 粒子数略减：降低胜利结算 RAF 每帧开销，观感接近 */
+    var np = 22;
     if (t < 0.09) {
       var fl = 1 - t / 0.09;
       ctx.save();

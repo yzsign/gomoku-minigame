@@ -255,6 +255,22 @@ app.startOnlineSocket = function() {
     app.onlineWsEverOpened = true;
     app.onlineReconnectAttempt = 0;
     app.clearOnlineReconnectTimer();
+    app.clearOnlineWsPingTimer();
+    var pingMs =
+      typeof app.ONLINE_WS_PING_INTERVAL_MS === 'number' && app.ONLINE_WS_PING_INTERVAL_MS > 5000
+        ? app.ONLINE_WS_PING_INTERVAL_MS
+        : 25000;
+    app._onlineWsPingTimer = setInterval(function () {
+      if (myGen !== app.onlineSocketConnectGen) {
+        return;
+      }
+      if (!app.socketTask || typeof app.socketTask.send !== 'function') {
+        return;
+      }
+      try {
+        app.socketTask.send({ data: 'ping' });
+      } catch (ePing) {}
+    }, pingMs);
     if (typeof app.syncConsumableBoardSkillsFromServerForOnlineGameIfNeeded === 'function') {
       app.syncConsumableBoardSkillsFromServerForOnlineGameIfNeeded();
     }
@@ -269,6 +285,9 @@ app.startOnlineSocket = function() {
     try {
       data = typeof raw === 'string' ? JSON.parse(raw) : raw;
     } catch (err) {
+      return;
+    }
+    if (data.type === 'PONG') {
       return;
     }
     if (data.type === 'ERROR') {
@@ -1112,6 +1131,10 @@ app.fillAmbientBackground = function() {
     topLight.addColorStop(0, 'rgba(255, 255, 255, 0.52)');
     topLight.addColorStop(0.4, 'rgba(165, 224, 228, 0.16)');
     topLight.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  } else if (th.id === 'cyberpunk') {
+    topLight.addColorStop(0, 'rgba(255, 255, 255, 0.06)');
+    topLight.addColorStop(0.42, 'rgba(255, 255, 255, 0.03)');
+    topLight.addColorStop(1, 'rgba(0, 0, 0, 0)');
   } else {
     topLight.addColorStop(0, 'rgba(255, 255, 255, 0.38)');
     topLight.addColorStop(0.45, 'rgba(255, 255, 255, 0.06)');
@@ -1139,6 +1162,10 @@ app.fillAmbientBackground = function() {
     vignette.addColorStop(0, 'rgba(70, 185, 195, 0)');
     vignette.addColorStop(0.74, 'rgba(28, 95, 108, 0.04)');
     vignette.addColorStop(1, 'rgba(14, 58, 68, 0.07)');
+  } else if (th.id === 'cyberpunk') {
+    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vignette.addColorStop(0.7, 'rgba(0, 0, 0, 0.22)');
+    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.38)');
   } else {
     vignette.addColorStop(0, 'rgba(20, 18, 28, 0)');
     vignette.addColorStop(0.72, 'rgba(18, 16, 24, 0.04)');
@@ -1188,6 +1215,10 @@ app.fillHomeBackground = function(th) {
     topLight.addColorStop(0, 'rgba(255, 255, 255, 0.52)');
     topLight.addColorStop(0.4, 'rgba(255, 210, 175, 0.16)');
     topLight.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  } else if (th.id === 'cyberpunk') {
+    topLight.addColorStop(0, 'rgba(255, 255, 255, 0.07)');
+    topLight.addColorStop(0.38, 'rgba(255, 255, 255, 0.03)');
+    topLight.addColorStop(1, 'rgba(0, 0, 0, 0)');
   } else {
     topLight.addColorStop(0, 'rgba(255, 255, 255, 0.42)');
     topLight.addColorStop(0.45, 'rgba(255, 255, 255, 0.08)');
@@ -1215,6 +1246,10 @@ app.fillHomeBackground = function(th) {
     vignette.addColorStop(0, 'rgba(70, 185, 195, 0)');
     vignette.addColorStop(0.74, 'rgba(28, 95, 108, 0.04)');
     vignette.addColorStop(1, 'rgba(14, 58, 68, 0.07)');
+  } else if (th.id === 'cyberpunk') {
+    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vignette.addColorStop(0.72, 'rgba(0, 0, 0, 0.2)');
+    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.36)');
   } else {
     vignette.addColorStop(0, 'rgba(24, 20, 18, 0)');
     vignette.addColorStop(0.72, 'rgba(20, 18, 22, 0.035)');
@@ -1239,6 +1274,12 @@ app.fillHomeBackground = function(th) {
     footC.addColorStop(0, 'rgba(255, 255, 255, 0)');
     footC.addColorStop(1, 'rgba(255, 185, 140, 0.1)');
     app.ctx.fillStyle = footC;
+    app.ctx.fillRect(0, 0, app.W, app.H);
+  } else if (th.id === 'cyberpunk') {
+    var footCb = app.ctx.createLinearGradient(0, app.H * 0.63, 0, app.H);
+    footCb.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    footCb.addColorStop(1, 'rgba(0, 0, 0, 0.12)');
+    app.ctx.fillStyle = footCb;
     app.ctx.fillRect(0, 0, app.W, app.H);
   }
 }
@@ -1396,28 +1437,58 @@ app.drawHomeUiImageContain = function(img, cx, cy, box) {
   return true;
 }
 
-/** 雪碧图或静态吉祥物图是否已就绪（与 drawHomeMascotAsset 判定一致） */
+/** 雪碧图非空时，优先用宽度 ÷ 单元格宽得到帧数（与 video 导出一致），否则用 MASCOT_SHEET_FRAME_COUNT */
+app.mascotSheetFrameCountForImage = function(sheet) {
+  var nCfg = app.MASCOT_SHEET_FRAME_COUNT || 1;
+  if (!sheet || !sheet.width || sheet.width <= 0) {
+    return nCfg;
+  }
+  var cw = app.MASCOT_SHEET_CELL_W_PX;
+  if (typeof cw === 'number' && cw > 0 && sheet.width % cw === 0) {
+    var n2 = sheet.width / cw;
+    if (n2 >= 1 && n2 <= 200) {
+      return n2;
+    }
+  }
+  return nCfg;
+}
+
+/** 雪碧图 / 静态首帧是否可用于首页团团（与 drawHomeMascotAsset 一致） */
 app.hasHomeMascotMediaLoaded = function(box) {
   if (!(box > 0)) {
     return false;
   }
+  var animMin =
+    app.MASCOT_SHEET_ANIM_MIN_FRAME_PX != null
+      ? app.MASCOT_SHEET_ANIM_MIN_FRAME_PX
+      : 100;
   var sheet = app.homeMascotSheetImg;
-  var n = app.MASCOT_SHEET_FRAME_COUNT;
+  var n = sheet ? app.mascotSheetFrameCountForImage(sheet) : app.MASCOT_SHEET_FRAME_COUNT;
   if (sheet && sheet.width > 0 && sheet.height > 0 && n >= 1) {
     var fw = Math.floor(sheet.width / n);
-    if (fw > 0) {
+    var ih = sheet.height;
+    var minSide =
+      app.MASCOT_MIN_FRAME_SIDE_PX != null ? app.MASCOT_MIN_FRAME_SIDE_PX : 28;
+    if (fw >= animMin && ih >= minSide) {
       return true;
     }
   }
-  return !!(app.homeMascotImg && app.homeMascotImg.width && app.homeMascotImg.height);
+  var im = app.homeMascotImg;
+  var minS =
+    app.MASCOT_MIN_STATIC_SIDE_PX != null ? app.MASCOT_MIN_STATIC_SIDE_PX : 48;
+  return !!(im && im.width >= minS && im.height >= minS);
 }
 
 /**
- * 首页吉祥物：优先雪碧图逐帧；否则静态 GIF（多为首帧）或 PNG。均未加载成功则不绘制。
+ * 首页团团：雪碧单帧足够大时逐帧动画；否则用 home-mascot.png / GIF（与 video_to_mascot_assets 导出一致）。
  */
 app.drawHomeMascotAsset = function(cx, cy, box) {
+  var animMin =
+    app.MASCOT_SHEET_ANIM_MIN_FRAME_PX != null
+      ? app.MASCOT_SHEET_ANIM_MIN_FRAME_PX
+      : 100;
   var sheet = app.homeMascotSheetImg;
-  var n = app.MASCOT_SHEET_FRAME_COUNT;
+  var n = sheet ? app.mascotSheetFrameCountForImage(sheet) : app.MASCOT_SHEET_FRAME_COUNT;
   if (
     sheet &&
     sheet.width > 0 &&
@@ -1428,7 +1499,9 @@ app.drawHomeMascotAsset = function(cx, cy, box) {
     var iw = sheet.width;
     var ih = sheet.height;
     var fw = Math.floor(iw / n);
-    if (fw > 0 && ih > 0) {
+    var minSide =
+      app.MASCOT_MIN_FRAME_SIDE_PX != null ? app.MASCOT_MIN_FRAME_SIDE_PX : 28;
+    if (fw >= animMin && ih >= minSide) {
       var frame =
         n > 1
           ? Math.floor(
@@ -1455,7 +1528,13 @@ app.drawHomeMascotAsset = function(cx, cy, box) {
       return true;
     }
   }
-  return app.drawHomeUiImageContain(app.homeMascotImg, cx, cy, box);
+  var im = app.homeMascotImg;
+  var minSt =
+    app.MASCOT_MIN_STATIC_SIDE_PX != null ? app.MASCOT_MIN_STATIC_SIDE_PX : 48;
+  if (im && im.width >= minSt && im.height >= minSt) {
+    return app.drawHomeUiImageContain(im, cx, cy, box);
+  }
+  return false;
 }
 
 app.loadHomeUiAssets = function() {
@@ -1568,47 +1647,22 @@ app.loadHomeUiAssets = function() {
     nextRel();
   }
 
-  /** 主包 images/ui 与分包目录同名时，仅用 images/ui/ 会解析到主包导致大图 404；先尝试 subpackages 全路径 */
+  /** 吉祥物大图仅在 res-mascot 分包（减主包体积）；需先 loadSubpackage，失败仍可试分包路径 */
   function loadMascotFromCandidatePaths() {
     loadPhase = 2;
     remaining = 2;
     bindFirstMatch(
       [
         'subpackages/res-mascot/images/ui/home-mascot.png',
-        'images/ui/home-mascot.png',
         'subpackages/res-mascot/images/ui/home-mascot.gif',
-        'images/ui/home-mascot.gif',
       ],
       function (im) {
         app.homeMascotImg = im;
       }
     );
-    bindFirstMatch(
-      [
-        'subpackages/res-mascot/images/ui/home-mascot-sheet.png',
-        'images/ui/home-mascot-sheet.png',
-      ],
-      function (im) {
-        app.homeMascotSheetImg = im;
-      }
-    );
-  }
-
-  function loadMascotMainPackagePathsOnly() {
-    loadPhase = 2;
-    remaining = 2;
-    bindFirstMatch(
-      ['images/ui/home-mascot.png', 'images/ui/home-mascot.gif'],
-      function (im) {
-        app.homeMascotImg = im;
-      }
-    );
-    bindFirstMatch(
-      ['images/ui/home-mascot-sheet.png'],
-      function (im) {
-        app.homeMascotSheetImg = im;
-      }
-    );
+    bindFirstMatch(['subpackages/res-mascot/images/ui/home-mascot-sheet.png'], function (im) {
+      app.homeMascotSheetImg = im;
+    });
   }
 
   function startMascotAssetsAfterSubpackage() {
@@ -1619,7 +1673,7 @@ app.loadHomeUiAssets = function() {
           loadMascotFromCandidatePaths();
         },
         fail: function () {
-          loadMascotMainPackagePathsOnly();
+          loadMascotFromCandidatePaths();
         },
       });
     } else {
@@ -2247,6 +2301,8 @@ app.drawHomeDockIconSkin = function(cx, cy, s, stroke) {
   app.ctx.restore();
 }
 
+/** @deprecated 深色主题已不再绘制足下光台，保留空函数以免旧引用报错 */
+app.drawCyberpunkHomeMascotPedestal = function() {};
 app.drawHomeBottomDock = function(hl, th) {
   var y0 = hl.bottomNavTop;
   var h = hl.bottomNavH;
@@ -2258,6 +2314,8 @@ app.drawHomeBottomDock = function(hl, th) {
     dockFill = 'rgba(241, 247, 245, 0.94)';
   } else if (th.id === 'ink') {
     dockFill = 'rgba(255, 248, 238, 0.82)';
+  } else if (th.id === 'cyberpunk') {
+    dockFill = 'rgba(24, 28, 34, 0.97)';
   } else {
     dockFill = 'rgba(255, 236, 218, 0.93)';
   }
@@ -2272,6 +2330,10 @@ app.drawHomeBottomDock = function(hl, th) {
     topLine.addColorStop(0, 'rgba(28, 58, 70, 0)');
     topLine.addColorStop(0.5, 'rgba(28, 58, 70, 0.1)');
     topLine.addColorStop(1, 'rgba(28, 58, 70, 0)');
+  } else if (th.id === 'cyberpunk') {
+    topLine.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    topLine.addColorStop(0.5, 'rgba(255, 255, 255, 0.1)');
+    topLine.addColorStop(1, 'rgba(255, 255, 255, 0)');
   } else {
     topLine.addColorStop(0, 'rgba(90, 72, 58, 0)');
     topLine.addColorStop(0.5, 'rgba(90, 72, 58, 0.12)');
@@ -2361,7 +2423,8 @@ app.drawHomeCopyrightBar = function(hl, th) {
     app.rpx(21) +
     'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
   app.ctx.fillStyle = th.muted;
-  app.ctx.globalAlpha = th.id === 'classic' ? 1 : 0.72;
+  app.ctx.globalAlpha =
+    th.id === 'classic' ? 1 : th.id === 'cyberpunk' ? 0.82 : 0.72;
   app.ctx.fillText('© 团团五子棋', app.snapPx(app.W / 2), app.snapPx(hl.footerY));
   app.ctx.globalAlpha = 1;
   app.ctx.restore();

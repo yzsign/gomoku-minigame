@@ -11,6 +11,11 @@ module.exports = function registerFriendListHome(app, deps) {
   var STORAGE_OPEN = 'gomoku_home_friend_list_open';
   var STORAGE_CACHE = 'gomoku_home_friend_list_cache_v1';
   var STORAGE_FAB_POS = 'gomoku_home_friend_fab_pos_v1';
+  /** 好友私聊：仅本机 wx.storage，与服务端无关 */
+  var STORAGE_FRIEND_DM_MESSAGES = 'gomoku_friend_dm_messages_v1';
+  /** 单会话最多保留条数，避免占满本地存储配额 */
+  var FRIEND_DM_PER_PEER_STORAGE_CAP = 220;
+  var FRIEND_DM_STORAGE_TEXT_CAP = 400;
   /** 悬浮球半径（逻辑 px），与拖拽/吸附/命中共用 */
   var HOME_FRIEND_LIST_FAB_R = 22.5;
   /** 好友列表行高（设计 rpx，原 96 增大 20%） */
@@ -97,7 +102,7 @@ module.exports = function registerFriendListHome(app, deps) {
   app.friendListRowSwipe = { peerKey: null, offset: 0 };
   /** 当前列表手势：null | { id, x0, y0, idx, peerKey, mode: 0 未决 | 1 竖向滚动 | 2 横向左滑, startOff } */
   app._flRowTouch = null;
-  /** 与某好友的会话面板（画布内）；消息仅存内存 */
+  /** 与某好友的会话面板（画布内）；消息缓存在 {@link app.friendChatMessagesByPeer} 并写入 wx.storage */
   app.homeFriendChatPeer = null;
   app.friendChatScrollY = 0;
   app.friendChatMessagesByPeer = {};
@@ -202,6 +207,141 @@ module.exports = function registerFriendListHome(app, deps) {
       }
     } catch (eL) {}
     return null;
+  }
+
+  function sanitizeFriendDmStoredMessage(raw) {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+    var text =
+      typeof raw.text === 'string'
+        ? raw.text.slice(0, FRIEND_DM_STORAGE_TEXT_CAP)
+        : '';
+    var msgId =
+      typeof raw.msgId === 'number' && !isNaN(raw.msgId)
+        ? Math.floor(raw.msgId)
+        : 0;
+    var ts =
+      typeof raw.ts === 'number' && !isNaN(raw.ts) ? raw.ts : Date.now();
+    var isSelf = !!raw.isSelf;
+    if (msgId <= 0) {
+      return null;
+    }
+    return { msgId: msgId, text: text, isSelf: isSelf, ts: ts };
+  }
+
+  function capPeerMessagesForStorage(list) {
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    var out = [];
+    var i;
+    for (i = 0; i < list.length; i++) {
+      var sm = sanitizeFriendDmStoredMessage(list[i]);
+      if (sm) {
+        out.push(sm);
+      }
+    }
+    if (out.length > FRIEND_DM_PER_PEER_STORAGE_CAP) {
+      out = out.slice(out.length - FRIEND_DM_PER_PEER_STORAGE_CAP);
+    }
+    return out;
+  }
+
+  function persistFriendDmMessages() {
+    try {
+      if (!wx || !wx.setStorageSync) {
+        return;
+      }
+      var owner =
+        typeof authApi.getStoredSelfUserId === 'function'
+          ? authApi.getStoredSelfUserId()
+          : null;
+      var peers = {};
+      var k;
+      var src = app.friendChatMessagesByPeer || {};
+      for (k in src) {
+        if (!Object.prototype.hasOwnProperty.call(src, k)) {
+          continue;
+        }
+        var arr = src[k];
+        if (!Array.isArray(arr)) {
+          continue;
+        }
+        peers[k] = capPeerMessagesForStorage(arr);
+      }
+      var blob = { v: 1, peers: peers };
+      if (owner != null) {
+        blob.ownerUserId = owner;
+      }
+      wx.setStorageSync(STORAGE_FRIEND_DM_MESSAGES, JSON.stringify(blob));
+    } catch (ePersist) {
+      try {
+        if (wx && wx.removeStorageSync) {
+          wx.removeStorageSync(STORAGE_FRIEND_DM_MESSAGES);
+        }
+      } catch (eRm) {}
+    }
+  }
+
+  function loadFriendDmMessagesIntoApp() {
+    try {
+      if (!wx || !wx.getStorageSync) {
+        return;
+      }
+      var raw = wx.getStorageSync(STORAGE_FRIEND_DM_MESSAGES);
+      if (!raw || typeof raw !== 'string') {
+        return;
+      }
+      var blob = JSON.parse(raw);
+      if (
+        !blob ||
+        blob.v !== 1 ||
+        !blob.peers ||
+        typeof blob.peers !== 'object'
+      ) {
+        return;
+      }
+      var cur =
+        typeof authApi.getStoredSelfUserId === 'function'
+          ? authApi.getStoredSelfUserId()
+          : null;
+      if (
+        blob.ownerUserId != null &&
+        cur != null &&
+        String(blob.ownerUserId) !== String(cur)
+      ) {
+        try {
+          if (wx.removeStorageSync) {
+            wx.removeStorageSync(STORAGE_FRIEND_DM_MESSAGES);
+          }
+        } catch (eClr) {}
+        return;
+      }
+      var out = {};
+      var maxMid = 0;
+      var key;
+      for (key in blob.peers) {
+        if (!Object.prototype.hasOwnProperty.call(blob.peers, key)) {
+          continue;
+        }
+        var capped = capPeerMessagesForStorage(blob.peers[key]);
+        if (!capped.length) {
+          continue;
+        }
+        out[key] = capped;
+        var j;
+        for (j = 0; j < capped.length; j++) {
+          if (capped[j].msgId > maxMid) {
+            maxMid = capped[j].msgId;
+          }
+        }
+      }
+      app.friendChatMessagesByPeer = out;
+      if (maxMid > (app._friendChatMsgId || 0)) {
+        app._friendChatMsgId = maxMid;
+      }
+    } catch (eLoad) {}
   }
 
   /**
@@ -498,6 +638,7 @@ module.exports = function registerFriendListHome(app, deps) {
       app.homeFriendFabCustomCx = sp0.cx;
       app.homeFriendFabCustomCy = sp0.cy;
     }
+    loadFriendDmMessagesIntoApp();
     app.homeFriendListOpen = false;
     persistOpen();
   };
@@ -1708,6 +1849,7 @@ module.exports = function registerFriendListHome(app, deps) {
       ts: typeof ts === 'number' ? ts : Date.now()
     });
     app._friendChatNeedScrollBottom = true;
+    persistFriendDmMessages();
   }
 
   app.appendFriendChatIncomingMessage = function (
@@ -2226,7 +2368,7 @@ module.exports = function registerFriendListHome(app, deps) {
   };
 
   /**
-   * 点击好友行：进入画布内会话面板（与列表同壳；消息仅存内存，POST 同 /api/social/friend-messages）。
+   * 点击好友行：进入画布内会话面板（与列表同壳；消息本机 wx.storage 缓存，实时仍经 POST /api/social/friend-messages）。
    */
   app.openHomeFriendChatMode = function (f) {
     if (!f || f.peerUserId == null) {
@@ -4038,6 +4180,15 @@ module.exports = function registerFriendListHome(app, deps) {
               bubbleRad
             );
             app.ctx.fill();
+            if (
+              FL &&
+              FL.chatBubbleSelfStroke &&
+              typeof FL.chatBubbleSelfStroke === 'string'
+            ) {
+              app.ctx.strokeStyle = FL.chatBubbleSelfStroke;
+              app.ctx.lineWidth = 1;
+              app.ctx.stroke();
+            }
             app.ctx.fillStyle = textOnSelf;
             app.ctx.textBaseline = 'middle';
             for (lj = 0; lj < lines2.length; lj++) {
@@ -4454,17 +4605,20 @@ module.exports = function registerFriendListHome(app, deps) {
         app.ctx.translate(-offRow, 0);
         var ze0 = FL && FL.rowEven ? FL.rowEven : 'rgba(245,234,223,0.35)';
         var ze1 = FL && FL.rowOdd ? FL.rowOdd : 'rgba(255,255,255,0.5)';
-        var rowBgOpaque =
-          ri % 2 === 0
-            ? 'rgba(252, 248, 242, 0.99)'
-            : 'rgba(255, 255, 255, 0.99)';
-        app.ctx.fillStyle = rowBgOpaque;
-        app.ctx.fillRect(
-          panelX + rowCellPad,
-          yRow,
-          L.w - rowCellPad * 2,
-          rowHCell
-        );
+        var useLightRowBase = !FL || FL.friendListRowUseLightBase !== false;
+        if (useLightRowBase) {
+          var rowBgOpaque =
+            ri % 2 === 0
+              ? 'rgba(252, 248, 242, 0.99)'
+              : 'rgba(255, 255, 255, 0.99)';
+          app.ctx.fillStyle = rowBgOpaque;
+          app.ctx.fillRect(
+            panelX + rowCellPad,
+            yRow,
+            L.w - rowCellPad * 2,
+            rowHCell
+          );
+        }
         app.ctx.fillStyle = ri % 2 === 0 ? ze0 : ze1;
         app.ctx.fillRect(
           panelX + rowCellPad,
@@ -4733,4 +4887,39 @@ module.exports = function registerFriendListHome(app, deps) {
       app.drawHomeFriendListOverlay(th);
     }
   };
+
+  authApi.onSilentLoginComplete(function (loginOk, payload) {
+    if (!loginOk || !payload || payload.userId == null) {
+      return;
+    }
+    var uid = Number(payload.userId);
+    if (isNaN(uid) || uid <= 0) {
+      return;
+    }
+    try {
+      if (!wx || !wx.getStorageSync) {
+        return;
+      }
+      var rawDm = wx.getStorageSync(STORAGE_FRIEND_DM_MESSAGES);
+      if (!rawDm || typeof rawDm !== 'string') {
+        return;
+      }
+      var blobDm = JSON.parse(rawDm);
+      if (
+        blobDm &&
+        blobDm.v === 1 &&
+        blobDm.ownerUserId != null &&
+        String(blobDm.ownerUserId) !== String(uid)
+      ) {
+        if (wx.removeStorageSync) {
+          wx.removeStorageSync(STORAGE_FRIEND_DM_MESSAGES);
+        }
+        app.friendChatMessagesByPeer = {};
+        app._friendChatMsgId = 0;
+        if (typeof app.draw === 'function') {
+          app.draw();
+        }
+      }
+    } catch (eSl) {}
+  });
 };

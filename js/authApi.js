@@ -10,6 +10,8 @@ var roomApi = require('./roomApi.js');
 var defaultAvatars = require('./defaultAvatars.js');
 
 var SESSION_TOKEN_KEY = 'gomoku_session_token';
+/** 静默登录 payload.userId，供本机私聊历史等按账号隔离（与 token 同步写入） */
+var LOCAL_SELF_USER_ID_KEY = 'gomoku_local_self_user_id_v1';
 
 /** 静默登录 wx.request 成功回调后触发（loginOk, payload），用于同步管理员标记等 */
 var silentLoginCompleteListeners = [];
@@ -35,8 +37,33 @@ function persistSession(payload) {
   try {
     if (typeof wx !== 'undefined' && wx.setStorageSync) {
       wx.setStorageSync(SESSION_TOKEN_KEY, payload.sessionToken);
+      if (
+        payload &&
+        payload.userId !== undefined &&
+        payload.userId !== null
+      ) {
+        var n = Number(payload.userId);
+        if (!isNaN(n) && n > 0) {
+          wx.setStorageSync(LOCAL_SELF_USER_ID_KEY, String(Math.floor(n)));
+        }
+      }
     }
   } catch (e) {}
+}
+
+function getStoredSelfUserId() {
+  try {
+    if (typeof wx !== 'undefined' && wx.getStorageSync) {
+      var s = wx.getStorageSync(LOCAL_SELF_USER_ID_KEY);
+      if (s != null && String(s).length > 0) {
+        var uid = Number(String(s));
+        if (!isNaN(uid) && uid > 0) {
+          return Math.floor(uid);
+        }
+      }
+    }
+  } catch (e2) {}
+  return null;
 }
 
 function getSessionToken() {
@@ -211,5 +238,6 @@ module.exports = {
   ensureSession: ensureSession,
   getSessionToken: getSessionToken,
   persistSession: persistSession,
+  getStoredSelfUserId: getStoredSelfUserId,
   onSilentLoginComplete: onSilentLoginComplete,
 };
