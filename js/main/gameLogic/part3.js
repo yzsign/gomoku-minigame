@@ -2235,6 +2235,7 @@ app.cancelMatchingTimers = function() {
     clearInterval(app.randomMatchPairedPollTimer);
     app.randomMatchPairedPollTimer = null;
   }
+  app.randomMatchPairedPollFailStreak = 0;
 }
 
 /** 房主：轮询 paired，对手加入后拿 yourToken 再连 WS（与随机先后手一致） */
@@ -2251,6 +2252,7 @@ app.pollRandomMatchPairedOnce = function() {
         if (res.statusCode !== 200 || !res.data) {
           return;
         }
+        app.randomMatchPairedPollFailStreak = 0;
         var p = res.data;
         if (!p.guestJoined) {
           return;
@@ -2278,7 +2280,19 @@ app.pollRandomMatchPairedOnce = function() {
         app.startOnlineSocket();
         app.draw();
       },
-      fail: function () {}
+      fail: function () {
+        if (!app.randomMatchHostWaiting || app.screen !== 'matching') {
+          return;
+        }
+        app.randomMatchPairedPollFailStreak =
+          (app.randomMatchPairedPollFailStreak || 0) + 1;
+        if (app.randomMatchPairedPollFailStreak >= 3) {
+          app.randomMatchPairedPollFailStreak = 0;
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '网络异常，正在重试匹配…', icon: 'none' });
+          }
+        }
+      }
     })
   );
 }
@@ -2410,6 +2424,9 @@ app.startRandomMatch = function() {
   app.homeDrawerOpen = false;
   app.cancelMatchingTimers();
   app.randomMatchHostWaiting = false;
+  if (typeof app.clearPendingOnlineInviteQuery === 'function') {
+    app.clearPendingOnlineInviteQuery();
+  }
   authApi.ensureSession(function (sessionOk, errHint) {
     if (!sessionOk) {
       wx.showToast({ title: errHint || '请先完成登录', icon: 'none' });
@@ -2535,9 +2552,16 @@ app.cancelMatching = function() {
   app.cancelMatchingTimers();
   if (app.randomMatchHostWaiting && app.onlineRoomId && app.randomMatchHostCancelToken) {
     wx.request(
-      roomApi.roomApiRandomMatchCancelOptions(
-        app.onlineRoomId,
-        app.randomMatchHostCancelToken
+      Object.assign(
+        roomApi.roomApiRandomMatchCancelOptions(
+          app.onlineRoomId,
+          app.randomMatchHostCancelToken
+        ),
+        {
+          fail: function () {
+            /* 本地已离开匹配页；取消失败仅影响服务端队列清理 */
+          }
+        }
       )
     );
   }
@@ -2589,6 +2613,9 @@ app.backToHome = function() {
   app.dailyPuzzleResultKind = '';
   app.dailyPuzzleSubmitActivityPointsDelta = null;
   app.onlineInviteConsumed = false;
+  if (typeof app.clearPendingOnlineInviteQuery === 'function') {
+    app.clearPendingOnlineInviteQuery();
+  }
   app.homeDrawerOpen = false;
   app.homePressedButton = null;
   app.homePressedDockCol = null;

@@ -53,13 +53,14 @@ app.setupShareMessage = function() {
 }
 app.setupShareMessage();
 
-var deferredOnlineInviteQuery = null;
 try {
   var launchOpt = wx.getLaunchOptionsSync && wx.getLaunchOptionsSync();
   if (launchOpt && launchOpt.query) {
     var lq = launchOpt.query;
     if (String(lq.online) === '1' && lq.roomId) {
-      deferredOnlineInviteQuery = lq;
+      if (typeof app.rememberOnlineInviteQuery === 'function') {
+        app.rememberOnlineInviteQuery(lq);
+      }
     } else if (String(lq.from) === 'invite') {
       app.startPvpLocal();
     }
@@ -87,12 +88,8 @@ app.draw();
  */
 authApi.silentLogin(null, function () {
   function afterLoginContinue() {
-    if (deferredOnlineInviteQuery) {
-      var q = deferredOnlineInviteQuery;
-      deferredOnlineInviteQuery = null;
-      if (typeof app.tryLaunchOnlineInvite === 'function') {
-        app.tryLaunchOnlineInvite(q);
-      }
+    if (typeof app.tryLaunchOnlineInvite === 'function') {
+      app.tryLaunchOnlineInvite(null);
     }
   }
   if (typeof app.ensurePrivacyAuthorized !== 'function') {
@@ -1373,10 +1370,15 @@ function fetchAdminStatusFromServer() {
               d = null;
             }
           }
-          if (res.statusCode === 200 && d && typeof d.admin === 'boolean') {
+          if (res.statusCode === 401 || res.statusCode === 403) {
+            app.userIsAdmin = false;
+          } else if (res.statusCode === 200 && d && typeof d.admin === 'boolean') {
             app.userIsAdmin = d.admin === true;
           }
           app.draw();
+        },
+        fail: function () {
+          /* 网络失败不覆盖已有 admin 标记，避免弱网闪动 */
         }
       })
     );

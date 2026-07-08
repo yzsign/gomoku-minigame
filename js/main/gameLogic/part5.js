@@ -1997,8 +1997,45 @@ app.ensureOnlineClockTick = function() {
       app.clearOnlineClockTick();
       return;
     }
+    if (typeof app.maybeNudgeOnlineMoveClockTimeout === 'function') {
+      app.maybeNudgeOnlineMoveClockTimeout();
+    }
     app.draw();
   }, 280);
+};
+
+/** 本地步时归零后通过 WS ping 触发服务端 applyClockTimeouts（轮询间隔外也能及时判负） */
+app.maybeNudgeOnlineMoveClockTimeout = function() {
+  if (
+    !app.isPvpOnline ||
+    app.gameOver ||
+    app.onlineClockPaused ||
+    app.onlineClockMoveDeadlineWallMs == null ||
+    isNaN(app.onlineClockMoveDeadlineWallMs)
+  ) {
+    return;
+  }
+  if (Date.now() < app.onlineClockMoveDeadlineWallMs) {
+    return;
+  }
+  var now = Date.now();
+  if (
+    app._onlineClockTimeoutNudgeAt != null &&
+    now - app._onlineClockTimeoutNudgeAt < 400
+  ) {
+    return;
+  }
+  app._onlineClockTimeoutNudgeAt = now;
+  if (
+    !app.socketTask ||
+    typeof app.socketTask.send !== 'function' ||
+    (typeof app.onlineSocketCanSend === 'function' && !app.onlineSocketCanSend())
+  ) {
+    return;
+  }
+  try {
+    app.socketTask.send({ data: 'ping' });
+  } catch (eClockPing) {}
 };
 
 app.shouldRunOnlineClockCountdown = function() {
@@ -5930,10 +5967,17 @@ if (typeof wx.onShow === 'function') {
           app.refreshAdminStatus();
         }
       }, 700);
-      if (res && res.query && String(res.query.online) === '1' && res.query.roomId) {
-        if (typeof app.tryLaunchOnlineInvite === 'function') {
-          app.tryLaunchOnlineInvite(res.query);
-        }
+      var inviteQuery =
+        typeof app.resolveOnlineInviteLaunchQuery === 'function'
+          ? app.resolveOnlineInviteLaunchQuery(res)
+          : null;
+      if (inviteQuery && typeof app.tryLaunchOnlineInvite === 'function') {
+        app.tryLaunchOnlineInvite(inviteQuery);
+      } else if (
+        app._pendingOnlineInviteQuery &&
+        typeof app.tryLaunchOnlineInvite === 'function'
+      ) {
+        app.tryLaunchOnlineInvite(null);
       }
       if (typeof app.schedulePuzzleFriendInviteOnShowFallback === 'function') {
         app.schedulePuzzleFriendInviteOnShowFallback();

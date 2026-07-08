@@ -3177,8 +3177,12 @@ app.ONLINE_RECONNECT_MAX_MS = 30000;
 app.onlineSocketConnectGen = 0;
 /** 是否曾成功 onOpen（用于区分首连与断线重连文案） */
 app.onlineWsEverOpened = false;
-/** 避免冷启动与 onShow 各处理一次同一邀请 */
+/** 避免冷启动与 onShow 各处理一次同一邀请（进房 API 成功后才置 true） */
 app.onlineInviteConsumed = false;
+/** 分享/链接进房：待处理 query，登录或 onShow 未带 query 时兜底重试 */
+app._pendingOnlineInviteQuery = null;
+/** 分享进房 join 请求进行中，避免并发重复 POST /join */
+app._onlineInviteJoinInFlight = false;
 /** 残局好友房：用于分享文案与「好友进房重置棋盘」提示 */
 app.onlinePuzzleFriendRoom = false;
 /** 邀请好友进残局前快照，分享取消时 restoreAfterCancelledPuzzleFriendInvite 恢复 */
@@ -3614,7 +3618,9 @@ app.randomMatchHostWaiting = false;
 app.randomMatchHostCancelToken = '';
 /** 房主轮询 GET /match/random/paired 直到 guestJoined */
 app.randomMatchPairedPollTimer = null;
-app.RANDOM_MATCH_TIMEOUT_MS = 5000;
+/** 匹配轮询连续网络失败次数（用于 Toast 提示） */
+app.randomMatchPairedPollFailStreak = 0;
+app.RANDOM_MATCH_TIMEOUT_MS = 2000;
 app.RANDOM_MATCH_PAIRED_POLL_MS = 400;
 
 app.FAKE_OPPONENT_NAMES = [
@@ -3738,6 +3744,9 @@ app.clearOnlineWsPingTimer = function() {
 
 /** 联机对局/匹配等待中是否应保持 roomId+token 并允许自动重连 */
 app.shouldAutoReconnectOnline = function() {
+  if (app._onlineInviteJoinInFlight) {
+    return false;
+  }
   if (!app.onlineRoomId || !app.onlineToken) {
     return false;
   }
@@ -4413,8 +4422,20 @@ app.submitPveGameToServer = function(body) {
   }
   wx.request(
     Object.assign(roomApi.mePveGameOptions(body), {
-      success: function() {},
-      fail: function() {}
+      success: function (res) {
+        if (
+          res.statusCode !== 200 &&
+          res.statusCode !== 201 &&
+          typeof wx.showToast === 'function'
+        ) {
+          wx.showToast({ title: '人机战绩保存失败', icon: 'none' });
+        }
+      },
+      fail: function () {
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '人机战绩保存失败', icon: 'none' });
+        }
+      }
     })
   );
 }

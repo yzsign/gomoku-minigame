@@ -24,6 +24,21 @@ module.exports = function registerUserSocialSocket(app, deps) {
   var MAX_RECONNECT_MS = 60000;
   var BASE_RECONNECT_MS = 800;
   var PING_INTERVAL_MS = 25000;
+  /** 社交 WS 多次重连失败后提示一次（连接恢复后重置） */
+  app._userSocialOfflineNotified = false;
+
+  function maybeNotifyUserSocialOffline() {
+    if (app._userSocialOfflineNotified) {
+      return;
+    }
+    if ((app.userSocialReconnectAttempt || 0) < 3) {
+      return;
+    }
+    app._userSocialOfflineNotified = true;
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '消息连接异常，邀请可能延迟', icon: 'none' });
+    }
+  }
 
   function clearUserSocialPing() {
     if (app._userSocialPingTimer != null) {
@@ -54,6 +69,7 @@ module.exports = function registerUserSocialSocket(app, deps) {
       : Math.min(MAX_RECONNECT_MS, BASE_RECONNECT_MS * Math.pow(2, attempt));
     app._userSocialReconnectTimer = setTimeout(function() {
       app._userSocialReconnectTimer = null;
+      maybeNotifyUserSocialOffline();
       if (typeof app.restartUserSocialSocket === 'function') {
         app.restartUserSocialSocket();
       }
@@ -486,6 +502,7 @@ module.exports = function registerUserSocialSocket(app, deps) {
         }
         app.userSocialSocketTask = null;
         app.userSocialReconnectAttempt = (app.userSocialReconnectAttempt || 0) + 1;
+        maybeNotifyUserSocialOffline();
         scheduleUserSocialReconnect(false);
       }
     });
@@ -498,6 +515,7 @@ module.exports = function registerUserSocialSocket(app, deps) {
         return;
       }
       app.userSocialReconnectAttempt = 0;
+      app._userSocialOfflineNotified = false;
       app._userSocialPingTimer = setInterval(function() {
         if (app.userSocialSocketTask !== sock) {
           return;
@@ -517,6 +535,7 @@ module.exports = function registerUserSocialSocket(app, deps) {
       clearUserSocialPing();
       app.userSocialSocketTask = null;
       app.userSocialReconnectAttempt = (app.userSocialReconnectAttempt || 0) + 1;
+      maybeNotifyUserSocialOffline();
       scheduleUserSocialReconnect(false);
     });
     sock.onError(function() {
@@ -526,6 +545,7 @@ module.exports = function registerUserSocialSocket(app, deps) {
       clearUserSocialPing();
       app.userSocialSocketTask = null;
       app.userSocialReconnectAttempt = (app.userSocialReconnectAttempt || 0) + 1;
+      maybeNotifyUserSocialOffline();
       scheduleUserSocialReconnect(false);
     });
   };

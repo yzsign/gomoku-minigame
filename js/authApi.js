@@ -12,6 +12,10 @@ var defaultAvatars = require('./defaultAvatars.js');
 var SESSION_TOKEN_KEY = 'gomoku_session_token';
 /** 静默登录 payload.userId，供本机私聊历史等按账号隔离（与 token 同步写入） */
 var LOCAL_SELF_USER_ID_KEY = 'gomoku_local_self_user_id_v1';
+/** 本地 token 有效时，onShow 跳过 wx.login 的最小间隔（毫秒） */
+var SESSION_LAST_OK_AT_KEY = 'gomoku_session_last_ok_at_v1';
+var SILENT_LOGIN_MIN_INTERVAL_MS = 5 * 60 * 1000;
+var SILENT_LOGIN_REQUEST_TIMEOUT_MS = 15000;
 
 /** 静默登录 wx.request 成功回调后触发（loginOk, payload），用于同步管理员标记等 */
 var silentLoginCompleteListeners = [];
@@ -30,10 +34,38 @@ function hasValidSessionToken(payload) {
   );
 }
 
+function recordSessionOkTime() {
+  try {
+    if (typeof wx !== 'undefined' && wx.setStorageSync) {
+      wx.setStorageSync(SESSION_LAST_OK_AT_KEY, String(Date.now()));
+    }
+  } catch (eRec) {}
+}
+
+function shouldSkipSilentLogin(optionalProfile) {
+  if (optionalProfile) {
+    return false;
+  }
+  if (!getSessionToken()) {
+    return false;
+  }
+  try {
+    if (typeof wx !== 'undefined' && wx.getStorageSync) {
+      var raw = wx.getStorageSync(SESSION_LAST_OK_AT_KEY);
+      var t = Number(raw);
+      if (!isNaN(t) && t > 0 && Date.now() - t < SILENT_LOGIN_MIN_INTERVAL_MS) {
+        return true;
+      }
+    }
+  } catch (eSkip) {}
+  return false;
+}
+
 function persistSession(payload) {
   if (!hasValidSessionToken(payload)) {
     return;
   }
+  recordSessionOkTime();
   try {
     if (typeof wx !== 'undefined' && wx.setStorageSync) {
       wx.setStorageSync(SESSION_TOKEN_KEY, payload.sessionToken);
@@ -147,6 +179,7 @@ function silentLoginPerform(optionalProfile, onDone) {
       wx.request({
         url: roomApi.GOMOKU_API_BASE + '/api/auth/silent-login',
         method: 'POST',
+        timeout: SILENT_LOGIN_REQUEST_TIMEOUT_MS,
         header: {
           'content-type': 'application/json',
         },
@@ -211,6 +244,12 @@ function silentLoginPerform(optionalProfile, onDone) {
 }
 
 function silentLogin(optionalProfile, onDone) {
+  if (shouldSkipSilentLogin(optionalProfile)) {
+    if (typeof onDone === 'function') {
+      onDone(true, { sessionSkipped: true });
+    }
+    return;
+  }
   silentLoginQueue.push({ optionalProfile: optionalProfile, onDone: onDone });
   function drain() {
     if (silentLoginBusy || !silentLoginQueue.length) {

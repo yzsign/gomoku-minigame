@@ -221,7 +221,7 @@ app.startOnlineSocket = function() {
     '&sessionToken=' +
     encodeURIComponent(st);
   if (typeof console !== 'undefined' && console.log) {
-    console.log('[Gomoku] WebSocket URL:', url);
+    console.log('[Gomoku] WebSocket connect roomId=', app.onlineRoomId);
   }
   app.socketTask = wx.connectSocket({
     url: url,
@@ -355,6 +355,7 @@ app.startOnlineAsHost = function (opts) {
   }
   var friendListInviteExplicit = !!(opts && opts.skipWeChatInviteShare);
   var skipWeChatShare = friendListInviteExplicit || notifyPeerUserId > 0;
+  app.clearPendingOnlineInviteQuery();
   app.homeDrawerOpen = false;
   authApi.ensureSession(function (sessionOk, errHint) {
     if (!sessionOk) {
@@ -823,21 +824,107 @@ app.startOnlineFriendWatchFromPeer = function (peerUserId) {
   });
 };
 
+app.normalizeOnlineInviteQuery = function(query) {
+  if (!query) {
+    return null;
+  }
+  var rid =
+    query.roomId != null
+      ? String(query.roomId).replace(/^\s+|\s+$/g, '')
+      : '';
+  if (String(query.online) !== '1' || !rid) {
+    return null;
+  }
+  return { online: '1', roomId: rid };
+};
+
+app.rememberOnlineInviteQuery = function(query) {
+  var norm = app.normalizeOnlineInviteQuery(query);
+  if (!norm) {
+    return false;
+  }
+  if (
+    app._pendingOnlineInviteQuery &&
+    app._pendingOnlineInviteQuery.roomId !== norm.roomId
+  ) {
+    app.onlineInviteConsumed = false;
+  }
+  app._pendingOnlineInviteQuery = norm;
+  return true;
+};
+
+app.clearPendingOnlineInviteQuery = function() {
+  app._pendingOnlineInviteQuery = null;
+};
+
+/** 冷启动 / 半屏 / 分享卡片：onShow.query 为空时用 getEnterOptionsSync / getLaunchOptionsSync 兜底 */
+app.resolveOnlineInviteLaunchQuery = function(showRes) {
+  var parsed = app.normalizeOnlineInviteQuery(showRes && showRes.query);
+  if (parsed) {
+    return parsed;
+  }
+  try {
+    if (typeof wx.getEnterOptionsSync === 'function') {
+      parsed = app.normalizeOnlineInviteQuery(wx.getEnterOptionsSync().query);
+      if (parsed) {
+        return parsed;
+      }
+    }
+    if (typeof wx.getLaunchOptionsSync === 'function') {
+      parsed = app.normalizeOnlineInviteQuery(wx.getLaunchOptionsSync().query);
+      if (parsed) {
+        return parsed;
+      }
+    }
+  } catch (eResolve) {}
+  return null;
+};
+
+app.shouldRetryOnlineInviteAfterJoinFailure = function(statusCode, errorCode) {
+  if (statusCode === 401 || statusCode === 503) {
+    return true;
+  }
+  if (statusCode === 409 && errorCode === 'SAME_USER') {
+    return false;
+  }
+  if (statusCode === 404 || statusCode === 409) {
+    return false;
+  }
+  return statusCode !== 200;
+};
+
+app.prepareForOnlineInviteJoin = function() {
+  if (typeof app.cancelMatchingTimers === 'function') {
+    app.cancelMatchingTimers();
+  }
+  app.randomMatchHostWaiting = false;
+  if (app.isPvpLocal) {
+    app.isPvpLocal = false;
+  }
+  if (typeof app.disconnectOnline === 'function') {
+    app.disconnectOnline();
+  }
+};
+
 app.joinOnlineAsGuest = function(roomId) {
   if (!roomId) {
     app._pvpInviteJoinInProgress = false;
+    app._onlineInviteJoinInFlight = false;
     return;
   }
-  app.onlineInviteConsumed = true;
+  if (app._onlineInviteJoinInFlight) {
+    return;
+  }
+  app._onlineInviteJoinInFlight = true;
+  app.prepareForOnlineInviteJoin();
   authApi.ensureSession(function (sessionOk, errHint) {
     if (!sessionOk) {
-      app.onlineInviteConsumed = false;
+      app._onlineInviteJoinInFlight = false;
       app._pvpInviteJoinInProgress = false;
       wx.showToast({ title: errHint || '请先完成登录', icon: 'none' });
       return;
     }
     var restorePvpInviteJoinGate = app._pvpInviteJoinInProgress;
-    app.disconnectOnline();
     if (restorePvpInviteJoinGate) {
       app._pvpInviteJoinInProgress = true;
     }
@@ -846,14 +933,17 @@ app.joinOnlineAsGuest = function(roomId) {
       Object.assign(roomApi.roomApiJoinOptions(roomId), {
     success: function (res) {
       wx.hideLoading();
+      app._onlineInviteJoinInFlight = false;
         if (res.statusCode !== 200 || !res.data) {
-        app.onlineInviteConsumed = false;
         app._pvpInviteJoinInProgress = false;
         var msg = '无法加入';
+        var errorCode = null;
         if (res.statusCode === 401) {
           msg = '请先登录';
+          errorCode = 'UNAUTHORIZED';
         } else if (res.statusCode === 404) {
           msg = '房间不存在';
+          errorCode = 'ROOM_NOT_FOUND';
         } else if (res.statusCode === 409) {
           var er = res.data;
           if (typeof er === 'string') {
@@ -864,6 +954,7 @@ app.joinOnlineAsGuest = function(roomId) {
             }
           }
           var code = er && er.code;
+          errorCode = code;
           if (code === 'SAME_USER') {
             msg =
               (er && er.message && String(er.message).trim()) ||
@@ -877,10 +968,21 @@ app.joinOnlineAsGuest = function(roomId) {
           }
         } else if (res.statusCode === 503) {
           msg = '暂无人机账号，请稍后重试';
+          errorCode = 'NO_BOTS';
+        }
+        if (
+          !app.shouldRetryOnlineInviteAfterJoinFailure(
+            res.statusCode,
+            errorCode
+          )
+        ) {
+          app.clearPendingOnlineInviteQuery();
         }
         wx.showToast({ title: msg, icon: 'none' });
         return;
       }
+      app.onlineInviteConsumed = true;
+      app.clearPendingOnlineInviteQuery();
       var d = res.data;
       app.isDailyPuzzle = false;
       app.dailyPuzzleLocalStudy = false;
@@ -930,7 +1032,7 @@ app.joinOnlineAsGuest = function(roomId) {
     },
     fail: function () {
       wx.hideLoading();
-      app.onlineInviteConsumed = false;
+      app._onlineInviteJoinInFlight = false;
       app._pvpInviteJoinInProgress = false;
       wx.showToast({ title: '网络请求失败', icon: 'none' });
     }
@@ -941,13 +1043,45 @@ app.joinOnlineAsGuest = function(roomId) {
 
 /** 分享链接带 roomId：直接进入加入房间（不再展示 canvas「好友邀请你下棋」门闩） */
 app.tryLaunchOnlineInvite = function(query) {
-  if (app.onlineInviteConsumed || app.isPvpOnline) {
+  if (query && app.rememberOnlineInviteQuery(query)) {
+    /* 合并本次 onShow / 启动参数 */
+  }
+  var pending = app._pendingOnlineInviteQuery;
+  if (!pending || !pending.roomId) {
     return;
   }
-  if (!query || String(query.online) !== '1' || !query.roomId) {
+  if (app.onlineInviteConsumed) {
+    if (
+      !app.onlineRoomId ||
+      String(app.onlineRoomId) === String(pending.roomId)
+    ) {
+      return;
+    }
+    app.onlineInviteConsumed = false;
+  }
+  if (app._onlineInviteJoinInFlight) {
     return;
   }
-  var rid = String(query.roomId);
+  var rid = pending.roomId;
+  if (app.isPvpOnline && app.onlineRoomId === rid) {
+    app.onlineInviteConsumed = true;
+    app.clearPendingOnlineInviteQuery();
+    if (!app.onlineWsConnected && typeof app.startOnlineSocket === 'function') {
+      app.startOnlineSocket();
+    }
+    if (typeof app.draw === 'function') {
+      app.draw();
+    }
+    return;
+  }
+  if (
+    app.isPvpOnline ||
+    app.screen === 'matching' ||
+    app.randomMatchHostWaiting ||
+    (app.onlineRoomId && app.onlineRoomId !== rid)
+  ) {
+    app.prepareForOnlineInviteJoin();
+  }
   app.screen = 'home';
   if (typeof app.draw === 'function') {
     app.draw();

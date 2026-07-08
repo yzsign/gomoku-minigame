@@ -5,6 +5,13 @@
 // var GOMOKU_API_BASE = 'http://127.0.0.1:8080';
 // var GOMOKU_API_BASE = 'https://springboot-emh7-241395-4-1418403127.sh.run.tcloudbase.com';
 var GOMOKU_API_BASE = 'https://www.tuantuangmk.com';
+/** 弱网下覆盖 game.json 默认 5s request 超时 */
+var DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+
+function withDefaultTimeout(opts) {
+  return Object.assign({ timeout: DEFAULT_REQUEST_TIMEOUT_MS }, opts);
+}
+
 function withAuthHeaders(baseHeader) {
   var h = baseHeader ? Object.assign({}, baseHeader) : {};
   try {
@@ -25,22 +32,22 @@ function withAuthHeaders(baseHeader) {
  * - 随机匹配：POST /api/match/random；房主取消：POST /api/match/random/cancel
  */
 function roomApiCreateOptions() {
-  return {
+  return withDefaultTimeout({
     url: GOMOKU_API_BASE + '/api/rooms',
     method: 'POST',
     header: withAuthHeaders({})
-  };
+  });
 }
 
 function roomApiJoinOptions(roomId) {
-  return {
+  return withDefaultTimeout({
     url: GOMOKU_API_BASE + '/api/rooms/join',
     method: 'POST',
     header: withAuthHeaders({
       'content-type': 'application/x-www-form-urlencoded'
     }),
     data: 'roomId=' + encodeURIComponent(roomId)
-  };
+  });
 }
 
 /**
@@ -62,28 +69,28 @@ function roomFriendWatchOptions(peerUserId) {
 
 /** 随机匹配：POST /api/match/random */
 function roomApiRandomMatchOptions() {
-  return {
+  return withDefaultTimeout({
     url: GOMOKU_API_BASE + '/api/match/random',
     method: 'POST',
     header: withAuthHeaders({})
-  };
+  });
 }
 
 /** 房主：对手加入后 GET /api/match/random/paired?roomId= — 取最终 WebSocket token（含随机先后手交换） */
 function roomApiRandomMatchPairedOptions(roomId) {
-  return {
+  return withDefaultTimeout({
     url:
       GOMOKU_API_BASE +
       '/api/match/random/paired?roomId=' +
       encodeURIComponent(roomId),
     method: 'GET',
     header: withAuthHeaders({})
-  };
+  });
 }
 
 /** 房主取消随机匹配等待：POST /api/match/random/cancel */
 function roomApiRandomMatchCancelOptions(roomId, blackToken) {
-  return {
+  return withDefaultTimeout({
     url: GOMOKU_API_BASE + '/api/match/random/cancel',
     method: 'POST',
     header: withAuthHeaders({
@@ -94,12 +101,12 @@ function roomApiRandomMatchCancelOptions(roomId, blackToken) {
       encodeURIComponent(roomId) +
       '&blackToken=' +
       encodeURIComponent(blackToken)
-  };
+  });
 }
 
 /** 匹配超时：POST /api/match/random/fallback-bot — 从数据库随机人机作为白方 */
 function roomApiRandomMatchFallbackOptions(roomId, blackToken) {
-  return {
+  return withDefaultTimeout({
     url: GOMOKU_API_BASE + '/api/match/random/fallback-bot',
     method: 'POST',
     header: withAuthHeaders({
@@ -110,7 +117,7 @@ function roomApiRandomMatchFallbackOptions(roomId, blackToken) {
       encodeURIComponent(roomId) +
       '&blackToken=' +
       encodeURIComponent(blackToken)
-  };
+  });
 }
 
 /** 随机一名人机的公开资料：GET /api/match/random/bot-profile（本地随机兜底 UI） */
@@ -171,23 +178,23 @@ function meShopCatalogPageOptions(page, size) {
 
 /** POST /api/me/pve-game：人机终局写入 games（body: JSON，需 Authorization） */
 function mePveGameOptions(bodyObj) {
-  return {
+  return withDefaultTimeout({
     url: GOMOKU_API_BASE + '/api/me/pve-game',
     method: 'POST',
     header: withAuthHeaders({
       'content-type': 'application/json'
     }),
     data: JSON.stringify(bodyObj || {})
-  };
+  });
 }
 
 /** GET /api/me/admin-status — 当前用户是否为 openid 管理员 */
 function meAdminStatusOptions() {
-  return {
+  return withDefaultTimeout({
     url: GOMOKU_API_BASE + '/api/me/admin-status',
     method: 'GET',
     header: withAuthHeaders({})
-  };
+  });
 }
 
 /** POST /api/admin/daily-puzzles — 创建残局（openid 管理员 Bearer + JSON body） */
