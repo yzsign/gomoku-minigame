@@ -2195,13 +2195,14 @@ module.exports = function registerFriendListHome(app, deps) {
   };
 
   app.dismissFriendListSearchKeyboard = function () {
-    if (typeof app._friendListSearchKbCleanup === 'function') {
+    var hadKb = typeof app._friendListSearchKbCleanup === 'function';
+    if (hadKb) {
       try {
         app._friendListSearchKbCleanup();
       } catch (e) {}
       app._friendListSearchKbCleanup = null;
     }
-    if (typeof wx !== 'undefined' && typeof wx.hideKeyboard === 'function') {
+    if (hadKb && typeof wx !== 'undefined' && typeof wx.hideKeyboard === 'function') {
       try {
         wx.hideKeyboard({});
       } catch (eH) {}

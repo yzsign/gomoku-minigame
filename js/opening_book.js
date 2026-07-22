@@ -217,6 +217,7 @@ function quartersForDiagWhite(wr, wc) {
 }
 
 function pickBlackThirdFromTable(board, w, black3Canon, q) {
+  var valid = [];
   var idx;
   for (idx = 0; idx < black3Canon.length; idx++) {
     var p = black3Canon[idx];
@@ -226,10 +227,13 @@ function pickBlackThirdFromTable(board, w, black3Canon, q) {
       board[abs.r][abs.c] === EMPTY &&
       inCenter5(abs.r, abs.c)
     ) {
-      return abs;
+      valid.push(abs);
     }
   }
-  return null;
+  if (valid.length === 0) {
+    return null;
+  }
+  return valid[Math.floor(Math.random() * valid.length)];
 }
 
 function hashBoardOpening(board) {
@@ -295,8 +299,7 @@ function whiteSecondMove(board, blackPos, options) {
   if (count === 0) {
     return null;
   }
-  var h = hashBoardOpening(board);
-  return list[h % count];
+  return list[Math.floor(Math.random() * count)];
 }
 
 /** 沿黑白与天元共线时，向白子外侧延伸一手（寒星类） */

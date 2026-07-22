@@ -521,14 +521,15 @@ app.hitJoinRoomModalCancel = function(clientX, clientY) {
 };
 
 app.dismissJoinRoomKeyboard = function() {
-  if (typeof app._joinRoomKeyboardCleanup === 'function') {
+  var hadKb = typeof app._joinRoomKeyboardCleanup === 'function';
+  if (hadKb) {
     try {
       app._joinRoomKeyboardCleanup();
     } catch (eJk) {}
     app._joinRoomKeyboardCleanup = null;
   }
   app.joinRoomInputFocused = false;
-  if (typeof wx !== 'undefined' && typeof wx.hideKeyboard === 'function') {
+  if (hadKb && typeof wx !== 'undefined' && typeof wx.hideKeyboard === 'function') {
     try {
       wx.hideKeyboard({});
     } catch (eH) {}

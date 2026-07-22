@@ -1123,7 +1123,10 @@ app.draw = function() {
     app.stopHomeMascotAnimLoop();
     app.checkinModalVisible = false;
     app.checkinModalData = null;
-    if (typeof app.closeJoinRoomModal === 'function') {
+    if (
+      app.joinRoomModalVisible &&
+      typeof app.closeJoinRoomModal === 'function'
+    ) {
       app.closeJoinRoomModal();
     }
   }
@@ -3164,7 +3167,56 @@ app.scheduleOnlineChatPanelAnimFrames = function() {
   }, 16);
 };
 
+/** 键盘顶沿 Y：局内聊天面板底沿应在其上方（含系统输入条留白） */
+app.onlineChatKeyboardTopLineY = function(kbH) {
+  if (!kbH || kbH <= 0) {
+    return app.H;
+  }
+  var padR =
+    typeof app.onlineChatKeyboardTopExtraPadRpx === 'number'
+      ? app.onlineChatKeyboardTopExtraPadRpx
+      : 16;
+  var pad = app.rpx(padR);
+  var full = app._onlineChatLayoutFullH || app.H;
+  var wh = app.H;
+  if (typeof wx !== 'undefined' && typeof wx.getWindowInfo === 'function') {
+    try {
+      var wi = wx.getWindowInfo();
+      if (wi && typeof wi.windowHeight === 'number' && wi.windowHeight > 0) {
+        wh = wi.windowHeight;
+      }
+    } catch (eW) {}
+  }
+  var shrunkTh =
+    typeof app.onlineChatKeyboardShrinkThresholdRpx === 'number'
+      ? app.rpx(app.onlineChatKeyboardShrinkThresholdRpx)
+      : app.rpx(24);
+  if (wh < full - shrunkTh) {
+    return wh - pad;
+  }
+  return full - kbH - pad;
+};
+
+app.clearOnlineChatKeyboardHeightWatch = function() {
+  if (
+    app._onlineChatKeyboardHeightListener &&
+    typeof wx !== 'undefined' &&
+    typeof wx.offKeyboardHeightChange === 'function'
+  ) {
+    try {
+      wx.offKeyboardHeightChange(app._onlineChatKeyboardHeightListener);
+    } catch (eKb0) {}
+  }
+  app._onlineChatKeyboardHeightListener = null;
+  app._onlineChatKeyboardHeight = 0;
+  app._onlineChatLayoutFullH = 0;
+};
+
 app.dismissOnlineChatKeyboard = function() {
+  app._onlineChatKbSession = (app._onlineChatKbSession || 0) + 1;
+  if (typeof app.clearOnlineChatKeyboardHeightWatch === 'function') {
+    app.clearOnlineChatKeyboardHeightWatch();
+  }
   if (typeof app._onlineChatKeyboardCleanup === 'function') {
     try {
       app._onlineChatKeyboardCleanup();
@@ -3187,6 +3239,9 @@ app.closeOnlineChatPanel = function() {
   app.onlineChatOpen = false;
   app.onlineChatEmojiOpen = false;
   app._onlineChatAnimStartMs = 0;
+  app._onlineChatBarHitKind = null;
+  app._onlineChatBarDownX = 0;
+  app._onlineChatBarDownY = 0;
   if (app._chatPanelAnimIv) {
     try {
       clearInterval(app._chatPanelAnimIv);
@@ -3472,59 +3527,76 @@ app._fallbackOnlineChatModal = function() {
     }
     return;
   }
+  var draft0 =
+    app.onlineChatInputDraft != null ? String(app.onlineChatInputDraft) : '';
   wx.showModal({
-    title: '发送消息',
+    title: '输入消息',
     editable: true,
-    placeholderText: '输入发送:',
+    placeholderText: '最多30字',
+    content: draft0,
+    confirmText: '确定',
+    cancelText: '取消',
     success: function(res) {
-      if (!res.confirm || res.content == null) {
-        return;
+      if (res.confirm && res.content != null) {
+        var t = String(res.content);
+        if (t.length > 30) {
+          t = t.slice(0, 30);
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '最多30字', icon: 'none' });
+          }
+        }
+        app.onlineChatInputDraft = t;
       }
-      app.trySendOnlineChatText(res.content);
+      if (typeof app.draw === 'function') {
+        app.draw();
+      }
     }
   });
 };
 
+/**
+ * 局内聊天文字输入：wx.showKeyboard + onKeyboardInput 实时同步到面板输入框；
+ * 须再点面板「发送」发出（键盘「完成」仅收起并保留草稿）。
+ * 注：showKeyboard 会在键盘上方显示微信系统输入条，暂无隐藏 API。
+ */
 app.promptOnlineChatText = function() {
   if (typeof wx === 'undefined') {
     return;
   }
-  if (typeof app.dismissFriendListSearchKeyboard === 'function') {
-    app.dismissFriendListSearchKeyboard();
-  }
-  if (typeof app.dismissOnlineChatKeyboard === 'function') {
-    app.dismissOnlineChatKeyboard();
+  if (typeof app._onlineChatKeyboardCleanup === 'function') {
+    return;
   }
   if (typeof wx.showKeyboard !== 'function') {
     app._fallbackOnlineChatModal();
     return;
   }
+  if (app._chatPanelAnimIv) {
+    try {
+      clearInterval(app._chatPanelAnimIv);
+    } catch (eAnim) {}
+    app._chatPanelAnimIv = null;
+  }
+  app._onlineChatKbSession = (app._onlineChatKbSession || 0) + 1;
+  var kbSession = app._onlineChatKbSession;
   var draft0 =
     app.onlineChatInputDraft != null ? String(app.onlineChatInputDraft) : '';
   var kbCleaned = false;
   var onInput = function(res) {
-    app.onlineChatInputDraft = res && res.value != null ? String(res.value) : '';
+    app.onlineChatInputDraft =
+      res && res.value != null ? String(res.value) : '';
     if (typeof app.draw === 'function') {
       app.draw();
     }
   };
   var onConfirm = function(res) {
-    var v =
-      res && res.value != null
-        ? String(res.value)
-        : app.onlineChatInputDraft != null
-          ? String(app.onlineChatInputDraft)
-          : '';
-    cleanup();
+    if (res && res.value != null) {
+      app.onlineChatInputDraft = String(res.value);
+    }
     try {
       if (typeof wx.hideKeyboard === 'function') {
         wx.hideKeyboard({});
       }
     } catch (eH) {}
-    app.onlineChatInputDraft = '';
-    if (app.trySendOnlineChatText(v)) {
-      return;
-    }
     if (typeof app.draw === 'function') {
       app.draw();
     }
@@ -3533,7 +3605,7 @@ app.promptOnlineChatText = function() {
     cleanup();
   };
   function cleanup() {
-    if (kbCleaned) {
+    if (kbCleaned || kbSession !== app._onlineChatKbSession) {
       return;
     }
     kbCleaned = true;
@@ -3552,6 +3624,9 @@ app.promptOnlineChatText = function() {
         wx.offKeyboardComplete(onComplete);
       }
     } catch (e3) {}
+    if (typeof app.clearOnlineChatKeyboardHeightWatch === 'function') {
+      app.clearOnlineChatKeyboardHeightWatch();
+    }
     app._onlineChatKeyboardCleanup = null;
   }
   app._onlineChatKeyboardCleanup = cleanup;
@@ -3565,17 +3640,69 @@ app.promptOnlineChatText = function() {
     if (typeof wx.onKeyboardComplete === 'function') {
       wx.onKeyboardComplete(onComplete);
     }
+    if (typeof wx.onKeyboardHeightChange === 'function') {
+      if (typeof app.clearOnlineChatKeyboardHeightWatch === 'function') {
+        app.clearOnlineChatKeyboardHeightWatch();
+      }
+      var onKbHOnline = function(res) {
+        if (kbSession !== app._onlineChatKbSession) {
+          return;
+        }
+        var raw =
+          res && typeof res.height === 'number' && !isNaN(res.height)
+            ? res.height
+            : 0;
+        var h = raw;
+        if (app.onlineChatKeyboardHeightDivideDpr) {
+          var dprKb = app.DPR;
+          if (typeof dprKb === 'number' && dprKb > 0 && dprKb === dprKb) {
+            h = h / dprKb;
+          }
+        }
+        var scKb = app.onlineChatKeyboardHeightScale;
+        if (typeof scKb === 'number' && scKb > 0 && scKb === scKb) {
+          h *= scKb;
+        }
+        app._onlineChatKeyboardHeight = Math.max(0, h);
+        if (typeof app.syncCanvasWithWindow === 'function') {
+          try {
+            app.syncCanvasWithWindow();
+          } catch (eSy) {}
+        }
+        if (typeof app.draw === 'function') {
+          app.draw();
+        }
+        if (h > 0 && typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(function() {
+            if (kbSession !== app._onlineChatKbSession) {
+              return;
+            }
+            if (typeof app.syncCanvasWithWindow === 'function') {
+              try {
+                app.syncCanvasWithWindow();
+              } catch (eSy2) {}
+            }
+            if (typeof app.draw === 'function') {
+              app.draw();
+            }
+          });
+        }
+      };
+      app._onlineChatKeyboardHeightListener = onKbHOnline;
+      wx.onKeyboardHeightChange(onKbHOnline);
+    }
   } catch (eL) {
     cleanup();
     app._fallbackOnlineChatModal();
     return;
   }
+  app._onlineChatLayoutFullH = app.H;
   wx.showKeyboard({
     defaultValue: draft0,
     maxLength: 30,
     multiple: false,
     confirmHold: false,
-    confirmType: 'send',
+    confirmType: 'done',
     fail: function() {
       cleanup();
       app._fallbackOnlineChatModal();
@@ -3645,6 +3772,15 @@ app.drawOnlineChatPanel = function(th, btnY) {
     headerH + app.rpx(6) + bannerH + bottomFixed + app.rpx(10);
   var minH = app.rpx(200);
   var ph = Math.max(minH, contentH);
+  var kbH = app._onlineChatKeyboardHeight || 0;
+  if (kbH > 0) {
+    var keyboardTop = app.onlineChatKeyboardTopLineY(kbH);
+    var nativeBarR =
+      typeof app.onlineChatKeyboardNativeBarRpx === 'number'
+        ? app.onlineChatKeyboardNativeBarRpx
+        : 80;
+    panelBottom = Math.min(panelBottom, keyboardTop - app.rpx(nativeBarR));
+  }
   var panelTop0 = panelBottom - ph;
   if (panelTop0 < oy) {
     panelTop0 = oy;
@@ -3800,8 +3936,11 @@ app.drawOnlineChatPanel = function(th, btnY) {
   var iy = py0 + phraseBlockH + sectionGap;
   var iH = inpRowH - app.rpx(12);
   var iW = w * 0.68;
-  ctx.strokeStyle = 'rgba(224, 216, 204, 0.85)';
-  ctx.lineWidth = 1;
+  var inpFocused = typeof app._onlineChatKeyboardCleanup === 'function';
+  ctx.strokeStyle = inpFocused
+    ? 'rgba(180, 140, 90, 0.95)'
+    : 'rgba(224, 216, 204, 0.85)';
+  ctx.lineWidth = inpFocused ? Math.max(1, app.rpx(2)) : 1;
   ctx.fillStyle = 'rgba(255, 252, 247, 0.9)';
   app.roundRect(pad, iy, iW, iH, app.rpx(12));
   ctx.fill();
@@ -3830,7 +3969,7 @@ app.drawOnlineChatPanel = function(th, btnY) {
     ctx.fillText(dispDraft, inpTextX, iy + iH * 0.5);
   } else {
     ctx.fillStyle = '#9a938a';
-    ctx.fillText('输入发送:', inpTextX, iy + iH * 0.5);
+    ctx.fillText('点击输入', inpTextX, iy + iH * 0.5);
   }
 
   var sbw = w - pad * 2 - iW - app.rpx(12);
@@ -4270,7 +4409,12 @@ app.applyAiMoveResult = function(mv) {
 }
 
 app.openingOptionsForAi = function() {
-  return { rif: true, dailyDifficulty: 3 };
+  return {
+    rif: true,
+    dailyDifficulty: 3,
+    nearBestMargin: 3000,
+    aiTune: { oppThreatWeight: 1.4, doubleThreatMult: 5 }
+  };
 }
 
 /**
@@ -6275,6 +6419,9 @@ if (typeof wx.onTouchCancel === 'function') {
       app._spectatorPopoverScrollTouchId = null;
     }
     app._spectatorPopoverTouchStartedInPanel = null;
+    app._onlineChatBarHitKind = null;
+    app._onlineChatBarDownX = 0;
+    app._onlineChatBarDownY = 0;
     if (app.pieceShopGridTouchArmed) {
       app.pieceShopGridTouchArmed = false;
     }

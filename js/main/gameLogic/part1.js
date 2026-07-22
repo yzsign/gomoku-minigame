@@ -3201,6 +3201,15 @@ app._chatPanelAnimIv = null;
 /** 自定义绘制用草稿；与 wx.showKeyboard 同步 */
 app.onlineChatInputDraft = '';
 app._onlineChatKeyboardCleanup = null;
+/** 递增后使未完成的键盘回调失效，避免 hide/show 竞态 */
+app._onlineChatKbSession = 0;
+app._onlineChatBarHitKind = null;
+app._onlineChatBarDownX = 0;
+app._onlineChatBarDownY = 0;
+/** 局内聊天键盘高度（逻辑 px，见 onlineChatKeyboardTopLineY） */
+app._onlineChatKeyboardHeight = 0;
+app._onlineChatKeyboardHeightListener = null;
+app._onlineChatLayoutFullH = 0;
 /** 头像旁会话气泡：{ my: {text,until,kind}, opp: ... } kind 为 TEXT|QUICK|EMOJI */
 app.onlineChatAvatarBubble = null;
 app._onlineChatAvatarBubbleMyTmr = null;
@@ -3498,6 +3507,13 @@ app.friendDmKeyboardHeightDivideDpr = false;
 app.friendDmKeyboardTopExtraPadRpx = 16;
 /** 当前 windowHeight 比唤起键盘前小超过此 rpx 时，视为系统已缩小窗口，不再减 kbH */
 app.friendDmKeyboardShrinkThresholdRpx = 24;
+/** 局内聊天：键盘顶起（换算/留白与好友私聊一致，可单独微调） */
+app.onlineChatKeyboardHeightScale = 1;
+app.onlineChatKeyboardHeightDivideDpr = false;
+app.onlineChatKeyboardTopExtraPadRpx = 16;
+app.onlineChatKeyboardShrinkThresholdRpx = 24;
+/** wx.showKeyboard 系统输入条高度预留（rpx），面板底沿在其上方 */
+app.onlineChatKeyboardNativeBarRpx = 80;
 /** 战绩页：在当前页面上以遮罩弹出棋谱回放（不切换 screen） */
 app.historyReplayOverlayVisible = false;
 /** 战绩列表：在回放图标上按下时的行记录与 touch identifier */
@@ -3838,6 +3854,12 @@ app.disconnectOnline = function() {
     app.dismissOnlineChatKeyboard();
   }
   app.onlineChatInputDraft = '';
+  app._onlineChatBarHitKind = null;
+  app._onlineChatBarDownX = 0;
+  app._onlineChatBarDownY = 0;
+  app._onlineChatKeyboardHeight = 0;
+  app._onlineChatKeyboardHeightListener = null;
+  app._onlineChatLayoutFullH = 0;
   if (typeof app.clearOnlineChatAvatarBubbleState === 'function') {
     app.clearOnlineChatAvatarBubbleState();
   }

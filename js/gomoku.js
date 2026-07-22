@@ -1101,6 +1101,30 @@ function minimax(board, depth, alpha, beta, maximizing, aiColor, maxCandidates) 
 
 /* ---------- AI 落子 ---------- */
 
+/** 根节点：在分差 margin 内的候选中随机，增加棋路变化（与后端 BotAiStyle 一致） */
+function pickNearBestRootMove(rootMoves, rootScores, margin) {
+  if (!rootMoves.length) {
+    return null;
+  }
+  var bestScore = rootScores[0];
+  var i;
+  for (i = 1; i < rootScores.length; i++) {
+    if (rootScores[i] > bestScore) {
+      bestScore = rootScores[i];
+    }
+  }
+  var pool = [];
+  for (i = 0; i < rootScores.length; i++) {
+    if (rootScores[i] >= bestScore - margin) {
+      pool.push(rootMoves[i]);
+    }
+  }
+  if (!pool.length) {
+    return rootMoves[0];
+  }
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 /**
  * AI：必胜/必堵 + 候选裁剪 + minimax + 棋型启发
  * @param {{
@@ -1136,10 +1160,14 @@ function aiMove(board, aiColor, options) {
       timeBudget = 1200;
       tuneMerged.forcedTiersMax = Math.min(tuneMerged.forcedTiersMax, 5);
     } else {
-      searchDepth = 12;
-      maxCandidates = 42;
-      timeBudget = 2400;
+      searchDepth = 14;
+      maxCandidates = 48;
+      timeBudget = 3200;
     }
+  }
+  var nearBestMargin = 4000;
+  if (options && options.nearBestMargin != null) {
+    nearBestMargin = clampNum(Number(options.nearBestMargin), 0, 20000);
   }
   currentAiTune = tuneMerged;
   searchDeadline = Date.now() + timeBudget;
@@ -1196,6 +1224,8 @@ function aiMove(board, aiColor, options) {
     }
     var bestMove = ordered[0];
     var bestScore = -1e15;
+    var rootMoves = [];
+    var rootScores = [];
     var alpha = -1e15;
     var beta = 1e15;
     var i;
@@ -1217,6 +1247,8 @@ function aiMove(board, aiColor, options) {
         maxCandidates
       );
       board[m.r][m.c] = EMPTY;
+      rootMoves.push(m);
+      rootScores.push(sc);
       if (sc > bestScore) {
         bestScore = sc;
         bestMove = m;
@@ -1224,7 +1256,8 @@ function aiMove(board, aiColor, options) {
       if (sc > alpha) alpha = sc;
     }
 
-    return bestMove || pool[0];
+    var picked = pickNearBestRootMove(rootMoves, rootScores, nearBestMargin);
+    return picked || bestMove || pool[0];
   } finally {
     searchDeadline = 0;
     currentAiTune = null;
