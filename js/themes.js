@@ -1,7 +1,7 @@
 /**
- * 界面风格：柔和渐变底 / 深色主按钮 / 高对比标题（棋院质感；青瓷 / 水墨为解锁；赛博 cyberpunk 可切换）
+ * 界面风格：柔和渐变底 / 深色主按钮 / 高对比标题（棋院质感；青瓷 / 水墨为解锁主题）
  * 设计稿宽度 750rpx（与 main 中 rpx() 一致）。
- * 檀木 classic、赛博 cyberpunk 与青瓷 mint、水墨 ink 各有一套色板，互不覆盖。
+ * 檀木 classic 与青瓷 mint、水墨 ink 各有一套色板，互不覆盖。
  * 本地无记录或需回退时默认檀木，避免冷启动先闪深色再随服务端纠偏。
  */
 var STORAGE_KEY = 'gomoku_theme_id';
@@ -24,6 +24,83 @@ var THEMES = {
     /** 首页「人机 / 好友」主按钮（与 homeCards 前两色一致，单列避免与其它用途混淆） */
     homePve: '#1f5664',
     homeFriend: '#2e7586',
+    homeJoin: '#44919f',
+    homeRandom: ['#3aab96', '#1f6b5c'],
+    homeActions: {
+      random: {
+        mode: 'hero',
+        grad: ['#8EC4B6', '#B8DCD2', '#E4F2EE'],
+        gradDir: 'h',
+        shadow: 'rgba(12, 52, 64, 0.16)',
+        fg: '#1A3A3E',
+        subFg: '#4A6868',
+        badgeFg: '#C05840',
+        emoji: '🎲',
+        iconBg: 'rgba(188, 220, 210, 0.55)',
+        iconBgDark: 'rgba(60, 110, 100, 0.12)',
+        subtitle: '挑战相当的对手',
+        badge: '推荐'
+      },
+      friend: {
+        mode: 'tile',
+        grad: ['#F8FCFB', '#D8EBE6'],
+        border: 'rgba(46, 117, 134, 0.26)',
+        shadow: 'rgba(12, 52, 64, 0.1)',
+        fg: '#1E4044',
+        subFg: '#5E7878',
+        emoji: '👥',
+        iconBg: 'rgba(170, 210, 200, 0.52)',
+        iconBgDark: 'rgba(40, 90, 80, 0.1)',
+        subtitle: '联机对弈'
+      },
+      join: {
+        mode: 'tile',
+        grad: ['#F6FAFC', '#CFE0EA'],
+        border: 'rgba(68, 145, 159, 0.26)',
+        shadow: 'rgba(12, 52, 64, 0.1)',
+        fg: '#1E4044',
+        subFg: '#5E7878',
+        emoji: '🔑',
+        iconBg: 'rgba(160, 200, 218, 0.5)',
+        iconBgDark: 'rgba(40, 80, 100, 0.1)',
+        subtitle: '输入房号'
+      },
+      pve: {
+        mode: 'tile',
+        grad: ['#F4FAF9', '#C8DDD8'],
+        border: 'rgba(31, 86, 100, 0.24)',
+        shadow: 'rgba(12, 52, 64, 0.1)',
+        fg: '#1E4044',
+        subFg: '#5E7878',
+        emoji: '🤖',
+        iconBg: 'rgba(168, 192, 186, 0.5)',
+        iconBgDark: 'rgba(50, 80, 74, 0.1)',
+        subtitle: '挑战 AI'
+      },
+      daily: {
+        mode: 'tile',
+        grad: ['#F6FAF8', '#D8E8E0'],
+        border: 'rgba(80, 140, 110, 0.2)',
+        shadow: 'rgba(12, 52, 64, 0.1)',
+        fg: '#1E4038',
+        subFg: '#5A7870',
+        emoji: '📖',
+        iconBg: 'rgba(170, 210, 190, 0.5)',
+        iconBgDark: 'rgba(40, 90, 70, 0.1)',
+        subtitle: '复盘学习'
+      }
+    },
+    /** 对局复盘页主按钮：continue / history / clear 三段渐变 */
+    reviewHub: {
+      continue: { grad: ['#62B0A0', '#3E9080', '#2A7068'] },
+      history: { grad: ['#78A8B8', '#5098A8', '#388898'] },
+      clear: { grad: ['#88A0A8', '#688088', '#506870'] }
+    },
+    /** 人机对战选色：黑棋深、白棋浅，语义化渐变 */
+    pveColor: {
+      black: { grad: ['#3A5858', '#284848', '#183838'] },
+      white: { grad: ['#78A8A0', '#589088', '#407870'] }
+    },
     btnPrimary: '#1f5664',
     btnPrimaryStroke: 'rgba(255,255,255,0.42)',
     btnShadow: 'rgba(12, 52, 64, 0.2)',
@@ -81,6 +158,81 @@ var THEMES = {
     homeCards: ['#5C4738', '#7B5E3F', '#6A5545'],
     homePve: '#5C4738',
     homeFriend: '#7B5E3F',
+    homeJoin: '#9A7348',
+    homeRandom: ['#5CBF60', '#2E7D32'],
+    homeActions: {
+      random: {
+        mode: 'hero',
+        grad: ['#A8C8B4', '#C8DCC8', '#F0E8DC'],
+        gradDir: 'h',
+        shadow: 'rgba(58, 78, 62, 0.14)',
+        fg: '#2A3830',
+        subFg: '#5A7068',
+        badgeFg: '#B86048',
+        emoji: '🎲',
+        iconBg: 'rgba(220, 210, 190, 0.55)',
+        iconBgDark: 'rgba(80, 60, 40, 0.1)',
+        subtitle: '挑战相当的对手',
+        badge: '推荐'
+      },
+      friend: {
+        mode: 'tile',
+        grad: ['#FDF9F4', '#EDDCC6'],
+        border: 'rgba(123, 94, 63, 0.28)',
+        shadow: 'rgba(72, 54, 38, 0.1)',
+        fg: '#3A322C',
+        subFg: '#887870',
+        emoji: '👥',
+        iconBg: 'rgba(230, 200, 170, 0.55)',
+        iconBgDark: 'rgba(100, 70, 40, 0.1)',
+        subtitle: '联机对弈'
+      },
+      join: {
+        mode: 'tile',
+        grad: ['#FDFAF4', '#F2E0C0'],
+        border: 'rgba(154, 115, 72, 0.28)',
+        shadow: 'rgba(72, 54, 38, 0.1)',
+        fg: '#3A322C',
+        subFg: '#887870',
+        emoji: '🔑',
+        iconBg: 'rgba(224, 200, 170, 0.52)',
+        iconBgDark: 'rgba(90, 65, 35, 0.1)',
+        subtitle: '输入房号'
+      },
+      pve: {
+        mode: 'tile',
+        grad: ['#FAF7F4', '#E0D4C8'],
+        border: 'rgba(92, 71, 56, 0.26)',
+        shadow: 'rgba(72, 54, 38, 0.1)',
+        fg: '#3A322C',
+        subFg: '#887870',
+        emoji: '🤖',
+        iconBg: 'rgba(210, 200, 188, 0.52)',
+        iconBgDark: 'rgba(70, 60, 50, 0.1)',
+        subtitle: '挑战 AI'
+      },
+      daily: {
+        mode: 'tile',
+        grad: ['#FAFCF8', '#DCE8DC'],
+        border: 'rgba(120, 160, 130, 0.22)',
+        shadow: 'rgba(58, 78, 62, 0.1)',
+        fg: '#343C34',
+        subFg: '#708078',
+        emoji: '📖',
+        iconBg: 'rgba(190, 210, 195, 0.52)',
+        iconBgDark: 'rgba(50, 80, 60, 0.1)',
+        subtitle: '复盘学习'
+      }
+    },
+    reviewHub: {
+      continue: { grad: ['#7AAA90', '#5A8870', '#446858'] },
+      history: { grad: ['#C8A888', '#A88868', '#886848'] },
+      clear: { grad: ['#A89888', '#887870', '#6A6058'] }
+    },
+    pveColor: {
+      black: { grad: ['#5A4E44', '#3A3228', '#242018'] },
+      white: { grad: ['#A89888', '#887870', '#686058'] }
+    },
     btnPrimary: '#5C4738',
     btnPrimaryStroke: 'rgba(255,255,255,0.36)',
     btnShadow: 'rgba(60, 48, 38, 0.16)',
@@ -136,6 +288,81 @@ var THEMES = {
     homeCards: ['#221c18', '#8f8578', '#5a524a'],
     homePve: '#221c18',
     homeFriend: '#8f8578',
+    homeJoin: '#6B6358',
+    homeRandom: ['#4a8f6a', '#2d5c44'],
+    homeActions: {
+      random: {
+        mode: 'hero',
+        grad: ['#A0C4B0', '#C8D8C8', '#EDE4D8'],
+        gradDir: 'h',
+        shadow: 'rgba(28, 20, 14, 0.14)',
+        fg: '#2A2820',
+        subFg: '#605850',
+        badgeFg: '#A86040',
+        emoji: '🎲',
+        iconBg: 'rgba(210, 200, 185, 0.52)',
+        iconBgDark: 'rgba(60, 50, 40, 0.1)',
+        subtitle: '挑战相当的对手',
+        badge: '推荐'
+      },
+      friend: {
+        mode: 'tile',
+        grad: ['#FEFCF8', '#E8DDD2'],
+        border: 'rgba(143, 133, 120, 0.28)',
+        shadow: 'rgba(68, 64, 60, 0.1)',
+        fg: '#322C26',
+        subFg: '#807870',
+        emoji: '👥',
+        iconBg: 'rgba(220, 200, 180, 0.52)',
+        iconBgDark: 'rgba(80, 60, 40, 0.1)',
+        subtitle: '联机对弈'
+      },
+      join: {
+        mode: 'tile',
+        grad: ['#FEFCF8', '#DAD4CA'],
+        border: 'rgba(107, 99, 88, 0.28)',
+        shadow: 'rgba(68, 64, 60, 0.1)',
+        fg: '#322C26',
+        subFg: '#807870',
+        emoji: '🔑',
+        iconBg: 'rgba(210, 192, 172, 0.5)',
+        iconBgDark: 'rgba(70, 55, 35, 0.1)',
+        subtitle: '输入房号'
+      },
+      pve: {
+        mode: 'tile',
+        grad: ['#F8F6F4', '#D8D0C8'],
+        border: 'rgba(34, 28, 24, 0.22)',
+        shadow: 'rgba(68, 64, 60, 0.1)',
+        fg: '#322C26',
+        subFg: '#807870',
+        emoji: '🤖',
+        iconBg: 'rgba(200, 194, 186, 0.5)',
+        iconBgDark: 'rgba(60, 55, 48, 0.1)',
+        subtitle: '挑战 AI'
+      },
+      daily: {
+        mode: 'tile',
+        grad: ['#F8FAF6', '#D8E4DC'],
+        border: 'rgba(100, 140, 120, 0.22)',
+        shadow: 'rgba(68, 64, 60, 0.1)',
+        fg: '#2A302A',
+        subFg: '#708078',
+        emoji: '📖',
+        iconBg: 'rgba(188, 206, 192, 0.5)',
+        iconBgDark: 'rgba(40, 70, 55, 0.1)',
+        subtitle: '复盘学习'
+      }
+    },
+    reviewHub: {
+      continue: { grad: ['#78A088', '#588868', '#406850'] },
+      history: { grad: ['#B8A898', '#988878', '#786858'] },
+      clear: { grad: ['#908880', '#706860', '#585048'] }
+    },
+    pveColor: {
+      black: { grad: ['#4A4038', '#322C26', '#1A1814'] },
+      white: { grad: ['#A89888', '#887868', '#686050'] }
+    },
     btnPrimary: '#221c18',
     btnPrimaryStroke: 'rgba(255,255,255,0.3)',
     btnShadow: 'rgba(28, 20, 14, 0.16)',
@@ -178,60 +405,6 @@ var THEMES = {
     },
     status: '#3a3632',
     hint: '#7a7268'
-  },
-  /**
-   * 深色界面（id 仍为 cyberpunk 以兼容存储 / 后端）：克制色板，与檀木同属默认可切换。
-   */
-  cyberpunk: {
-    id: 'cyberpunk',
-    name: '赛博',
-    bg: ['#12161c', '#151a22', '#0e1117'],
-    title: '#e8eaed',
-    subtitle: '#8b96a8',
-    muted: '#6b7585',
-    homeCards: ['#3d4f63', '#4a5a6e', '#5c6b7d'],
-    homePve: '#4a5d72',
-    homeFriend: '#5a6d82',
-    btnPrimary: '#5a7a94',
-    btnPrimaryStroke: 'rgba(255, 255, 255, 0.22)',
-    btnShadow: 'rgba(0, 0, 0, 0.38)',
-    btnGhostFill: 'rgba(28, 32, 40, 0.94)',
-    btnGhostStroke: 'rgba(255, 255, 255, 0.16)',
-    btnGhostText: '#a8b4c4',
-    pageIndicator: '#7a8fa3',
-    result: {
-      defaultEnd: '#121820',
-      win: { bg: 'rgba(76, 140, 96, 0.22)', title: '#7ccd93' },
-      lose: { bg: 'rgba(160, 72, 88, 0.2)', title: '#e89aa8' },
-      draw: { bg: 'rgba(95, 108, 128, 0.2)', title: '#aeb8c8' },
-      sub: '#8b96a8',
-      secondaryFill: 'rgba(255, 255, 255, 0.06)',
-      secondaryStroke: 'rgba(255, 255, 255, 0.2)',
-      secondaryText: '#c4ced8'
-    },
-    board: {
-      g0: '#1a1f28',
-      g1: '#252b36',
-      line: 'rgba(255, 255, 255, 0.18)',
-      star: '#c5ccd6',
-      gridLineWidth: 1
-    },
-    pieces: {
-      black: {
-        g0: '#4a4e52',
-        gm: '#222428',
-        g1: '#060608',
-        stroke: 'rgba(255, 255, 255, 0.14)'
-      },
-      white: {
-        g0: '#fffffc',
-        gm: '#e8eef0',
-        g1: '#c8d4dc',
-        stroke: '#7a8694'
-      }
-    },
-    status: '#a8b4c4',
-    hint: '#7a8494'
   }
 };
 
@@ -683,9 +856,14 @@ function pointsCostFromShopCatalog(itemCode, fallback) {
   return fallback;
 }
 
-/** 首页循环切换：檀木 → 赛博（默认可用）→ 已解锁青瓷 / 水墨 */
+/** 已废弃的赛博主题 id，统一回退檀木 */
+function normalizeThemeId(id) {
+  return id === 'cyberpunk' ? 'classic' : id;
+}
+
+/** 首页循环切换：檀木 → 已解锁青瓷 / 水墨 */
 function getThemeIdsForCycling() {
-  var ids = ['classic', 'cyberpunk'];
+  var ids = ['classic'];
   if (isPieceSkinUnlockedOnServer('mint')) {
     ids.push('mint');
   }
@@ -1037,13 +1215,14 @@ function applyPieceSkinIdFromServer(id) {
 }
 
 function getTheme(id) {
-  var t = THEMES[id] || THEMES.classic;
-  return t;
+  var tid = normalizeThemeId(id);
+  return THEMES[tid] || THEMES.classic;
 }
 
 function clampThemeIdToUnlocked(id) {
-  if (id === 'classic' || id === 'cyberpunk') {
-    return THEMES[id] ? id : 'classic';
+  id = normalizeThemeId(id);
+  if (id === 'classic') {
+    return 'classic';
   }
   if ((id === 'mint' || id === 'ink') && THEMES[id] && isPieceSkinUnlockedOnServer(id)) {
     return id;
@@ -1058,8 +1237,11 @@ function loadSavedThemeId() {
       if (v === 'classic') {
         return 'classic';
       }
-      if (v === 'cyberpunk' && THEMES.cyberpunk) {
-        return 'cyberpunk';
+      if (v === 'cyberpunk') {
+        try {
+          wx.setStorageSync(STORAGE_KEY, 'classic');
+        } catch (eCyber) {}
+        return 'classic';
       }
       if ((v === 'mint' || v === 'ink') && THEMES[v]) {
         if (isPieceSkinUnlockedOnServer(v)) {
@@ -1088,7 +1270,7 @@ function saveThemeId(id) {
     if (!isPieceSkinUnlockedOnServer(id)) {
       return;
     }
-  } else if (id !== 'classic' && id !== 'cyberpunk') {
+  } else if (id !== 'classic') {
     return;
   }
   try {
@@ -1105,7 +1287,7 @@ function applyThemeIdFromServer(id) {
   if (!id || typeof id !== 'string') {
     return;
   }
-  var tid = id.trim();
+  var tid = normalizeThemeId(id.trim());
   if (!THEMES[tid]) {
     return;
   }
@@ -1115,14 +1297,6 @@ function applyThemeIdFromServer(id) {
         wx.setStorageSync(STORAGE_KEY, 'classic');
       }
     } catch (e) {}
-    return;
-  }
-  if (tid === 'cyberpunk' && THEMES.cyberpunk) {
-    try {
-      if (typeof wx !== 'undefined' && wx.setStorageSync) {
-        wx.setStorageSync(STORAGE_KEY, 'cyberpunk');
-      }
-    } catch (e2) {}
     return;
   }
   if ((tid === 'mint' || tid === 'ink') && isPieceSkinUnlockedOnServer(tid)) {

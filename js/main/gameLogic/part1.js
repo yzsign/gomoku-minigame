@@ -77,6 +77,13 @@ app.checkinStateCache = null;
 app.checkinModalVisible = false;
 app.checkinModalData = null;
 
+/** 首页「加入房间」自绘弹窗（替代 wx.showModal） */
+app.joinRoomModalVisible = false;
+app.joinRoomDraft = '';
+app.joinRoomInputFocused = false;
+app.joinRoomPressedButton = null;
+app._joinRoomKeyboardCleanup = null;
+
 /** 是否已处理过「首次资料」询问（含用户点暂不、拒绝/关闭 getUserProfile、不支持授权的环境） */
 app.PROFILE_PROMPT_STORAGE_KEY = 'gomoku_profile_prompt_done';
 /** 授权后写入，棋盘左下角展示「我」的昵称 */
@@ -1105,16 +1112,6 @@ app.getPropBarUiColors = function(th) {
       pressShadow: 'rgba(31, 86, 100, 0.28)'
     };
   }
-  if (id === 'cyberpunk') {
-    return {
-      btnInnerG0: 'rgba(34, 38, 46, 0.96)',
-      btnInnerG1: 'rgba(26, 30, 38, 0.97)',
-      btnIdleBorder: 'rgba(255, 255, 255, 0.18)',
-      btnOnBorder: primary,
-      btnLetter: title,
-      pressShadow: 'rgba(0, 0, 0, 0.35)'
-    };
-  }
   if (id === 'ink') {
     return {
       btnInnerG0: 'rgba(255, 252, 248, 0.97)',
@@ -2015,6 +2012,8 @@ app.themeBubbleRafId = null;
 app.homeDrawerOpen = false;
 /** 首页三主按钮按下态：'random' | 'pvp' | 'pve' | null（松手在同类按钮上才触发逻辑） */
 app.homePressedButton = null;
+/** 子页全屏入口按下态：人机选色 / 复盘 hub 等 */
+app.subPagePressedButton = null;
 /** 首页底部 Dock 按下列：0～2 或 null（与 hitHomeBottomNav 一致：签、战绩、杂货铺） */
 app.homePressedDockCol = null;
 
@@ -2432,37 +2431,6 @@ app.shopModalUiFromTheme = function(th) {
   th = th || app.getUiTheme();
   var id = th.id;
   var bg = th.bg && th.bg.length ? th.bg : ['#fff9f4', '#fff6ed', '#fffcf9'];
-  if (id === 'cyberpunk') {
-    var rib0cb =
-      th.homeCards && th.homeCards[0] ? th.homeCards[0] : th.btnPrimary;
-    return {
-      panel: bg,
-      title: th.title,
-      subtitle: th.subtitle,
-      muted: th.muted,
-      sep: 'rgba(255, 255, 255, 0.12)',
-      cardG0: 'rgba(34, 38, 46, 0.94)',
-      cardG1: 'rgba(26, 30, 38, 0.97)',
-      stroke: 'rgba(255, 255, 255, 0.16)',
-      focusStroke: th.btnPrimary,
-      focusShadow: 'rgba(0, 0, 0, 0.38)',
-      statusSep: 'rgba(255, 255, 255, 0.08)',
-      ribbon0: rib0cb,
-      ribbon1: th.btnPrimary,
-      ribbon2:
-        th.homeCards && th.homeCards[2]
-          ? th.homeCards[2]
-          : th.homeCards && th.homeCards[1]
-            ? th.homeCards[1]
-            : th.btnPrimary,
-      ribbonText: '#f0f2f5',
-      ribbonTextShadow: 'rgba(0, 0, 0, 0.35)',
-      pointsCost: '#9eb0c4',
-      redeemBtnG0:
-        th.homeCards && th.homeCards[1] ? th.homeCards[1] : th.btnPrimary,
-      redeemBtnG1: th.btnPrimary
-    };
-  }
   return {
     panel: bg,
     title: th.title,
@@ -2654,20 +2622,17 @@ app.friendListHomeUiFromTheme = function(th) {
     th.result && th.result.win && th.result.win.title
       ? th.result.win.title
       : '#2e7d32';
-  var cyber = id === 'cyberpunk';
   return {
-    backdropAlpha: cyber ? 0.52 : id === 'ink' ? 0.52 : id === 'mint' ? 0.4 : 0.45,
+    backdropAlpha: id === 'ink' ? 0.52 : id === 'mint' ? 0.4 : 0.45,
     panelG0: panelArr[0],
     panelG1: panelArr[1],
     panelG2: panelArr[2],
     panelShadow:
-      cyber
-        ? 'rgba(0, 0, 0, 0.35)'
-        : id === 'mint'
-          ? 'rgba(12, 52, 64, 0.2)'
-          : id === 'ink'
-            ? 'rgba(20, 16, 12, 0.26)'
-            : 'rgba(60, 48, 38, 0.18)',
+      id === 'mint'
+        ? 'rgba(12, 52, 64, 0.2)'
+        : id === 'ink'
+          ? 'rgba(20, 16, 12, 0.26)'
+          : 'rgba(60, 48, 38, 0.18)',
     title: th.title,
     collapse: th.muted,
     searchBg0: S ? S.cardG0 : '#fffefb',
@@ -2679,39 +2644,28 @@ app.friendListHomeUiFromTheme = function(th) {
     searchPlaceholder: th.muted,
     loading: th.muted,
     emptyTitle: th.title,
-    rowEven:
-      cyber
-        ? 'rgba(22, 30, 46, 0.97)'
-        : H
-          ? H.parchmentTint
-          : 'rgba(253, 245, 230, 0.32)',
+    rowEven: H ? H.parchmentTint : 'rgba(253, 245, 230, 0.32)',
     rowOdd:
-      cyber
-        ? 'rgba(16, 22, 34, 0.97)'
-        : id === 'mint'
-          ? 'rgba(255, 255, 255, 0.65)'
-          : id === 'ink'
-            ? 'rgba(255, 252, 248, 0.55)'
-            : 'rgba(255, 252, 246, 0.58)',
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.65)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 248, 0.55)'
+          : 'rgba(255, 252, 246, 0.58)',
     avatarFallback:
-      cyber
-        ? '#4a6270'
-        : id === 'mint'
-          ? '#c8e0dc'
-          : id === 'ink'
-            ? '#ddd4cc'
-            : '#e0d6c8',
+      id === 'mint'
+        ? '#c8e0dc'
+        : id === 'ink'
+          ? '#ddd4cc'
+          : '#e0d6c8',
     avatarChar: th.title,
     name: th.title,
     /** 好友列表未读私聊角标 */
     unreadDot:
-      cyber
+      id === 'mint'
         ? '#e53935'
-        : id === 'mint'
-          ? '#e53935'
-          : id === 'ink'
-            ? '#e57373'
-            : '#d32f2f',
+        : id === 'ink'
+          ? '#e57373'
+          : '#d32f2f',
     online: winTitle,
     offline: th.muted,
     actionHint: th.muted,
@@ -2734,35 +2688,29 @@ app.friendListHomeUiFromTheme = function(th) {
     fabShadow: th.btnShadow,
     /** 侧栏大面板渐变/子块填充：相对实色 1.0 的不透明度（越大越实） */
     panelBodyAlpha: 0.92,
-    friendListRowUseLightBase: !cyber,
+    friendListRowUseLightBase: true,
     /** 好友列表 Tab：仅选中态药丸（无底层轨道） */
     tabPill:
-      cyber
-        ? 'rgba(28, 36, 50, 0.92)'
-        : id === 'mint'
-          ? 'rgba(255, 255, 255, 0.94)'
-          : id === 'ink'
-            ? 'rgba(255, 252, 248, 0.96)'
-            : 'rgba(255, 253, 248, 0.97)',
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.94)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 248, 0.96)'
+          : 'rgba(255, 253, 248, 0.97)',
     tabPillStroke:
-      cyber
-        ? 'rgba(255, 255, 255, 0.2)'
-        : id === 'mint'
-          ? 'rgba(46, 117, 134, 0.22)'
-          : id === 'ink'
-            ? 'rgba(74, 66, 58, 0.24)'
-            : 'rgba(200, 188, 172, 0.45)',
+      id === 'mint'
+        ? 'rgba(46, 117, 134, 0.22)'
+        : id === 'ink'
+          ? 'rgba(74, 66, 58, 0.24)'
+          : 'rgba(200, 188, 172, 0.45)',
     /** 行内「游戏中」与战绩胜色、online 点同源 */
     friendInGame: winTitle,
     /** 行内「观战中」：略偏青/蓝，与下棋区分 */
     friendSpectating:
-      cyber
-        ? '#1565c0'
-        : id === 'mint'
-          ? '#00838f'
-          : id === 'ink'
-            ? '#5d6e76'
-            : '#1565c0',
+      id === 'mint'
+        ? '#00838f'
+        : id === 'ink'
+          ? '#5d6e76'
+          : '#1565c0',
     /**
      * 行内「观战」药丸：与侧栏内搜索区卡片（杂货铺 S.card*）同底，主色字 + 极淡顶光，与 Tab 条气质一致。
      */
@@ -2933,54 +2881,41 @@ app.friendListHomeUiFromTheme = function(th) {
     /** 「观战人数：」标签用色（muted） */
     spectatorBadgeMuted: th.muted,
     /** 私聊顶栏：与侧栏渐变中段一致 */
-    chatHeaderBg:
-      cyber
-        ? 'rgba(16, 22, 36, 0.99)'
-        : panelArr[1],
-    /** 私聊消息列表区（暖色 parchment / 深色主题深底） */
+    chatHeaderBg: panelArr[1],
+    /** 私聊消息列表区（暖色 parchment） */
     chatMsgBg:
-      cyber
-        ? 'rgba(12, 18, 30, 0.98)'
-        : id === 'mint'
-          ? 'rgba(226, 241, 239, 0.96)'
-          : id === 'ink'
-            ? 'rgba(235, 229, 221, 0.96)'
-            : 'rgba(244, 236, 226, 0.96)',
+      id === 'mint'
+        ? 'rgba(226, 241, 239, 0.96)'
+        : id === 'ink'
+          ? 'rgba(235, 229, 221, 0.96)'
+          : 'rgba(244, 236, 226, 0.96)',
     /** 对方气泡：与列表药丸卡片一致 */
     chatBubbleOther:
-      cyber
-        ? 'rgba(34, 44, 62, 0.94)'
-        : id === 'mint'
-          ? 'rgba(255, 255, 255, 0.94)'
-          : id === 'ink'
-            ? 'rgba(255, 252, 248, 0.96)'
-            : 'rgba(255, 253, 248, 0.97)',
+      id === 'mint'
+        ? 'rgba(255, 255, 255, 0.94)'
+        : id === 'ink'
+          ? 'rgba(255, 252, 248, 0.96)'
+          : 'rgba(255, 253, 248, 0.97)',
     chatBubbleOtherStroke:
-      cyber
-        ? 'rgba(255, 255, 255, 0.18)'
-        : id === 'mint'
-          ? 'rgba(46, 117, 134, 0.2)'
-          : id === 'ink'
-            ? 'rgba(74, 66, 58, 0.22)'
-            : 'rgba(200, 188, 172, 0.4)',
+      id === 'mint'
+        ? 'rgba(46, 117, 134, 0.2)'
+        : id === 'ink'
+          ? 'rgba(74, 66, 58, 0.22)'
+          : 'rgba(200, 188, 172, 0.4)',
     /** 己方气泡：主题色浅铺，与杂货铺主按钮同源 */
     chatBubbleSelf:
-      cyber
-        ? 'rgba(90, 122, 148, 0.22)'
-        : id === 'mint'
-          ? 'rgba(55, 132, 146, 0.24)'
-          : id === 'ink'
-            ? 'rgba(105, 86, 68, 0.3)'
-            : 'rgba(191, 144, 99, 0.34)',
-    chatBubbleSelfStroke: cyber ? 'rgba(255, 255, 255, 0.2)' : null,
+      id === 'mint'
+        ? 'rgba(55, 132, 146, 0.24)'
+        : id === 'ink'
+          ? 'rgba(105, 86, 68, 0.3)'
+          : 'rgba(191, 144, 99, 0.34)',
+    chatBubbleSelfStroke: null,
     chatAvatarSelfFallback:
-      cyber
-        ? '#3d5a68'
-        : id === 'mint'
-          ? '#c5e0dc'
-          : id === 'ink'
-            ? '#cfc4b8'
-            : '#ead8c8',
+      id === 'mint'
+        ? '#c5e0dc'
+        : id === 'ink'
+          ? '#cfc4b8'
+          : '#ead8c8',
     chatCursor: th.btnPrimary,
     chatSendActive: th.btnPrimary,
     chatSendInactive: th.muted
@@ -3060,7 +2995,7 @@ app.snapPx = function(x) {
 
 /* ---------- 界面与对局状态 ---------- */
 
-/** 'home' | 'pve_color' | 'matching' | 'game' | 'history' | 'replay' | 'review_hub' | 'admin_puzzle' */
+/** 'home' | 'friend_battle' | 'pve_color' | 'matching' | 'game' | 'history' | 'replay' | 'review_hub' | 'admin_puzzle' */
 app.screen = 'home';
 /** 对局复盘入口页：GET /api/me/replay-study 的响应体（含 hasData） */
 app.reviewHubData = null;
@@ -3119,6 +3054,8 @@ app.pveAiColor = function() {
 
 /** 是否由「随机匹配」进入的人机局（用于文案） */
 app.isRandomMatch = false;
+/** 休闲好友房：不计天梯 Elo 与胜负统计（与 STATE.ranked=false 一致） */
+app.isCasualRoom = false;
 /** 联机白方为数据库人机（随机匹配超时接入） */
 app.onlineOpponentIsBot = false;
 /** STATE：各方是否为人机（用于「我」对面是否为电脑，避免误用对手接口头像） */
@@ -3149,6 +3086,29 @@ app.dailyPuzzleResultKind = '';
 /** 当日第一次通关每日残局时 submit 返回的团团积分增量，在 openResult 时触发飘字 */
 app.dailyPuzzleSubmitActivityPointsDelta = null;
 app.onlineRoomId = '';
+/** 好友对战页「创建房间」建房后、等待好友加入前，左上角展示房号 */
+app.friendRoomCodeHostPending = false;
+/** 好友对战页「输入房号加入」成功后，左上角展示房号 */
+app.friendRoomCodeManualJoin = false;
+/** 左上角房号：创建房间（等待加入）或输入房号加入时展示 */
+app.shouldShowFriendRoomIdTop = function() {
+  if (
+    !app.isPvpOnline ||
+    !app.onlineRoomId ||
+    app.isRandomMatch ||
+    app.onlinePuzzleFriendRoom
+  ) {
+    return false;
+  }
+  if (app.friendRoomCodeHostPending) {
+    return !!(
+      app.pvpOnlineYourColor === app.BLACK &&
+      typeof app.isOnlineFriendMatchNotStarted === 'function' &&
+      app.isOnlineFriendMatchNotStarted()
+    );
+  }
+  return !!app.friendRoomCodeManualJoin;
+};
 app.onlineToken = '';
 /** 本客户端执子 gomoku.BLACK | gomoku.WHITE，与服务器 STATE.yourColor 一致 */
 app.pvpOnlineYourColor = app.BLACK;
@@ -3820,6 +3780,9 @@ app.disconnectOnline = function() {
     app.stopResultTuanPointsAnim();
   }
   app.isPvpOnline = false;
+  app.isCasualRoom = false;
+  app.friendRoomCodeHostPending = false;
+  app.friendRoomCodeManualJoin = false;
   app.onlineRoomId = '';
   app.onlineToken = '';
   app.onlineSpectatorMode = false;
@@ -5190,6 +5153,9 @@ app.applyOnlineState = function(data) {
       data.puzzleRoom === 'true' ||
       data.puzzleRoom === 1 ||
       data.puzzleRoom === '1';
+  }
+  if (data.ranked !== undefined && data.ranked !== null) {
+    app.isCasualRoom = !app.normalizeOnlineBool(data.ranked, true);
   }
   var noOnlineClock =
     app.onlinePuzzleFriendRoom ||

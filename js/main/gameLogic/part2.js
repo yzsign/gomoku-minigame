@@ -336,14 +336,14 @@ app.startOnlineSocket = function() {
 /**
  * 创建好友房并作为房主进房（底层实现）。
  *
- * - **首页「好友对战」**：请只调 {@link app.startOnlineAsHostFromHome}，等价于本函数传入 {@code null}，
- *   建房后进房并 {@link wx.shareAppMessage}，不请求 /api/social/pvp-invites。
+ * - **好友对战页「邀请好友」**：请调 {@link app.startOnlineAsHostInviteWeChat}，建房后进房并 {@link wx.shareAppMessage}。
+ * - **好友对战页「创建房间」**：请调 {@link app.startOnlineAsHostByRoomCode}，建房后进房展示房号，不调微信分享。
  * - **好友列表行内「邀请」**：传入 {@code skipWeChatInviteShare: true} 与 {@code notifyPeerUserId}；
  *   仅 WS 推送邀请，不调起微信分享。若显式 {@code skipWeChatInviteShare} 但缺少 peerId，会 Toast 提示。
  *
  *  safeguard：只要解析出合法 {@code notifyPeerUserId}，一律视为列表邀请路径，禁止再走微信分享。
  *
- * @param {{ notifyPeerUserId?: number, skipWeChatInviteShare?: boolean }|null|undefined} [opts]
+ * @param {{ notifyPeerUserId?: number, skipWeChatInviteShare?: boolean, skipWeChatShare?: boolean }|null|undefined} [opts]
  */
 app.startOnlineAsHost = function (opts) {
   var notifyPeerUserId = 0;
@@ -353,8 +353,11 @@ app.startOnlineAsHost = function (opts) {
       notifyPeerUserId = n;
     }
   }
+  var skipWeChatShareOnly = !!(opts && opts.skipWeChatShare);
   var friendListInviteExplicit = !!(opts && opts.skipWeChatInviteShare);
-  var skipWeChatShare = friendListInviteExplicit || notifyPeerUserId > 0;
+  var skipWeChatShare =
+    skipWeChatShareOnly || friendListInviteExplicit || notifyPeerUserId > 0;
+  app.friendRoomCodeHostPending = false;
   app.clearPendingOnlineInviteQuery();
   app.homeDrawerOpen = false;
   authApi.ensureSession(function (sessionOk, errHint) {
@@ -379,11 +382,16 @@ app.startOnlineAsHost = function (opts) {
       }
       var d = res.data;
       app.onlineRoomId = d.roomId;
+      app.friendRoomCodeHostPending =
+        skipWeChatShareOnly &&
+        !friendListInviteExplicit &&
+        notifyPeerUserId <= 0;
       app.onlineToken = d.blackToken;
       app.onlineSpectatorMode = false;
       app.pvpOnlineYourColor = app.BLACK;
       app.isPvpLocal = false;
       app.isRandomMatch = false;
+      app.isCasualRoom = !app.normalizeOnlineBool(d.ranked, true);
       app.screen = 'game';
       app.lastOpponentMove = null;
       app.board = gomoku.createBoard();
@@ -438,7 +446,7 @@ app.startOnlineAsHost = function (opts) {
       if (!skipWeChatShare) {
         if (typeof wx.shareAppMessage === 'function') {
           wx.shareAppMessage({
-            title: '五子棋 房号 ' + app.onlineRoomId,
+            title: '五子棋 · ' + app.onlineRoomId,
             query: 'roomId=' + app.onlineRoomId + '&online=1'
           });
         } else {
@@ -459,10 +467,66 @@ app.startOnlineAsHost = function (opts) {
 };
 
 /**
- * 首页大卡「好友对战」唯一推荐入口：建房 + 进房 + 微信分享（不受好友列表 WS 邀请逻辑影响）。
+ * 好友对战页「邀请好友」：建房 + 进房 + 微信分享。
  */
-app.startOnlineAsHostFromHome = function () {
+app.startOnlineAsHostInviteWeChat = function () {
   app.startOnlineAsHost(null);
+};
+
+/**
+ * 好友对战页「创建房间」：建房 + 进房，展示房号等待好友输入加入。
+ */
+app.startOnlineAsHostByRoomCode = function () {
+  app.startOnlineAsHost({ skipWeChatShare: true });
+};
+
+/** @deprecated 请用 {@link app.startOnlineAsHostInviteWeChat} 或 {@link app.openFriendBattleHub} */
+app.startOnlineAsHostFromHome = function () {
+  app.startOnlineAsHostInviteWeChat();
+};
+
+/**
+ * 输入房号加入休闲房（POST /api/rooms/join）。
+ */
+app.promptJoinRoomById = function () {
+  if (typeof app.openJoinRoomModal === 'function') {
+    app.openJoinRoomModal();
+    return;
+  }
+  if (typeof wx === 'undefined' || typeof wx.showModal !== 'function') {
+    return;
+  }
+  var canEdit = !wx.canIUse || wx.canIUse('showModal.object.editable');
+  if (!canEdit) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '当前版本不支持输入房号', icon: 'none' });
+    }
+    return;
+  }
+  wx.showModal({
+    title: '加入房间',
+    content: '请输入6位数字房号',
+    editable: true,
+    placeholderText: '例如 123456',
+    success: function (res) {
+      if (!res.confirm) {
+        return;
+      }
+      var rid =
+        res.content != null
+          ? String(res.content).replace(/^\s+|\s+$/g, '').replace(/\s+/g, '')
+          : '';
+      if (!rid) {
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '请输入房号', icon: 'none' });
+        }
+        return;
+      }
+      if (typeof app.joinOnlineAsGuest === 'function') {
+        app.joinOnlineAsGuest(rid, { fromManualRoomCode: true });
+      }
+    }
+  });
 };
 
 /**
@@ -906,7 +970,8 @@ app.prepareForOnlineInviteJoin = function() {
   }
 };
 
-app.joinOnlineAsGuest = function(roomId) {
+app.joinOnlineAsGuest = function(roomId, opts) {
+  opts = opts || {};
   if (!roomId) {
     app._pvpInviteJoinInProgress = false;
     app._onlineInviteJoinInFlight = false;
@@ -915,6 +980,8 @@ app.joinOnlineAsGuest = function(roomId) {
   if (app._onlineInviteJoinInFlight) {
     return;
   }
+  app.friendRoomCodeManualJoin = false;
+  app.friendRoomCodeHostPending = false;
   app._onlineInviteJoinInFlight = true;
   app.prepareForOnlineInviteJoin();
   authApi.ensureSession(function (sessionOk, errHint) {
@@ -997,6 +1064,8 @@ app.joinOnlineAsGuest = function(roomId) {
       }
       app.dailyPuzzleBotGen = (app.dailyPuzzleBotGen || 0) + 1;
       app.onlineRoomId = roomId;
+      app.friendRoomCodeHostPending = false;
+      app.friendRoomCodeManualJoin = !!opts.fromManualRoomCode;
       var joinTok =
         d.yourToken != null && d.yourToken !== ''
           ? d.yourToken
@@ -1017,6 +1086,7 @@ app.joinOnlineAsGuest = function(roomId) {
         joinColor === app.BLACK ? app.BLACK : app.WHITE;
       app.isPvpLocal = false;
       app.isRandomMatch = false;
+      app.isCasualRoom = !app.normalizeOnlineBool(d.ranked, true);
       app.screen = 'game';
       app.lastOpponentMove = null;
       app.board = gomoku.createBoard();
@@ -1147,7 +1217,36 @@ app.computeLayout = function() {
     app.shouldShowOnlineGameClockUi()
       ? toPx(52)
       : 0;
-  var topBar = Math.max(44, headerBottom + toPx(8) + onlineClockStrip);
+  var showFriendRoomBadge =
+    typeof app.shouldShowFriendRoomIdTop === 'function' &&
+    app.shouldShowFriendRoomIdTop();
+  var sbH = toPx(26);
+  var spectatorGapBelowRoom = toPx(16);
+  var friendRoomLineH = toPx(28);
+  /**
+   * 观战 / 房号：贴近左上角（安全区内侧），下拉面板的左缘与胶囊左缘对齐。
+   */
+  var cornerPadL = toPx(8);
+  var cornerPadT = toPx(20);
+  var sbW = toPx(148);
+  var safeL =
+    app.sys && app.sys.safeArea && typeof app.sys.safeArea.left === 'number'
+      ? app.sys.safeArea.left
+      : 0;
+  var sbX = safeL + cornerPadL;
+  var friendRoomLineY = showFriendRoomBadge ? insetTop + cornerPadT : 0;
+  var sbY = showFriendRoomBadge
+    ? friendRoomLineY + friendRoomLineH + spectatorGapBelowRoom
+    : 0;
+  var topBarBase = Math.max(44, headerBottom + toPx(8) + onlineClockStrip);
+  var topBar;
+  if (showFriendRoomBadge) {
+    topBar = Math.max(topBarBase, sbY + sbH + toPx(4));
+  } else {
+    topBar = topBarBase;
+    sbY = topBar + toPx(24);
+    topBar = Math.max(topBar, sbY + sbH + toPx(4));
+  }
   /* 残局管理：为「题目标题/排期」横条与棋盘间留白（与 part6 getAdminPuzzleMetaBarLayout 配套） */
   if (app.screen === 'admin_puzzle') {
     topBar += toPx(210);
@@ -1185,23 +1284,9 @@ app.computeLayout = function() {
   var boardPx = span * cell;
   /* 底栏垂直中心：条底对齐 H - safeBottom（刘海/ home 条之上） */
   var bottomY = app.H - safeBottom - barH * 0.5;
-
-  /**
-   * 观战按钮：顶栏下沿再下 20（750 稿）处，屏幕左侧；下拉面板的左缘与按钮左缘对齐。
-   */
-  var marginL = toPx(20);
-  var sbW = toPx(148);
-  var sbH = toPx(26);
-  var safeL =
-    app.sys && app.sys.safeArea && typeof app.sys.safeArea.left === 'number'
-      ? app.sys.safeArea.left
-      : 0;
-  var sbX = safeL + marginL;
-  /** 顶栏下沿（layout.topBar）以下 20px 设计间距 */
-  var sbY = topBar + toPx(20);
   var spW = toPx(220);
   var spH = toPx(320);
-  var spX = safeL + marginL;
+  var spX = safeL + cornerPadL;
   var spY = sbY + sbH + toPx(8);
   var spRowH = toPx(44);
 
@@ -1219,6 +1304,11 @@ app.computeLayout = function() {
     spectatorBadgeY: sbY,
     spectatorBadgeW: sbW,
     spectatorBadgeH: sbH,
+    showFriendRoomBadge: showFriendRoomBadge,
+    friendRoomLineX: sbX,
+    friendRoomLineY: friendRoomLineY,
+    friendRoomLineH: friendRoomLineH,
+    friendRoomLineW: Math.max(toPx(80), app.W - sbX - toPx(16)),
     spectatorPopoverX: spX,
     spectatorPopoverY: spY,
     spectatorPopoverW: spW,
@@ -1265,10 +1355,6 @@ app.fillAmbientBackground = function() {
     topLight.addColorStop(0, 'rgba(255, 255, 255, 0.52)');
     topLight.addColorStop(0.4, 'rgba(165, 224, 228, 0.16)');
     topLight.addColorStop(1, 'rgba(255, 255, 255, 0)');
-  } else if (th.id === 'cyberpunk') {
-    topLight.addColorStop(0, 'rgba(255, 255, 255, 0.06)');
-    topLight.addColorStop(0.42, 'rgba(255, 255, 255, 0.03)');
-    topLight.addColorStop(1, 'rgba(0, 0, 0, 0)');
   } else {
     topLight.addColorStop(0, 'rgba(255, 255, 255, 0.38)');
     topLight.addColorStop(0.45, 'rgba(255, 255, 255, 0.06)');
@@ -1296,10 +1382,6 @@ app.fillAmbientBackground = function() {
     vignette.addColorStop(0, 'rgba(70, 185, 195, 0)');
     vignette.addColorStop(0.74, 'rgba(28, 95, 108, 0.04)');
     vignette.addColorStop(1, 'rgba(14, 58, 68, 0.07)');
-  } else if (th.id === 'cyberpunk') {
-    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    vignette.addColorStop(0.7, 'rgba(0, 0, 0, 0.22)');
-    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.38)');
   } else {
     vignette.addColorStop(0, 'rgba(20, 18, 28, 0)');
     vignette.addColorStop(0.72, 'rgba(18, 16, 24, 0.04)');
@@ -1342,17 +1424,13 @@ app.fillHomeBackground = function(th) {
     topLight.addColorStop(0.4, 'rgba(255, 230, 200, 0.12)');
     topLight.addColorStop(1, 'rgba(255, 255, 255, 0)');
   } else if (th.id === 'mint') {
-    topLight.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
-    topLight.addColorStop(0.36, 'rgba(172, 228, 232, 0.18)');
+    topLight.addColorStop(0, 'rgba(255, 255, 255, 0.36)');
+    topLight.addColorStop(0.36, 'rgba(172, 228, 232, 0.1)');
     topLight.addColorStop(1, 'rgba(255, 255, 255, 0)');
   } else if (th.id === 'classic') {
-    topLight.addColorStop(0, 'rgba(255, 255, 255, 0.52)');
-    topLight.addColorStop(0.4, 'rgba(255, 210, 175, 0.16)');
+    topLight.addColorStop(0, 'rgba(255, 255, 255, 0.32)');
+    topLight.addColorStop(0.4, 'rgba(255, 210, 175, 0.08)');
     topLight.addColorStop(1, 'rgba(255, 255, 255, 0)');
-  } else if (th.id === 'cyberpunk') {
-    topLight.addColorStop(0, 'rgba(255, 255, 255, 0.07)');
-    topLight.addColorStop(0.38, 'rgba(255, 255, 255, 0.03)');
-    topLight.addColorStop(1, 'rgba(0, 0, 0, 0)');
   } else {
     topLight.addColorStop(0, 'rgba(255, 255, 255, 0.42)');
     topLight.addColorStop(0.45, 'rgba(255, 255, 255, 0.08)');
@@ -1380,10 +1458,6 @@ app.fillHomeBackground = function(th) {
     vignette.addColorStop(0, 'rgba(70, 185, 195, 0)');
     vignette.addColorStop(0.74, 'rgba(28, 95, 108, 0.04)');
     vignette.addColorStop(1, 'rgba(14, 58, 68, 0.07)');
-  } else if (th.id === 'cyberpunk') {
-    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    vignette.addColorStop(0.72, 'rgba(0, 0, 0, 0.2)');
-    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.36)');
   } else {
     vignette.addColorStop(0, 'rgba(24, 20, 18, 0)');
     vignette.addColorStop(0.72, 'rgba(20, 18, 22, 0.035)');
@@ -1406,17 +1480,30 @@ app.fillHomeBackground = function(th) {
   } else if (th.id === 'classic') {
     var footC = app.ctx.createLinearGradient(0, app.H * 0.62, 0, app.H);
     footC.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    footC.addColorStop(1, 'rgba(255, 185, 140, 0.1)');
+    footC.addColorStop(1, 'rgba(255, 185, 140, 0.06)');
     app.ctx.fillStyle = footC;
     app.ctx.fillRect(0, 0, app.W, app.H);
-  } else if (th.id === 'cyberpunk') {
-    var footCb = app.ctx.createLinearGradient(0, app.H * 0.63, 0, app.H);
-    footCb.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    footCb.addColorStop(1, 'rgba(0, 0, 0, 0.12)');
-    app.ctx.fillStyle = footCb;
-    app.ctx.fillRect(0, 0, app.W, app.H);
+    app.drawHomeClassicGardenBackdrop();
   }
 }
+
+/** 檀木首页顶区：柔和花野光斑（对齐设计稿暖黄绿氛围） */
+app.drawHomeClassicGardenBackdrop = function() {
+  app.ctx.save();
+  var cx = app.W * 0.5;
+  var top = app.getHomeNavBarLayout().navBottom;
+  function blob(x, y, r, color) {
+    var g = app.ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, color);
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    app.ctx.fillStyle = g;
+    app.ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  blob(cx - app.rpx(80), top + app.rpx(60), app.rpx(140), 'rgba(255, 228, 175, 0.18)');
+  blob(cx + app.rpx(100), top + app.rpx(40), app.rpx(120), 'rgba(164, 217, 192, 0.12)');
+  blob(cx, top + app.rpx(100), app.rpx(180), 'rgba(255, 242, 218, 0.22)');
+  app.ctx.restore();
+};
 
 /** 首页左上角：围棋阴阳意象小标 */
 app.drawHomeAppLogo = function(cx, cy, r) {
@@ -1880,7 +1967,7 @@ app.drawHomeNavBar = function(th) {
     '700 ' +
     navTitleFs +
     'px -apple-system, "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
-  app.ctx.fillStyle = th.title;
+  app.ctx.fillStyle = th.id === 'classic' ? '#2F4538' : th.title;
   var titleCx = app.W * 0.5;
   if (
     app.sys.safeArea &&
@@ -2165,73 +2252,125 @@ app.homePillRgbCss = function(c) {
   return 'rgb(' + c.r + ',' + c.g + ',' + c.b + ')';
 }
 
+/** 首页按钮：hex 向黑/白混合，用于立体底边与高光 */
+app.homePillShadeHex = function(hex, towardBlack) {
+  var c = app.homePillHexToRgb(hex);
+  if (!c) {
+    return hex;
+  }
+  var target = towardBlack ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 };
+  return app.homePillRgbCss(app.homePillMixRgb(c, towardBlack, target));
+}
+
+/** 首页 action kind → themes.homeActions 键 */
+app.resolveHomeActionKind = function(kind) {
+  if (kind === 'room_create' || kind === 'pvp') {
+    return 'friend';
+  }
+  if (kind === 'room_join') {
+    return 'join';
+  }
+  return kind;
+};
+
+/** 子页竖向按钮：与首页 tile 同套 homeActions 配色，仅隐藏图标 */
+app.subHubTileOpts = function(extra) {
+  return Object.assign(
+    { compact: true, showSubtitle: false, emojiOverride: '' },
+    extra || {}
+  );
+};
+
+app.getHomeActionSpec = function(kind, th) {
+  var key = app.resolveHomeActionKind(kind);
+  var actions = th && th.homeActions ? th.homeActions : null;
+  if (actions && actions[key]) {
+    return actions[key];
+  }
+  var legacy = app.getHomePillStyle(kind, th);
+  if (legacy.mode === 'gradient') {
+    return {
+      grad: [legacy.gradTop, legacy.gradBot],
+      shadow: legacy.shadowCol,
+      fg: legacy.fg,
+      subFg: 'rgba(255,255,255,0.82)',
+      emoji: '',
+      subtitle: ''
+    };
+  }
+  if (legacy.mode === 'solid') {
+    return {
+      grad: [legacy.baseHex, legacy.baseHex],
+      shadow: legacy.shadowCol,
+      fg: legacy.fg,
+      subFg: 'rgba(255,255,255,0.82)',
+      emoji: '',
+      subtitle: ''
+    };
+  }
+  return {
+    mode: 'soft',
+    grad: ['#FFFBEB', '#FEF3C7'],
+    border: '#FCD34D',
+    shadow: 'rgba(0,0,0,0.08)',
+    fg: legacy.fg,
+    subFg: legacy.fg,
+    emoji: '',
+    subtitle: ''
+  };
+};
+
 /**
- * 首页三主按钮：纵向微渐变 + 顶光高光；随机为描边浅底，好友/人机为实色（人机对比更强）
- * @param {boolean} [pressed] 按下态：略缩小下移 + 遮罩
+ * 首页主按钮：hero 横渐变主 CTA + tile 奶油卡片 2×2（对齐设计稿）
  */
-app.drawHomeReferencePill = function(cx, cy, bw, bh, label, pillKind, th, pressed) {
+app.drawHomeActionCard = function(cx, cy, bw, bh, label, kind, th, pressed, opts) {
+  opts = opts || {};
+  var spec = app.getHomeActionSpec(kind, th);
+  if (opts.emojiOverride !== undefined) {
+    spec = Object.assign({}, spec, { emoji: opts.emojiOverride });
+  }
+  if (opts.subtitleOverride !== undefined) {
+    spec = Object.assign({}, spec, { subtitle: opts.subtitleOverride });
+  }
+  var isHero = spec.mode === 'hero';
+  var isTile = spec.mode === 'tile' || spec.mode === 'soft';
+  var shadowCol =
+    spec.shadow || (th && th.btnShadow) || 'rgba(0, 0, 0, 0.1)';
   var x0 = cx - bw / 2;
   var y0 = cy - bh / 2;
-  var rr = bh / 2;
-  var baseHex = null;
-  var fg;
-  var stroke = null;
-  var shadowCol;
-  var topLift;
-  var botDepth;
+  var rr = isHero ? app.rpx(36) : app.rpx(28);
+  var padL = app.rpx(isHero ? 26 : opts.compact ? 22 : 24);
+  var iconR = Math.min(
+    bh * (isHero ? 0.28 : 0.26),
+    app.rpx(isHero ? 38 : 32)
+  );
+  var iconCx = x0 + padL + iconR;
+  var iconCy = cy;
+  var showSub =
+    opts.showSubtitle !== false && spec.subtitle && spec.subtitle.length > 0;
 
-  if (pillKind === 'friend') {
-    baseHex = th.homeFriend != null ? th.homeFriend : th.homeCards[1];
-    fg = '#FFFFFF';
-    shadowCol = th.btnShadow;
-    topLift = 0.2;
-    botDepth = 0.14;
-  } else if (pillKind === 'pve') {
-    baseHex = th.homePve != null ? th.homePve : th.homeCards[0];
-    fg = '#FFFFFF';
-    shadowCol = th.btnShadow;
-    topLift = 0.14;
-    botDepth = 0.26;
-  } else {
-    baseHex = th.btnGhostFill;
-    fg = th.btnGhostText;
-    stroke = th.btnGhostStroke;
-    shadowCol = 'rgba(0, 0, 0, 0.07)';
-    topLift = 0.38;
-    botDepth = 0.06;
-  }
-
-  var rgb = app.homePillHexToRgb(baseHex);
-  var fillStyle;
-  if (rgb) {
-    var c0 = app.homePillMixRgb(rgb, topLift, { r: 255, g: 255, b: 255 });
-    var c1 = app.homePillMixRgb(rgb, botDepth, { r: 0, g: 0, b: 0 });
-    var lg = app.ctx.createLinearGradient(x0, y0, x0, y0 + bh);
-    lg.addColorStop(0, app.homePillRgbCss(c0));
-    lg.addColorStop(1, app.homePillRgbCss(c1));
-    fillStyle = lg;
-  } else {
-    fillStyle = baseHex;
-  }
+  var depthBase = spec.grad[spec.grad.length - 1] || spec.grad[0] || '#cccccc';
+  var depthFill = app.homePillShadeHex(depthBase, isHero ? 0.14 : 0.1);
+  var depthOff = pressed ? app.rpx(1) : app.rpx(isHero ? 5 : 4);
 
   app.ctx.save();
   if (pressed) {
     app.ctx.translate(cx, cy);
-    app.ctx.scale(0.982, 0.982);
+    app.ctx.scale(0.978, 0.978);
     app.ctx.translate(-cx, -cy);
     app.ctx.translate(0, app.rpx(2));
   }
-  var blurBase = pillKind === 'random' ? app.rpx(10) : app.rpx(14);
-  var offY = app.rpx(pillKind === 'pve' ? 5 : 4);
-  if (pressed) {
-    blurBase = Math.max(app.rpx(4), blurBase * 0.55);
-    offY *= 0.45;
-  }
+
+  app.ctx.fillStyle = depthFill;
+  app.roundRect(x0, y0 + depthOff, bw, bh, rr);
+  app.ctx.fill();
+
   app.ctx.shadowColor = shadowCol;
-  app.ctx.shadowBlur = blurBase;
+  app.ctx.shadowBlur = pressed ? app.rpx(3) : app.rpx(isHero ? 14 : 10);
   app.ctx.shadowOffsetX = 0;
-  app.ctx.shadowOffsetY = offY;
-  app.ctx.fillStyle = fillStyle;
+  app.ctx.shadowOffsetY = pressed ? app.rpx(1) : app.rpx(isHero ? 5 : 4);
+  app.ctx.fillStyle =
+    isTile && spec.grad && spec.grad[0] ? spec.grad[0] : '#ffffff';
   app.roundRect(x0, y0, bw, bh, rr);
   app.ctx.fill();
   app.ctx.shadowBlur = 0;
@@ -2240,51 +2379,233 @@ app.drawHomeReferencePill = function(cx, cy, bw, bh, label, pillKind, th, presse
   app.ctx.save();
   app.roundRect(x0, y0, bw, bh, rr);
   app.ctx.clip();
-  var gh = bh * (pillKind === 'random' ? 0.52 : 0.48);
-  var gl = app.ctx.createLinearGradient(x0, y0, x0, y0 + gh);
-  if (pillKind === 'random') {
-    gl.addColorStop(0, 'rgba(255,255,255,0.5)');
-    gl.addColorStop(0.55, 'rgba(255,255,255,0.12)');
-    gl.addColorStop(1, 'rgba(255,255,255,0)');
+  var bg;
+  if (isHero && spec.gradDir === 'h') {
+    bg = app.ctx.createLinearGradient(x0, y0, x0 + bw, y0);
   } else {
-    gl.addColorStop(0, 'rgba(255,255,255,0.26)');
-    gl.addColorStop(0.5, 'rgba(255,255,255,0.08)');
-    gl.addColorStop(1, 'rgba(255,255,255,0)');
+    bg = app.ctx.createLinearGradient(x0, y0, x0, y0 + bh);
   }
-  app.ctx.fillStyle = gl;
-  app.ctx.fillRect(x0, y0, bw, gh);
+  var gi;
+  for (gi = 0; gi < spec.grad.length; gi++) {
+    bg.addColorStop(
+      spec.grad.length === 1 ? 0 : gi / (spec.grad.length - 1),
+      spec.grad[gi]
+    );
+  }
+  app.ctx.fillStyle = bg;
+  app.ctx.fillRect(x0, y0, bw, bh);
+
+  var sheen = app.ctx.createLinearGradient(x0, y0, x0, y0 + bh * 0.55);
+  sheen.addColorStop(0, 'rgba(255,255,255,' + (isHero ? 0.32 : isTile ? 0.16 : 0.2) + ')');
+  sheen.addColorStop(0.45, 'rgba(255,255,255,' + (isHero ? 0.08 : 0.03) + ')');
+  sheen.addColorStop(1, 'rgba(255,255,255,0)');
+  app.ctx.fillStyle = sheen;
+  app.ctx.fillRect(x0, y0, bw, bh * 0.55);
+
+  var innerShadow = app.ctx.createLinearGradient(x0, y0 + bh * 0.55, x0, y0 + bh);
+  innerShadow.addColorStop(0, 'rgba(0,0,0,0)');
+  innerShadow.addColorStop(1, 'rgba(0,0,0,' + (isHero ? 0.07 : 0.05) + ')');
+  app.ctx.fillStyle = innerShadow;
+  app.ctx.fillRect(x0, y0 + bh * 0.55, bw, bh * 0.45);
   app.ctx.restore();
 
-  if (stroke) {
-    app.ctx.strokeStyle = stroke;
+  if (spec.border) {
+    app.ctx.strokeStyle = spec.border;
     app.ctx.lineWidth = Math.max(1, app.rpx(1.5));
-    app.roundRect(x0, y0, bw, bh, rr);
-    app.ctx.stroke();
-  } else {
-    app.ctx.strokeStyle = 'rgba(255, 255, 255, 0.38)';
-    app.ctx.lineWidth = Math.max(1, app.rpx(1));
     app.roundRect(x0 + 0.5, y0 + 0.5, bw - 1, bh - 1, rr - 0.5);
     app.ctx.stroke();
   }
 
-  app.ctx.font =
-    '600 ' +
-    app.rpx(36) +
-    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
-  app.ctx.fillStyle = fg;
-  app.ctx.textAlign = 'center';
+  app.ctx.save();
+  app.roundRect(x0 + app.rpx(2), y0 + app.rpx(2), bw - app.rpx(4), bh - app.rpx(4), rr - app.rpx(2));
+  app.ctx.clip();
+  app.ctx.strokeStyle = 'rgba(255,255,255,' + (isHero ? 0.42 : 0.28) + ')';
+  app.ctx.lineWidth = Math.max(1, app.rpx(1));
+  app.ctx.beginPath();
+  app.ctx.moveTo(app.snapPx(x0 + rr * 0.5), app.snapPx(y0 + app.rpx(1.5)));
+  app.ctx.lineTo(app.snapPx(x0 + bw - rr * 0.5), app.snapPx(y0 + app.rpx(1.5)));
+  app.ctx.stroke();
+  app.ctx.restore();
+
+  if (spec.emoji) {
+    app.ctx.save();
+    app.ctx.shadowColor = 'rgba(0,0,0,0.08)';
+    app.ctx.shadowBlur = app.rpx(4);
+    app.ctx.shadowOffsetY = app.rpx(2);
+    var iconGrad = app.ctx.createLinearGradient(
+      iconCx,
+      iconCy - iconR,
+      iconCx,
+      iconCy + iconR
+    );
+    iconGrad.addColorStop(0, 'rgba(255,255,255,0.72)');
+    iconGrad.addColorStop(0.45, spec.iconBg || 'rgba(255,255,255,0.65)');
+    iconGrad.addColorStop(1, spec.iconBgDark || 'rgba(0,0,0,0.06)');
+    app.ctx.fillStyle = iconGrad;
+    app.ctx.beginPath();
+    app.ctx.arc(iconCx, iconCy, iconR, 0, Math.PI * 2);
+    app.ctx.fill();
+    app.ctx.shadowBlur = 0;
+    app.ctx.shadowOffsetY = 0;
+    app.ctx.strokeStyle = isHero
+      ? 'rgba(255,255,255,0.55)'
+      : 'rgba(255,255,255,0.38)';
+    app.ctx.lineWidth = Math.max(1, app.rpx(1));
+    app.ctx.stroke();
+    app.ctx.font =
+      app.rpx(isHero ? 38 : 32) +
+      'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+    app.ctx.textAlign = 'center';
+    app.ctx.textBaseline = 'middle';
+    app.ctx.fillText(spec.emoji, app.snapPx(iconCx), app.snapPx(iconCy + app.rpx(1)));
+    app.ctx.restore();
+  }
+
+  var textX = spec.emoji ? iconCx + iconR + app.rpx(18) : cx;
+  var titleY = showSub ? cy - app.rpx(isHero ? 18 : 14) : cy;
+  app.ctx.textAlign = spec.emoji ? 'left' : 'center';
   app.ctx.textBaseline = 'middle';
-  app.ctx.fillText(label, app.snapPx(cx), app.snapPx(cy));
+  app.ctx.font =
+    '700 ' +
+    app.rpx(isHero ? 34 : 28) +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  app.ctx.fillStyle = spec.fg || th.title;
+  app.ctx.fillText(label, app.snapPx(textX), app.snapPx(titleY));
+
+  if (showSub) {
+    app.ctx.font =
+      '500 ' +
+      app.rpx(isHero ? 22 : 20) +
+      'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+    app.ctx.fillStyle = spec.subFg || th.subtitle;
+    app.ctx.fillText(
+      spec.subtitle,
+      app.snapPx(textX),
+      app.snapPx(cy + app.rpx(isHero ? 20 : 16))
+    );
+  }
+
+  if (spec.badge && kind === 'random') {
+    var badgeW = app.rpx(68);
+    var badgeH = app.rpx(32);
+    var bx = x0 + bw - badgeW - app.rpx(14);
+    var by = y0 + app.rpx(12);
+    app.ctx.save();
+    app.ctx.fillStyle = 'rgba(0,0,0,0.06)';
+    app.roundRect(bx, by + app.rpx(2), badgeW, badgeH, badgeH / 2);
+    app.ctx.fill();
+    var badgeGrad = app.ctx.createLinearGradient(bx, by, bx, by + badgeH);
+    badgeGrad.addColorStop(0, 'rgba(255,255,255,0.96)');
+    badgeGrad.addColorStop(1, 'rgba(255,248,242,0.88)');
+    app.ctx.fillStyle = badgeGrad;
+    app.ctx.shadowColor = 'rgba(0,0,0,0.08)';
+    app.ctx.shadowBlur = app.rpx(4);
+    app.ctx.shadowOffsetY = app.rpx(2);
+    app.roundRect(bx, by, badgeW, badgeH, badgeH / 2);
+    app.ctx.fill();
+    app.ctx.shadowBlur = 0;
+    app.ctx.font =
+      '700 ' + app.rpx(20) + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
+    app.ctx.fillStyle = spec.badgeFg || '#D64545';
+    app.ctx.textAlign = 'center';
+    app.ctx.textBaseline = 'middle';
+    app.ctx.fillText(
+      spec.badge,
+      app.snapPx(bx + badgeW / 2),
+      app.snapPx(by + badgeH / 2)
+    );
+    app.ctx.restore();
+  }
+
   if (pressed) {
     app.ctx.save();
     app.roundRect(x0, y0, bw, bh, rr);
     app.ctx.clip();
-    app.ctx.fillStyle = 'rgba(0, 0, 0, 0.11)';
+    app.ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
     app.ctx.fillRect(x0, y0, bw, bh);
     app.ctx.restore();
   }
   app.ctx.restore();
-}
+};
+
+/** @deprecated 使用 drawHomeActionCard */
+app.drawHomeReferencePill = function(cx, cy, bw, bh, label, pillKind, th, pressed) {
+  app.drawHomeActionCard(cx, cy, bw, bh, label, pillKind, th, pressed, {
+    compact: bw < app.rpx(320),
+    showSubtitle: pillKind === 'random' || bw >= app.rpx(300)
+  });
+};
+
+/**
+ * 旧版配色回退（homeActions 缺失时）
+ */
+app.getHomePillStyle = function(pillKind, th) {
+  var kind = pillKind;
+  if (kind === 'room_create' || kind === 'pvp') {
+    kind = 'friend';
+  } else if (kind === 'room_join') {
+    kind = 'join';
+  }
+  if (kind === 'friend') {
+    return {
+      mode: 'solid',
+      baseHex: th.homeFriend != null ? th.homeFriend : th.homeCards[1],
+      fg: '#FFFFFF',
+      shadowCol: th.btnShadow,
+      topLift: 0.2,
+      botDepth: 0.14
+    };
+  }
+  if (kind === 'join') {
+    return {
+      mode: 'solid',
+      baseHex:
+        th.homeJoin != null
+          ? th.homeJoin
+          : th.homeCards && th.homeCards[2]
+            ? th.homeCards[2]
+            : th.homeFriend,
+      fg: '#FFFFFF',
+      shadowCol: th.btnShadow,
+      topLift: 0.18,
+      botDepth: 0.16
+    };
+  }
+  if (kind === 'pve') {
+    return {
+      mode: 'solid',
+      baseHex: th.homePve != null ? th.homePve : th.homeCards[0],
+      fg: '#FFFFFF',
+      shadowCol: th.btnShadow,
+      topLift: 0.14,
+      botDepth: 0.26
+    };
+  }
+  if (kind === 'random') {
+    var rg =
+      th.homeRandom && th.homeRandom.length >= 2
+        ? th.homeRandom
+        : ['#5CBF60', '#2E7D32'];
+    return {
+      mode: 'gradient',
+      gradTop: rg[0],
+      gradBot: rg[1],
+      fg: '#FFFFFF',
+      shadowCol: th.btnShadow || 'rgba(40, 100, 50, 0.22)',
+      topLift: 0.12,
+      botDepth: 0.08
+    };
+  }
+  return {
+    mode: 'ghost',
+    baseHex: th.btnGhostFill,
+    fg: th.btnGhostText,
+    stroke: th.btnGhostStroke,
+    shadowCol: 'rgba(0, 0, 0, 0.06)',
+    topLift: 0.32,
+    botDepth: 0.04
+  };
+};
 
 /** 顶栏扬声器（线框），size 为 48rpx 量级边长 */
 app.drawHomeSpeakerGlyph = function(cx, cy, color, size) {
@@ -2435,8 +2756,6 @@ app.drawHomeDockIconSkin = function(cx, cy, s, stroke) {
   app.ctx.restore();
 }
 
-/** @deprecated 深色主题已不再绘制足下光台，保留空函数以免旧引用报错 */
-app.drawCyberpunkHomeMascotPedestal = function() {};
 app.drawHomeBottomDock = function(hl, th) {
   var y0 = hl.bottomNavTop;
   var h = hl.bottomNavH;
@@ -2448,10 +2767,8 @@ app.drawHomeBottomDock = function(hl, th) {
     dockFill = 'rgba(241, 247, 245, 0.94)';
   } else if (th.id === 'ink') {
     dockFill = 'rgba(255, 248, 238, 0.82)';
-  } else if (th.id === 'cyberpunk') {
-    dockFill = 'rgba(24, 28, 34, 0.97)';
   } else {
-    dockFill = 'rgba(255, 236, 218, 0.93)';
+    dockFill = 'rgba(255, 252, 248, 0.96)';
   }
   app.ctx.fillStyle = dockFill;
   app.ctx.fillRect(0, y0, app.W, app.H - y0);
@@ -2464,10 +2781,6 @@ app.drawHomeBottomDock = function(hl, th) {
     topLine.addColorStop(0, 'rgba(28, 58, 70, 0)');
     topLine.addColorStop(0.5, 'rgba(28, 58, 70, 0.1)');
     topLine.addColorStop(1, 'rgba(28, 58, 70, 0)');
-  } else if (th.id === 'cyberpunk') {
-    topLine.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    topLine.addColorStop(0.5, 'rgba(255, 255, 255, 0.1)');
-    topLine.addColorStop(1, 'rgba(255, 255, 255, 0)');
   } else {
     topLine.addColorStop(0, 'rgba(90, 72, 58, 0)');
     topLine.addColorStop(0.5, 'rgba(90, 72, 58, 0.12)');
@@ -2557,43 +2870,79 @@ app.drawHomeCopyrightBar = function(hl, th) {
     app.rpx(21) +
     'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
   app.ctx.fillStyle = th.muted;
-  app.ctx.globalAlpha =
-    th.id === 'classic' ? 1 : th.id === 'cyberpunk' ? 0.82 : 0.72;
+  app.ctx.globalAlpha = th.id === 'classic' ? 1 : 0.72;
   app.ctx.fillText('© 团团五子棋', app.snapPx(app.W / 2), app.snapPx(hl.footerY));
   app.ctx.globalAlpha = 1;
   app.ctx.restore();
 }
 
 /**
- * 主内容区（750rpx 稿）：IP → 主按钮 → 底部功能区 + 版权。
- * 功能区与版权整体贴安全区底部；主按钮略收紧间距、底部 Dock 略加高以平衡标签行。
+ * 首页主按钮网格尺寸（2×2 tile、hero 宽），供子页复用同一套视觉规格。
  */
-app.getHomeLayout = function() {
-  var nav = app.getHomeNavBarLayout();
+app.getHomeActionGridMetrics = function() {
   var cx =
     app.sys.safeArea &&
     app.sys.safeArea.width != null &&
     app.sys.safeArea.left != null
       ? app.sys.safeArea.left + app.sys.safeArea.width * 0.5
       : app.W / 2;
-  var btnW = app.rpx(668);
-  var btnH = app.rpx(116);
-  var btnGap = app.rpx(36);
-  var ipGap = app.rpx(40);
-  var ipBlockH = app.rpx(232);
+  var btnW = Math.min(app.rpx(668), app.W - app.rpx(48));
+  var btnH = app.rpx(128);
+  var heroH = app.rpx(136);
+  var btnGap = app.rpx(28);
+  var gridGap = app.rpx(24);
+  var gridCellW = (btnW - gridGap) * 0.5;
+  var gridCellH = btnH;
+  var cxGridL = cx - gridCellW / 2 - gridGap / 2;
+  var cxGridR = cx + gridCellW / 2 + gridGap / 2;
+  return {
+    cx: cx,
+    btnW: btnW,
+    btnH: btnH,
+    heroH: heroH,
+    btnGap: btnGap,
+    gridGap: gridGap,
+    gridCellW: gridCellW,
+    gridCellH: gridCellH,
+    cxGridL: cxGridL,
+    cxGridR: cxGridR
+  };
+};
+
+app.hitHomeGridCell = function(clientX, clientY, cx, cy, cw, ch) {
+  return (
+    Math.abs(clientX - cx) <= cw / 2 + 4 &&
+    Math.abs(clientY - cy) <= ch / 2 + 6
+  );
+};
+
+/**
+ * 主内容区（750rpx 稿）：IP → 主按钮 → 底部功能区 + 版权。
+ * 主按钮紧跟吉祥物下方，加大卡片间距与内边距，避免视觉拥挤。
+ */
+app.getHomeLayout = function() {
+  var nav = app.getHomeNavBarLayout();
+  var g = app.getHomeActionGridMetrics();
+  var cx = g.cx;
+  var btnW = g.btnW;
+  var btnH = g.btnH;
+  var heroH = g.heroH;
+  var btnGap = g.btnGap;
+  var gridGap = g.gridGap;
+  var gridCellW = g.gridCellW;
+  var gridCellH = g.gridCellH;
+  var cxGridL = g.cxGridL;
+  var cxGridR = g.cxGridR;
+  var ipGap = app.rpx(32);
+  var ipBlockH = app.rpx(210);
   var ipTop = nav.navBottom + ipGap;
   var mascotCy = ipTop + ipBlockH * 0.5;
   var mascotScale = app.rpx(140) / 92;
-  var btnTopGap = app.rpx(48);
-  /** 人机 + 对局复盘入口并排一行，避免第四颗全宽主按钮把 Dock/吉祥物顶出屏外 */
-  var btnPairGap = app.rpx(20);
-  var halfBtnW = (btnW - btnPairGap) * 0.5;
-  var yRandom = ipTop + ipBlockH + btnTopGap + btnH / 2;
-  var yFriend = yRandom + btnH / 2 + btnGap + btnH / 2;
-  var yPvePair = yFriend + btnH / 2 + btnGap + btnH / 2;
-  var cxPve = cx - btnW * 0.25 - btnPairGap * 0.25;
-  var cxDaily = cx + btnW * 0.25 + btnPairGap * 0.25;
-  var dockTopFromFlow = yPvePair + btnH / 2 + app.rpx(28) + app.rpx(36);
+  var btnTopGap = app.rpx(40);
+  var yRandom = ipTop + ipBlockH + btnTopGap + heroH / 2;
+  var yGridRow1 = yRandom + heroH / 2 + btnGap + gridCellH / 2;
+  var yGridRow2 = yGridRow1 + gridCellH + gridGap;
+  var dockTopFromFlow = yGridRow2 + gridCellH / 2 + app.rpx(32);
   var bottomNavH = app.rpx(216);
   var footerGap = app.rpx(14);
   var copyrightHalf = app.rpx(13);
@@ -2612,17 +2961,27 @@ app.getHomeLayout = function() {
     cx: cx,
     btnW: btnW,
     btnH: btnH,
+    heroH: heroH,
     gap: btnGap,
     mascotCx: cx,
     mascotCy: mascotCy,
     mascotScale: mascotScale,
     yRandom: yRandom,
-    yFriend: yFriend,
-    yPvePair: yPvePair,
-    cxPve: cxPve,
-    cxDaily: cxDaily,
-    halfBtnW: halfBtnW,
-    btnPairGap: btnPairGap,
+    yGridRow1: yGridRow1,
+    yGridRow2: yGridRow2,
+    yRoomPair: yGridRow1,
+    yPvePair: yGridRow2,
+    cxGridL: cxGridL,
+    cxGridR: cxGridR,
+    cxCreate: cxGridL,
+    cxJoin: cxGridR,
+    cxPve: cxGridL,
+    cxDaily: cxGridR,
+    gridCellW: gridCellW,
+    gridCellH: gridCellH,
+    gridGap: gridGap,
+    halfBtnW: gridCellW,
+    btnPairGap: gridGap,
     bottomNavTop: dockTop,
     bottomNavH: bottomNavH,
     footerY: footerY,

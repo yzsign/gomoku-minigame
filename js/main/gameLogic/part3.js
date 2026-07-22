@@ -392,6 +392,365 @@ app.drawCheckinModalOverlay = function(th) {
   app.ctx.restore();
 }
 
+app.sanitizeJoinRoomDraft = function(raw) {
+  return String(raw != null ? raw : '')
+    .replace(/\D/g, '')
+    .slice(0, 6);
+};
+
+app.getJoinRoomModalLayout = function() {
+  var cx =
+    app.sys.safeArea &&
+    app.sys.safeArea.width != null &&
+    app.sys.safeArea.left != null
+      ? app.sys.safeArea.left + app.sys.safeArea.width * 0.5
+      : app.W / 2;
+  var w = Math.min(app.rpx(580), app.W - app.rpx(56));
+  var pad = app.rpx(32);
+  var innerW = w - pad * 2;
+  var btnH = app.rpx(96);
+  var btnGap = app.rpx(16);
+  var inputH = app.rpx(88);
+  var titleBlock = app.rpx(44);
+  var hintBlock = app.rpx(32);
+  var sectionGap = app.rpx(22);
+  var h =
+    pad +
+    titleBlock +
+    hintBlock +
+    sectionGap +
+    inputH +
+    sectionGap +
+    btnH +
+    btnGap +
+    btnH +
+    pad;
+  var cy = app.H * 0.44;
+  var y0 = cy - h / 2;
+  var titleY = y0 + pad + titleBlock * 0.5;
+  var hintY = y0 + pad + titleBlock + hintBlock * 0.5;
+  var inputCy =
+    y0 + pad + titleBlock + hintBlock + sectionGap + inputH * 0.5;
+  var yConfirm =
+    y0 +
+    pad +
+    titleBlock +
+    hintBlock +
+    sectionGap +
+    inputH +
+    sectionGap +
+    btnH * 0.5;
+  var yCancel = yConfirm + btnH * 0.5 + btnGap + btnH * 0.5;
+  return {
+    cx: cx,
+    cy: cy,
+    w: w,
+    h: h,
+    r: app.rpx(28),
+    pad: pad,
+    innerW: innerW,
+    inputCy: inputCy,
+    inputH: inputH,
+    yConfirm: yConfirm,
+    yCancel: yCancel,
+    btnH: btnH,
+    btnW: innerW,
+    titleY: titleY,
+    hintY: hintY,
+    x0: cx - w / 2,
+    y0: y0
+  };
+};
+
+app.hitJoinRoomModalPanel = function(clientX, clientY) {
+  if (!app.joinRoomModalVisible) {
+    return false;
+  }
+  var L = app.getJoinRoomModalLayout();
+  return (
+    clientX >= L.x0 &&
+    clientX <= L.x0 + L.w &&
+    clientY >= L.y0 &&
+    clientY <= L.y0 + L.h
+  );
+};
+
+app.hitJoinRoomModalInput = function(clientX, clientY) {
+  if (!app.joinRoomModalVisible) {
+    return false;
+  }
+  var L = app.getJoinRoomModalLayout();
+  return app.hitHomeGridCell(
+    clientX,
+    clientY,
+    L.cx,
+    L.inputCy,
+    L.innerW,
+    L.inputH
+  );
+};
+
+app.hitJoinRoomModalConfirm = function(clientX, clientY) {
+  if (!app.joinRoomModalVisible) {
+    return false;
+  }
+  var L = app.getJoinRoomModalLayout();
+  return app.hitHomeGridCell(
+    clientX,
+    clientY,
+    L.cx,
+    L.yConfirm,
+    L.btnW,
+    L.btnH
+  );
+};
+
+app.hitJoinRoomModalCancel = function(clientX, clientY) {
+  if (!app.joinRoomModalVisible) {
+    return false;
+  }
+  var L = app.getJoinRoomModalLayout();
+  return app.hitHomeGridCell(
+    clientX,
+    clientY,
+    L.cx,
+    L.yCancel,
+    L.btnW,
+    L.btnH
+  );
+};
+
+app.dismissJoinRoomKeyboard = function() {
+  if (typeof app._joinRoomKeyboardCleanup === 'function') {
+    try {
+      app._joinRoomKeyboardCleanup();
+    } catch (eJk) {}
+    app._joinRoomKeyboardCleanup = null;
+  }
+  app.joinRoomInputFocused = false;
+  if (typeof wx !== 'undefined' && typeof wx.hideKeyboard === 'function') {
+    try {
+      wx.hideKeyboard({});
+    } catch (eH) {}
+  }
+};
+
+app.closeJoinRoomModal = function() {
+  app.dismissJoinRoomKeyboard();
+  app.joinRoomModalVisible = false;
+  app.joinRoomDraft = '';
+  app.joinRoomPressedButton = null;
+};
+
+app.openJoinRoomModal = function() {
+  app.dismissJoinRoomKeyboard();
+  app.joinRoomDraft = '';
+  app.joinRoomPressedButton = null;
+  app.joinRoomModalVisible = true;
+  app.draw();
+  if (typeof app.openJoinRoomKeyboard === 'function') {
+    app.openJoinRoomKeyboard();
+  }
+};
+
+app.submitJoinRoomFromModal = function() {
+  var rid = app.sanitizeJoinRoomDraft(app.joinRoomDraft);
+  app.joinRoomDraft = rid;
+  if (!rid) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '请输入房号', icon: 'none' });
+    }
+    return;
+  }
+  app.closeJoinRoomModal();
+  app.draw();
+  if (typeof app.joinOnlineAsGuest === 'function') {
+    app.joinOnlineAsGuest(rid, { fromManualRoomCode: true });
+  }
+};
+
+app.openJoinRoomKeyboard = function() {
+  if (typeof wx === 'undefined' || typeof wx.showKeyboard !== 'function') {
+    return;
+  }
+  app.dismissJoinRoomKeyboard();
+  app.joinRoomInputFocused = true;
+  var draft0 = app.sanitizeJoinRoomDraft(app.joinRoomDraft);
+  app.joinRoomDraft = draft0;
+
+  var kbCleaned = false;
+  function cleanup() {
+    if (kbCleaned) {
+      return;
+    }
+    kbCleaned = true;
+    try {
+      if (typeof wx.offKeyboardInput === 'function') {
+        wx.offKeyboardInput(onInput);
+      }
+    } catch (e1) {}
+    try {
+      if (typeof wx.offKeyboardConfirm === 'function') {
+        wx.offKeyboardConfirm(onConfirm);
+      }
+    } catch (e2) {}
+    try {
+      if (typeof wx.offKeyboardComplete === 'function') {
+        wx.offKeyboardComplete(onComplete);
+      }
+    } catch (e3) {}
+    app._joinRoomKeyboardCleanup = null;
+    app.joinRoomInputFocused = false;
+  }
+
+  function onInput(res) {
+    app.joinRoomDraft = app.sanitizeJoinRoomDraft(
+      res && res.value != null ? res.value : ''
+    );
+    app.draw();
+  }
+
+  function onConfirm() {
+    app.submitJoinRoomFromModal();
+  }
+
+  function onComplete() {
+    cleanup();
+    app.draw();
+  }
+
+  app._joinRoomKeyboardCleanup = cleanup;
+  try {
+    if (typeof wx.onKeyboardInput === 'function') {
+      wx.onKeyboardInput(onInput);
+    }
+    if (typeof wx.onKeyboardConfirm === 'function') {
+      wx.onKeyboardConfirm(onConfirm);
+    }
+    if (typeof wx.onKeyboardComplete === 'function') {
+      wx.onKeyboardComplete(onComplete);
+    }
+  } catch (eBind) {
+    cleanup();
+    return;
+  }
+
+  wx.showKeyboard({
+    defaultValue: draft0,
+    maxLength: 6,
+    multiple: false,
+    confirmHold: false,
+    confirmType: 'done'
+  });
+};
+
+app.drawJoinRoomModalOverlay = function(th) {
+  if (!app.joinRoomModalVisible || app.screen !== 'home') {
+    return;
+  }
+  th = th || app.getCurrentTheme();
+  var L = app.getJoinRoomModalLayout();
+  var shellSpec = app.getHomeActionSpec('daily', th);
+  var x = L.x0;
+  var y = L.y0;
+
+  app.ctx.save();
+  app.ctx.fillStyle = 'rgba(0,0,0,0.52)';
+  app.ctx.fillRect(0, 0, app.W, app.H);
+
+  app.ctx.shadowColor = shellSpec.shadow || th.btnShadow || 'rgba(0,0,0,0.18)';
+  app.ctx.shadowBlur = app.rpx(32);
+  app.ctx.shadowOffsetY = app.rpx(12);
+  var shellG = app.ctx.createLinearGradient(x, y, x, y + L.h);
+  shellG.addColorStop(0, shellSpec.grad[0] || '#F8FCFD');
+  shellG.addColorStop(1, shellSpec.grad[shellSpec.grad.length - 1] || '#D8E8EE');
+  app.ctx.fillStyle = shellG;
+  app.roundRect(x, y, L.w, L.h, L.r);
+  app.ctx.fill();
+  app.ctx.shadowBlur = 0;
+  app.ctx.shadowOffsetY = 0;
+
+  if (shellSpec.border) {
+    app.ctx.strokeStyle = shellSpec.border;
+    app.ctx.lineWidth = Math.max(1, app.rpx(1.5));
+    app.roundRect(x + 0.5, y + 0.5, L.w - 1, L.h - 1, L.r - 0.5);
+    app.ctx.stroke();
+  }
+
+  app.ctx.textAlign = 'center';
+  app.ctx.textBaseline = 'middle';
+  app.ctx.font =
+    '700 ' +
+    app.rpx(34) +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  app.ctx.fillStyle = shellSpec.fg || th.title;
+  app.ctx.fillText('加入房间', app.snapPx(L.cx), app.snapPx(L.titleY));
+
+  app.ctx.font =
+    '500 ' +
+    app.rpx(24) +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  app.ctx.fillStyle = shellSpec.subFg || th.subtitle;
+  app.ctx.fillText('请输入6位数字房号', app.snapPx(L.cx), app.snapPx(L.hintY));
+
+  var ix = L.cx - L.innerW / 2;
+  var iy = L.inputCy - L.inputH / 2;
+  app.ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  app.roundRect(ix, iy, L.innerW, L.inputH, app.rpx(18));
+  app.ctx.fill();
+  app.ctx.strokeStyle = app.joinRoomInputFocused
+    ? th.btnPrimary || shellSpec.fg || th.title
+    : shellSpec.border || 'rgba(0,0,0,0.08)';
+  app.ctx.lineWidth = Math.max(1, app.rpx(app.joinRoomInputFocused ? 2 : 1.25));
+  app.roundRect(ix + 0.5, iy + 0.5, L.innerW - 1, L.inputH - 1, app.rpx(17));
+  app.ctx.stroke();
+
+  var draft = app.sanitizeJoinRoomDraft(app.joinRoomDraft);
+  var display = draft;
+  if (
+    display &&
+    typeof app.formatFriendRoomIdDisplay === 'function' &&
+    draft.length === 6
+  ) {
+    display = app.formatFriendRoomIdDisplay(draft);
+  }
+  app.ctx.font =
+    '600 ' +
+    app.rpx(display ? 36 : 28) +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  app.ctx.fillStyle = display ? shellSpec.fg || th.title : th.muted;
+  app.ctx.fillText(
+    display || '例如 123456',
+    app.snapPx(L.cx),
+    app.snapPx(L.inputCy)
+  );
+
+  app.drawHomeActionCard(
+    L.cx,
+    L.yConfirm,
+    L.btnW,
+    L.btnH,
+    '确定',
+    'pve',
+    th,
+    app.joinRoomPressedButton === 'confirm',
+    app.subHubTileOpts({ showSubtitle: true, subtitleOverride: '加入对局' })
+  );
+  app.drawHomeActionCard(
+    L.cx,
+    L.yCancel,
+    L.btnW,
+    L.btnH,
+    '取消',
+    'daily',
+    th,
+    app.joinRoomPressedButton === 'cancel',
+    app.subHubTileOpts()
+  );
+
+  app.ctx.restore();
+};
+
 app.drawRatingCardOverlay = function(th) {
   if (!app.ratingCardVisible || !app.ratingCardData) {
     if (typeof app.destroyRatingCardSyncProfileNativeBtn === 'function') {
@@ -1713,17 +2072,34 @@ app.hitThemeEntry = function(clientX, clientY) {
   );
 }
 
-app.getPveColorLayout = function() {
-  var btnW = Math.min(app.W - 48, 300);
-  var btnH = 54;
-  var cx = app.W / 2;
+app.getSubHubVerticalLayout = function(buttonCount) {
+  var g = app.getHomeActionGridMetrics();
+  var yFirst = app.H * 0.36;
+  var step = g.gridCellH + g.gridGap;
+  buttonCount = buttonCount || 1;
   return {
-    btnW: btnW,
-    btnH: btnH,
-    cx: cx,
-    yBlack: app.H * 0.4,
-    yWhite: app.H * 0.52,
-    backY: app.H * 0.66
+    cx: g.cx,
+    btnW: g.btnW,
+    btnH: g.gridCellH,
+    gap: g.gridGap,
+    step: step,
+    yFirst: yFirst,
+    backY: yFirst + step * buttonCount + g.btnGap + app.rpx(16)
+  };
+};
+
+app.getPveColorLayout = function() {
+  var L = app.getSubHubVerticalLayout(2);
+  return {
+    cx: L.cx,
+    btnW: L.btnW,
+    btnH: L.btnH,
+    gap: L.gap,
+    step: L.step,
+    yFirst: L.yFirst,
+    yBlack: L.yFirst,
+    yWhite: L.yFirst + L.step,
+    backY: L.backY
   };
 }
 
@@ -2619,6 +2995,10 @@ app.backToHome = function() {
   app.homeDrawerOpen = false;
   app.homePressedButton = null;
   app.homePressedDockCol = null;
+  app.subPagePressedButton = null;
+  if (typeof app.closeJoinRoomModal === 'function') {
+    app.closeJoinRoomModal();
+  }
   app.screen = 'home';
   app.draw();
 }
@@ -3695,6 +4075,8 @@ function resultOverlayTitlePack(app) {
           sub = '对方思考超时';
         } else if (app.onlineGameEndReason === 'RESIGN') {
           sub = '对方认输';
+        } else if (app.isCasualRoom) {
+          sub = '好友对战';
         }
       }
       titleColor = rs.win.title;
@@ -3716,6 +4098,8 @@ function resultOverlayTitlePack(app) {
           sub = '思考超时判负';
         } else if (app.onlineGameEndReason === 'RESIGN') {
           sub = '已认输';
+        } else if (app.isCasualRoom) {
+          sub = '好友对战';
         }
       }
       titleColor = rs.lose.title;
@@ -3725,6 +4109,8 @@ function resultOverlayTitlePack(app) {
       main = '和局';
       if (app.onlineGameEndReason === 'TIME_DRAW') {
         sub = '本局已超过30分钟';
+      } else if (app.isCasualRoom) {
+        sub = '好友对战';
       }
       titleColor = rs.draw.title;
       break;
@@ -3896,7 +4282,7 @@ function getResultOverlayRankLabel(app) {
  * @returns {number|null} 本局 change，无结算数据为 null
  */
 function getResultOverlayMyLadderDeltaNum(app) {
-  if (!app.isPvpOnline || app.onlineSpectatorMode) {
+  if (!app.isPvpOnline || app.onlineSpectatorMode || app.isCasualRoom) {
     return null;
   }
   var sr = app.lastSettleRating;
@@ -4399,6 +4785,9 @@ app.drawResultOverlay = function() {
 
   function eloLine(forBlack, onlineWhich) {
     if (app.isDailyPuzzle) {
+      return { elo: '--', delta: '', dNeg: false, dZero: true };
+    }
+    if (app.isCasualRoom) {
       return { elo: '--', delta: '', dNeg: false, dZero: true };
     }
     var sr = app.lastSettleRating;

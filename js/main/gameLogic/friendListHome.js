@@ -452,6 +452,13 @@ module.exports = function registerFriendListHome(app, deps) {
       }
     }
 
+    if (app.screen === 'friend_battle' && typeof app.getFriendBattleLayout === 'function') {
+      var fL = app.getFriendBattleLayout();
+      if (fL && typeof fL.backY === 'number') {
+        return fin(minYInset, fL.backY - 24 - r - m);
+      }
+    }
+
     return fin(minYInset, maxYSafe);
   }
 

@@ -40,7 +40,7 @@ app.setupShareMessage = function() {
           title:
             app.onlinePuzzleFriendRoom || app.onlineSpectatorMode
               ? '来下这盘残局 · 房号 ' + app.onlineRoomId
-              : '五子棋 房号 ' + app.onlineRoomId,
+              : '五子棋 · ' + app.onlineRoomId,
           query: 'roomId=' + app.onlineRoomId + '&online=1'
         };
       }

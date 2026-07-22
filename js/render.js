@@ -707,8 +707,6 @@ function drawBoard(ctx, layout, theme) {
         ? 'rgba(26, 52, 74, 0.34)'
         : theme.id === 'ink'
           ? 'rgba(42, 38, 34, 0.3)'
-          : theme.id === 'cyberpunk'
-            ? 'rgba(48, 56, 68, 0.5)'
           : 'rgba(0, 0, 0, 0.16)';
   ctx.lineWidth = 1;
   ctx.stroke();
@@ -740,8 +738,6 @@ function drawBoardCoordinateLabels(ctx, layout, theme) {
         ? 'rgba(26, 52, 74, 0.68)'
         : theme && theme.id === 'ink'
           ? 'rgba(42, 38, 34, 0.72)'
-          : theme && theme.id === 'cyberpunk'
-            ? 'rgba(175, 190, 208, 0.82)'
           : 'rgba(0, 0, 0, 0.55)';
   ctx.save();
   ctx.font =

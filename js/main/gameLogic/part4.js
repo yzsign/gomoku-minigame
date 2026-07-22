@@ -803,10 +803,6 @@ app.drawHomeContentBelowPieceSkinModal = function() {
       halo.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
       halo.addColorStop(0.45, 'rgba(175, 232, 236, 0.26)');
       halo.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    } else if (th.id === 'cyberpunk') {
-      halo.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
-      halo.addColorStop(0.48, 'rgba(255, 255, 255, 0.08)');
-      halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
     } else if (th.id === 'ink') {
       halo.addColorStop(0, 'rgba(255, 252, 245, 0.42)');
       halo.addColorStop(0.5, 'rgba(255, 220, 185, 0.14)');
@@ -828,45 +824,60 @@ app.drawHomeContentBelowPieceSkinModal = function() {
 
   app.drawHomeMascotAsset(hl.mascotCx, mascotDrawCy, mascotBox);
 
-  app.drawHomeReferencePill(
+  app.drawHomeActionCard(
     hl.cx,
     hl.yRandom,
     hl.btnW,
-    hl.btnH,
+    hl.heroH,
     '随机匹配',
     'random',
     th,
-    app.homePressedButton === 'random'
+    app.homePressedButton === 'random',
+    { showSubtitle: true }
   );
-  app.drawHomeReferencePill(
-    hl.cx,
-    hl.yFriend,
-    hl.btnW,
-    hl.btnH,
+  app.drawHomeActionCard(
+    hl.cxCreate,
+    hl.yGridRow1,
+    hl.gridCellW,
+    hl.gridCellH,
     '好友对战',
     'friend',
     th,
-    app.homePressedButton === 'pvp'
+    app.homePressedButton === 'room_create',
+    { compact: true, showSubtitle: true }
   );
-  app.drawHomeReferencePill(
+  app.drawHomeActionCard(
+    hl.cxJoin,
+    hl.yGridRow1,
+    hl.gridCellW,
+    hl.gridCellH,
+    '加入房间',
+    'join',
+    th,
+    app.homePressedButton === 'room_join',
+    { compact: true, showSubtitle: true }
+  );
+  app.drawHomeActionCard(
     hl.cxPve,
-    hl.yPvePair,
-    hl.halfBtnW,
-    hl.btnH,
+    hl.yGridRow2,
+    hl.gridCellW,
+    hl.gridCellH,
     '人机对战',
     'pve',
     th,
-    app.homePressedButton === 'pve'
+    app.homePressedButton === 'pve',
+    { compact: true, showSubtitle: true }
   );
-  app.drawHomeReferencePill(
+  app.drawHomeActionCard(
     hl.cxDaily,
-    hl.yPvePair,
-    hl.halfBtnW,
-    hl.btnH,
+    hl.yGridRow2,
+    hl.gridCellW,
+    hl.gridCellH,
     '对局复盘',
     'daily',
     th,
-    app.homePressedButton === 'daily'
+    app.homePressedButton === 'daily',
+    { compact: true, showSubtitle: true }
   );
 
   app.drawHomeBottomDock(hl, th);
@@ -877,6 +888,7 @@ app.drawHomeContentBelowPieceSkinModal = function() {
   app.drawThemeChrome(th);
   app.drawRatingCardOverlay(th);
   app.drawCheckinModalOverlay(th);
+  app.drawJoinRoomModalOverlay(th);
   if (typeof app.drawHomeFriendListFab === 'function') {
     app.drawHomeFriendListFab(th);
   }
@@ -1764,30 +1776,28 @@ app.openGameReviewEntry = function() {
 };
 
 /**
- * 与 {@link #getPveColorLayout} 同一套纵向比例：标题 0.18、副标题 0.26、主卡片 0.40 / 0.52、返回 0.66；
- * 三颗主按钮时第三颗与第二颗间距同黑白间距，返回略下移以免与卡片重叠。
+ * 子页竖向全宽按钮布局（与首页 tile 同高同色，无图标居中文案）。
  */
 app.getReviewHubLayout = function() {
-  var cl = app.getPveColorLayout();
   var hasData = !!(app.reviewHubData && app.reviewHubData.hasData);
-  var step = cl.yWhite - cl.yBlack;
-  var yThird = cl.yWhite + step;
+  var count = hasData ? 3 : 1;
+  var L = app.getSubHubVerticalLayout(count);
   return {
-    btnW: cl.btnW,
-    btnH: cl.btnH,
-    cx: cl.cx,
+    cx: L.cx,
+    btnW: L.btnW,
+    btnH: L.btnH,
+    step: L.step,
     hasData: hasData,
-    yContinue: hasData ? cl.yBlack : null,
-    yHistory: hasData ? cl.yWhite : cl.yBlack,
-    yClear: hasData ? yThird : null,
-    backY: hasData ? app.H * 0.72 : cl.backY
+    yFirst: L.yFirst,
+    yContinue: hasData ? L.yFirst : null,
+    yHistory: hasData ? L.yFirst + L.step : L.yFirst,
+    yClear: hasData ? L.yFirst + L.step * 2 : null,
+    backY: L.backY
   };
 };
 
 app.hitReviewHubButton = function(clientX, clientY) {
   var L = app.getReviewHubLayout();
-  var bw = L.btnW / 2 + 12;
-  var bh = L.btnH / 2 + 12;
   if (
     Math.abs(clientX - L.cx) <= 90 &&
     Math.abs(clientY - L.backY) <= 24
@@ -1796,19 +1806,40 @@ app.hitReviewHubButton = function(clientX, clientY) {
   }
   if (L.hasData && L.yContinue != null) {
     if (
-      Math.abs(clientX - L.cx) <= bw &&
-      Math.abs(clientY - L.yContinue) <= bh
+      app.hitHomeGridCell(
+        clientX,
+        clientY,
+        L.cx,
+        L.yContinue,
+        L.btnW,
+        L.btnH
+      )
     ) {
       return 'continue';
     }
   }
-  if (Math.abs(clientX - L.cx) <= bw && Math.abs(clientY - L.yHistory) <= bh) {
+  if (
+    app.hitHomeGridCell(
+      clientX,
+      clientY,
+      L.cx,
+      L.yHistory,
+      L.btnW,
+      L.btnH
+    )
+  ) {
     return 'history';
   }
   if (L.hasData && L.yClear != null) {
     if (
-      Math.abs(clientX - L.cx) <= bw &&
-      Math.abs(clientY - L.yClear) <= bh
+      app.hitHomeGridCell(
+        clientX,
+        clientY,
+        L.cx,
+        L.yClear,
+        L.btnW,
+        L.btnH
+      )
     ) {
       return 'clear';
     }
@@ -1818,6 +1849,13 @@ app.hitReviewHubButton = function(clientX, clientY) {
 
 app.handleReviewHubTouchStart = function(clientX, clientY) {
   var h = app.hitReviewHubButton(clientX, clientY);
+  app.handleReviewHubAction(h);
+};
+
+app.handleReviewHubAction = function(h) {
+  if (!h) {
+    return;
+  }
   if (h === 'back') {
     app.reviewHubData = null;
     app.screen = 'home';
@@ -1869,9 +1907,6 @@ app.drawReviewHubScreen = function() {
 
   var L = app.getReviewHubLayout();
   var th = app.getCurrentTheme();
-  var cards = th.homeCards || ['#5a7a8c', '#8b6b7a'];
-  var card0 = cards[0];
-  var card1 = cards.length > 1 ? cards[1] : card0;
 
   app.ctx.save();
   app.ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
@@ -1885,40 +1920,60 @@ app.drawReviewHubScreen = function() {
     : '暂无云端存档，可从战绩载入棋谱';
   render.drawText(app.ctx, subMsg, app.W / 2, app.H * 0.26, 15, th.subtitle);
 
-  if (L.hasData && L.yContinue != null) {
-    app.drawMacaronCard(
-      '继续上次复盘',
+  if (L.hasData) {
+    app.drawHomeActionCard(
       L.cx,
       L.yContinue,
       L.btnW,
       L.btnH,
-      card0,
-      false,
-      'bear'
+      '继续复盘',
+      'daily',
+      th,
+      app.subPagePressedButton === 'review_continue',
+      app.subHubTileOpts({
+        showSubtitle: true,
+        subtitleOverride: '载入云端存档'
+      })
     );
-  }
-  app.drawMacaronCard(
-    '从战绩选择棋谱',
-    L.cx,
-    L.yHistory,
-    L.btnW,
-    L.btnH,
-    L.hasData ? card1 : card0,
-    false,
-    L.hasData ? 'heart' : 'bear'
-  );
-  if (L.hasData && L.yClear != null) {
-    var clearFill =
-      cards.length > 2 ? cards[2] : 'rgba(120, 110, 100, 0.92)';
-    app.drawMacaronCard(
-      '清除云端复盘存档',
+    app.drawHomeActionCard(
+      L.cx,
+      L.yHistory,
+      L.btnW,
+      L.btnH,
+      '从战绩选择棋谱',
+      'pve',
+      th,
+      app.subPagePressedButton === 'review_history',
+      app.subHubTileOpts({
+        showSubtitle: true,
+        subtitleOverride: '浏览历史对局'
+      })
+    );
+    app.drawHomeActionCard(
       L.cx,
       L.yClear,
       L.btnW,
       L.btnH,
-      clearFill,
-      false,
-      null
+      '清除云端复盘存档',
+      'friend',
+      th,
+      app.subPagePressedButton === 'review_clear',
+      app.subHubTileOpts()
+    );
+  } else {
+    app.drawHomeActionCard(
+      L.cx,
+      L.yHistory,
+      L.btnW,
+      L.btnH,
+      '从战绩选择棋谱',
+      'daily',
+      th,
+      app.subPagePressedButton === 'review_history',
+      app.subHubTileOpts({
+        showSubtitle: true,
+        subtitleOverride: '浏览历史对局'
+      })
     );
   }
 
@@ -2412,11 +2467,117 @@ app.drawHistory = function() {
   app.drawRatingCardOverlay(th);
 }
 
+app.getFriendBattleLayout = function() {
+  var L = app.getSubHubVerticalLayout(2);
+  return {
+    cx: L.cx,
+    btnW: L.btnW,
+    btnH: L.btnH,
+    step: L.step,
+    yFirst: L.yFirst,
+    yBlack: L.yFirst,
+    yWhite: L.yFirst + L.step,
+    backY: L.backY
+  };
+};
+
+app.hitFriendBattleButton = function(clientX, clientY) {
+  var cl = app.getFriendBattleLayout();
+  if (
+    app.hitHomeGridCell(
+      clientX,
+      clientY,
+      cl.cx,
+      cl.yBlack,
+      cl.btnW,
+      cl.btnH
+    )
+  ) {
+    return 'invite';
+  }
+  if (
+    app.hitHomeGridCell(
+      clientX,
+      clientY,
+      cl.cx,
+      cl.yWhite,
+      cl.btnW,
+      cl.btnH
+    )
+  ) {
+    return 'create';
+  }
+  if (Math.abs(clientX - cl.cx) <= 90 && Math.abs(clientY - cl.backY) <= 24) {
+    return 'back';
+  }
+  return null;
+};
+
+app.openFriendBattleHub = function() {
+  app.homeDrawerOpen = false;
+  app.screen = 'friend_battle';
+  app.draw();
+};
+
+app.drawFriendBattleHub = function() {
+  app.fillAmbientBackground();
+
+  var cl = app.getFriendBattleLayout();
+  var th = app.getCurrentTheme();
+
+  app.ctx.save();
+  app.ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
+  app.ctx.shadowBlur = 10;
+  app.ctx.shadowOffsetY = 2;
+  render.drawText(app.ctx, '好友对战', app.W / 2, app.H * 0.18, 30, th.title);
+  app.ctx.restore();
+  render.drawText(
+    app.ctx,
+    '邀请微信好友或创建房间等待加入',
+    app.W / 2,
+    app.H * 0.26,
+    15,
+    th.subtitle
+  );
+
+  app.drawHomeActionCard(
+    cl.cx,
+    cl.yBlack,
+    cl.btnW,
+    cl.btnH,
+    '邀请微信好友',
+    'pve',
+    th,
+    app.subPagePressedButton === 'fb_invite',
+    app.subHubTileOpts({ showSubtitle: true, subtitleOverride: '微信分享' })
+  );
+  app.drawHomeActionCard(
+    cl.cx,
+    cl.yWhite,
+    cl.btnW,
+    cl.btnH,
+    '创建房间',
+    'daily',
+    th,
+    app.subPagePressedButton === 'fb_create',
+    app.subHubTileOpts({ showSubtitle: true, subtitleOverride: '等待好友加入' })
+  );
+
+  app.ctx.font =
+    '15px "PingFang SC","Hiragino Sans GB",sans-serif';
+  app.ctx.fillStyle = th.muted;
+  app.ctx.textAlign = 'center';
+  app.ctx.textBaseline = 'middle';
+  app.ctx.fillText('返回', app.snapPx(cl.cx), app.snapPx(cl.backY));
+  app.drawThemeChrome(th);
+};
+
 app.drawPveColorSelect = function() {
   app.fillAmbientBackground();
 
   var cl = app.getPveColorLayout();
   var th = app.getCurrentTheme();
+
   app.ctx.save();
   app.ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
   app.ctx.shadowBlur = 10;
@@ -2425,25 +2586,27 @@ app.drawPveColorSelect = function() {
   app.ctx.restore();
   render.drawText(app.ctx, '选择执子', app.W / 2, app.H * 0.26, 15, th.subtitle);
 
-  app.drawMacaronCard(
-    '黑棋（先手）',
+  app.drawHomeActionCard(
     cl.cx,
     cl.yBlack,
     cl.btnW,
     cl.btnH,
-    th.homeCards[0],
-    false,
-    'bear'
+    '黑棋',
+    'pve',
+    th,
+    app.subPagePressedButton === 'pve_black',
+    app.subHubTileOpts({ showSubtitle: true, subtitleOverride: '先手' })
   );
-  app.drawMacaronCard(
-    '白棋（后手）',
+  app.drawHomeActionCard(
     cl.cx,
     cl.yWhite,
     cl.btnW,
     cl.btnH,
-    th.homeCards[1],
-    false,
-    'heart'
+    '白棋',
+    'daily',
+    th,
+    app.subPagePressedButton === 'pve_white',
+    app.subHubTileOpts({ showSubtitle: true, subtitleOverride: '后手' })
   );
 
   app.ctx.font =
@@ -2544,7 +2707,7 @@ app.drawRandomMatchPrimaryCard = function(cx, cy, bw, bh) {
 }
 
 /**
- * 主操作卡片：深色底 + 顶光渐变 + 投影；doodleKind 为右下角弱装饰
+ * 主操作卡片：渐变底 + 立体厚度 + 顶光；fill 可为 hex 或 { grad: [...] }
  */
 app.drawMacaronCard = function(
   label,
@@ -2559,28 +2722,90 @@ app.drawMacaronCard = function(
   var r = Math.min(26, bh * 0.42);
   var x0 = cx - bw / 2;
   var y0 = cy - bh / 2;
-  app.ctx.fillStyle = 'rgba(0, 0, 0, 0.14)';
-  app.roundRect(x0 + 2, y0 + 5, bw, bh, r);
+  var gradStops;
+  var baseHex;
+  if (fillHex && fillHex.grad && fillHex.grad.length) {
+    gradStops = fillHex.grad;
+    baseHex = gradStops[gradStops.length - 1];
+  } else if (typeof fillHex === 'string' && fillHex.charAt(0) === '#') {
+    baseHex = fillHex;
+    gradStops = [
+      typeof app.homePillShadeHex === 'function'
+        ? app.homePillShadeHex(fillHex, -0.1)
+        : fillHex,
+      fillHex,
+      typeof app.homePillShadeHex === 'function'
+        ? app.homePillShadeHex(fillHex, 0.16)
+        : fillHex
+    ];
+  } else {
+    baseHex = '#5C4738';
+    gradStops = [baseHex, baseHex];
+  }
+  var depthFill =
+    typeof app.homePillShadeHex === 'function'
+      ? app.homePillShadeHex(baseHex, 0.22)
+      : 'rgba(0,0,0,0.18)';
+  var depthOff = 4;
+
+  app.ctx.save();
+  app.ctx.fillStyle = depthFill;
+  app.roundRect(x0, y0 + depthOff, bw, bh, r);
   app.ctx.fill();
-  app.ctx.shadowColor = 'rgba(0, 0, 0, 0.22)';
-  app.ctx.shadowBlur = 18;
-  app.ctx.shadowOffsetY = 6;
-  app.ctx.fillStyle = fillHex;
+
+  app.ctx.shadowColor = 'rgba(0, 0, 0, 0.24)';
+  app.ctx.shadowBlur = 14;
+  app.ctx.shadowOffsetY = 5;
+  app.ctx.fillStyle = gradStops[0];
   app.roundRect(x0, y0, bw, bh, r);
   app.ctx.fill();
   app.ctx.shadowBlur = 0;
   app.ctx.shadowOffsetY = 0;
-  var sheen = app.ctx.createLinearGradient(x0, y0, x0 + bw, y0 + bh);
-  sheen.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
-  sheen.addColorStop(0.42, 'rgba(255, 255, 255, 0)');
-  sheen.addColorStop(1, 'rgba(0, 0, 0, 0.12)');
+
+  app.ctx.save();
+  app.roundRect(x0, y0, bw, bh, r);
+  app.ctx.clip();
+  var bg = app.ctx.createLinearGradient(x0, y0, x0, y0 + bh);
+  var gi;
+  for (gi = 0; gi < gradStops.length; gi++) {
+    bg.addColorStop(
+      gradStops.length === 1 ? 0 : gi / (gradStops.length - 1),
+      gradStops[gi]
+    );
+  }
+  app.ctx.fillStyle = bg;
+  app.ctx.fillRect(x0, y0, bw, bh);
+
+  var sheen = app.ctx.createLinearGradient(x0, y0, x0, y0 + bh * 0.55);
+  sheen.addColorStop(0, 'rgba(255, 255, 255, 0.28)');
+  sheen.addColorStop(0.4, 'rgba(255, 255, 255, 0.06)');
+  sheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
   app.ctx.fillStyle = sheen;
-  app.roundRect(x0, y0, bw, bh, r);
-  app.ctx.fill();
-  app.ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+  app.ctx.fillRect(x0, y0, bw, bh * 0.55);
+
+  var innerShadow = app.ctx.createLinearGradient(x0, y0 + bh * 0.5, x0, y0 + bh);
+  innerShadow.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  innerShadow.addColorStop(1, 'rgba(0, 0, 0, 0.14)');
+  app.ctx.fillStyle = innerShadow;
+  app.ctx.fillRect(x0, y0 + bh * 0.5, bw, bh * 0.5);
+  app.ctx.restore();
+
+  app.ctx.strokeStyle = 'rgba(255, 255, 255, 0.32)';
   app.ctx.lineWidth = 1.2;
-  app.roundRect(x0, y0, bw, bh, r);
+  app.roundRect(x0 + 0.5, y0 + 0.5, bw - 1, bh - 1, r - 0.5);
   app.ctx.stroke();
+
+  app.ctx.save();
+  app.roundRect(x0 + 2, y0 + 2, bw - 4, bh - 4, r - 2);
+  app.ctx.clip();
+  app.ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+  app.ctx.lineWidth = 1;
+  app.ctx.beginPath();
+  app.ctx.moveTo(app.snapPx(x0 + r * 0.4), app.snapPx(y0 + 1.5));
+  app.ctx.lineTo(app.snapPx(x0 + bw - r * 0.4), app.snapPx(y0 + 1.5));
+  app.ctx.stroke();
+  app.ctx.restore();
+
   if (isSelected) {
     app.ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
     app.ctx.lineWidth = 2.5;
@@ -2592,7 +2817,12 @@ app.drawMacaronCard = function(
   app.ctx.fillStyle = '#ffffff';
   app.ctx.textBaseline = 'middle';
   app.ctx.textAlign = 'center';
+  app.ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
+  app.ctx.shadowBlur = 2;
+  app.ctx.shadowOffsetY = 1;
   app.ctx.fillText(label, app.snapPx(cx), app.snapPx(cy));
+  app.ctx.shadowBlur = 0;
+  app.ctx.shadowOffsetY = 0;
   if (doodleKind) {
     doodles.drawCardCornerDoodle(app.ctx, doodleKind, cx, cy, bw, bh);
   }

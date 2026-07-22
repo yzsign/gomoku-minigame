@@ -719,6 +719,64 @@ app.getSpectatorPopoverScrollMetrics = function () {
   };
 };
 
+app.hitFriendRoomIdLineRect = function (x, y) {
+  if (
+    typeof app.shouldShowFriendRoomIdTop !== 'function' ||
+    !app.shouldShowFriendRoomIdTop() ||
+    !app.layout ||
+    app.layout.friendRoomLineY <= 0
+  ) {
+    return false;
+  }
+  var L = app.layout;
+  var lx = L.friendRoomLineX != null ? L.friendRoomLineX : L.spectatorBadgeX;
+  var ly = L.friendRoomLineY;
+  var lh = L.friendRoomLineH != null ? L.friendRoomLineH : app.rpx(28);
+  var lw =
+    L.friendRoomLineW != null ? L.friendRoomLineW : app.W - lx - app.rpx(16);
+  var pad = app.rpx(6);
+  return (
+    x >= lx - pad &&
+    x <= lx + lw + pad &&
+    y >= ly - pad &&
+    y <= ly + lh + pad
+  );
+};
+
+/** 点击房号：复制纯数字房号到剪贴板（失败时静默，不弹窗打断对局） */
+app.copyFriendRoomIdToClipboard = function () {
+  if (!app.onlineRoomId) {
+    return;
+  }
+  var raw = String(app.onlineRoomId).replace(/\s+/g, '');
+  if (!raw || typeof wx.setClipboardData !== 'function') {
+    return;
+  }
+  var doCopy = function () {
+    wx.setClipboardData({
+      data: raw,
+      success: function () {
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '房号已复制', icon: 'success' });
+        }
+      },
+      fail: function (err) {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(
+            '[copy roomId]',
+            err && err.errMsg ? err.errMsg : err
+          );
+        }
+      }
+    });
+  };
+  if (typeof app.ensurePrivacyAuthorized === 'function') {
+    app.ensurePrivacyAuthorized(doCopy, function () {});
+    return;
+  }
+  doCopy();
+};
+
 app.hitSpectatorBadgeRect = function (x, y) {
   if (!app.isPvpOnline || !app.layout || app.layout.spectatorBadgeX == null) {
     return false;
@@ -1065,6 +1123,9 @@ app.draw = function() {
     app.stopHomeMascotAnimLoop();
     app.checkinModalVisible = false;
     app.checkinModalData = null;
+    if (typeof app.closeJoinRoomModal === 'function') {
+      app.closeJoinRoomModal();
+    }
   }
   if (app.screen === 'home') {
     app.drawHome();
@@ -1093,6 +1154,15 @@ app.draw = function() {
     app.drawHistory();
     if (app.historyReplayOverlayVisible) {
       app.drawHistoryReplayOverlay();
+    }
+    if (typeof app.drawFriendListGlobalChrome === 'function') {
+      app.drawFriendListGlobalChrome();
+    }
+    return;
+  }
+  if (app.screen === 'friend_battle') {
+    if (typeof app.drawFriendBattleHub === 'function') {
+      app.drawFriendBattleHub();
     }
     if (typeof app.drawFriendListGlobalChrome === 'function') {
       app.drawFriendListGlobalChrome();
@@ -1249,11 +1319,10 @@ app.draw = function() {
     app.drawOnlineGameClockAboveBoard(app.ctx, th, app.layout);
   }
 
-  /** 顶栏下沿 + 设计间距，左上角「观战人数：N」按钮（可点出独立观战列表面板，不打开侧栏好友列表） */
+  /** 顶栏下沿 + 设计间距，左上角房号 / 「观战人数：N」（可点出独立观战列表面板） */
   if (
     app.isPvpOnline &&
     app.layout &&
-    typeof app.spectatorCount === 'number' &&
     app.layout.spectatorBadgeX != null &&
     typeof app.friendListHomeUiFromTheme === 'function'
   ) {
@@ -1261,109 +1330,46 @@ app.draw = function() {
       var FL = app.friendListHomeUiFromTheme(th || app.getUiTheme());
       var bx = app.layout.spectatorBadgeX;
       var by = app.layout.spectatorBadgeY;
-      var bw = app.layout.spectatorBadgeW || app.rpx(76);
+      var bw = app.layout.spectatorBadgeW || app.rpx(148);
       var bh = app.layout.spectatorBadgeH || app.rpx(26);
-      var count = Math.max(0, app.spectatorCount || 0);
-      var p1 = '观战人数：';
-      var p2 = String(count);
-      var p3 = '';
-
-      var g0 =
-        FL && FL.watchPillG0
-          ? FL.watchPillG0
-          : 'rgba(255, 255, 255, 0.99)';
-      var g1 =
-        FL && FL.watchPillG1
-          ? FL.watchPillG1
-          : 'rgba(234, 244, 236, 0.96)';
-      var strokeC =
-        FL && FL.watchPillStroke
-          ? FL.watchPillStroke
-          : 'rgba(46, 125, 50, 0.24)';
-      var shadeC =
-        FL && FL.watchPillShade
-          ? FL.watchPillShade
-          : 'rgba(20, 70, 32, 0.06)';
-      var labelMute =
-        FL && FL.spectatorBadgeMuted != null
-          ? FL.spectatorBadgeMuted
-          : th.muted;
-      var countC =
-        FL && FL.spectatorBadgeCount != null
-          ? FL.spectatorBadgeCount
-          : FL && FL.watchPillText
-            ? FL.watchPillText
-            : '#2e7d32';
-
-      app.ctx.save();
-      /**
-       * 圆角须 ≤ min(w,h)/2。勿用 rpx(999) 等超大半径：arcTo 在部分真机/小游戏上会生成异常大路径，整屏被浅色填充（类似纸撕裂大块白斑）。
-       */
-      var capR = Math.min(
-        Math.min(bw, bh) * 0.5,
-        bw * 0.5,
-        bh * 0.5,
-        app.rpx(9)
-      );
-      if (capR < 0.5) {
-        capR = 0.5;
-      }
-      if (typeof app.roundRect === 'function') {
-        app.ctx.fillStyle = shadeC;
-        app.roundRect(
-          bx + app.rpx(0.5),
-          by + app.rpx(1),
-          bw,
-          bh,
-          capR
+      var pillGap = app.rpx(8);
+      if (
+        typeof app.shouldShowFriendRoomIdTop === 'function' &&
+        app.shouldShowFriendRoomIdTop() &&
+        typeof app.drawFriendRoomIdLine === 'function'
+      ) {
+        var roomLineY =
+          app.layout.friendRoomLineY > 0
+            ? app.layout.friendRoomLineY
+            : by - app.rpx(28) - pillGap;
+        var roomLineH = app.layout.friendRoomLineH || app.rpx(28);
+        app.drawFriendRoomIdLine(
+          app.ctx,
+          bx,
+          roomLineY + roomLineH * 0.5,
+          FL,
+          th,
+          typeof app.formatFriendRoomIdDisplay === 'function'
+            ? app.formatFriendRoomIdDisplay(app.onlineRoomId)
+            : String(app.onlineRoomId)
         );
-        app.ctx.fill();
       }
-      var fillB = g1;
-      try {
-        if (app.ctx.createLinearGradient) {
-          var gradB = app.ctx.createLinearGradient(bx, by, bx, by + bh);
-          gradB.addColorStop(0, g0);
-          gradB.addColorStop(1, g1);
-          fillB = gradB;
+      if (typeof app.spectatorCount === 'number') {
+        var count = Math.max(0, app.spectatorCount || 0);
+        if (typeof app.drawWatchStyleLabelPill === 'function') {
+          app.drawWatchStyleLabelPill(
+            app.ctx,
+            bx,
+            by,
+            bw,
+            bh,
+            FL,
+            th,
+            '观战人数：',
+            String(count)
+          );
         }
-      } catch (eBg) {
-        fillB = g1;
       }
-      app.ctx.fillStyle = fillB;
-      if (typeof app.roundRect === 'function') {
-        app.roundRect(bx, by, bw, bh, capR);
-        app.ctx.fill();
-        app.roundRect(bx, by, bw, bh, capR);
-        app.ctx.strokeStyle = strokeC;
-        app.ctx.lineWidth = Math.max(1, app.rpx(1));
-        app.ctx.stroke();
-      } else {
-        app.ctx.fillRect(bx, by, bw, bh);
-        app.ctx.strokeStyle = strokeC;
-        app.ctx.lineWidth = 1;
-        app.ctx.strokeRect(bx, by, bw, bh);
-      }
-
-      var bfs = Math.max(10, app.rpx(12));
-      app.ctx.font = '500 ' + bfs + 'px "PingFang SC","Hiragino Sans GB",sans-serif';
-      app.ctx.textAlign = 'left';
-      app.ctx.textBaseline = 'middle';
-      var m1 = app.ctx.measureText(p1);
-      var m2 = app.ctx.measureText(p2);
-      var m3 = app.ctx.measureText(p3);
-      var totalW = m1.width + m2.width + m3.width;
-      var startX = bx + bw * 0.5 - totalW * 0.5;
-      var ty = by + bh * 0.5 + 0.5;
-      app.ctx.fillStyle = labelMute;
-      app.ctx.fillText(p1, startX, ty);
-      app.ctx.fillStyle = countC;
-      app.ctx.fillText(p2, startX + m1.width, ty);
-      if (p3) {
-        app.ctx.fillStyle = labelMute;
-        app.ctx.fillText(p3, startX + m1.width + m2.width, ty);
-      }
-      app.ctx.restore();
     } catch (e) {
       console.error('Spectator badge draw failed:', e);
       // Do not let badge errors break the entire game render
@@ -1397,7 +1403,7 @@ app.draw = function() {
       }
     } else if (app.onlineOpponentLeft) {
       status = '对方已离开房间';
-    } else if (!app.onlineBlackConnected || !app.onlineWhiteConnected) {
+      } else if (!app.onlineBlackConnected || !app.onlineWhiteConnected) {
       status =
         app.pvpOnlineYourColor === app.BLACK && app.onlineRoomId
           ? '等待白方加入 · 房号 ' + app.onlineRoomId
@@ -2128,6 +2134,218 @@ app.drawUndoRejectFloat = function() {
   ctx.restore();
 };
 
+/** 6 位数字房号中间加空格，便于辨认 */
+app.formatFriendRoomIdDisplay = function(roomId) {
+  var s = roomId != null ? String(roomId).replace(/\s+/g, '') : '';
+  if (/^\d{6}$/.test(s)) {
+    return s.slice(0, 3) + ' ' + s.slice(3);
+  }
+  return s;
+};
+
+/**
+ * 好友房号：纯文字行（与观战人数左对齐，字体配色一致，无胶囊底）。
+ */
+app.drawFriendRoomIdLine = function(ctx, x, cy, FL, th, roomCode) {
+  if (!ctx || !roomCode) {
+    return;
+  }
+  th = th || (typeof app.getUiTheme === 'function' ? app.getUiTheme() : {});
+  var label = '房号';
+  var labelGap = app.rpx(4);
+  var labelMute =
+    FL && FL.spectatorBadgeMuted != null ? FL.spectatorBadgeMuted : th.muted;
+  var codeC =
+    FL && FL.spectatorBadgeCount != null
+      ? FL.spectatorBadgeCount
+      : FL && FL.watchPillText
+        ? FL.watchPillText
+        : '#2e7d32';
+  var fs = Math.max(10, app.rpx(12));
+  var minFs = Math.max(8, app.rpx(9));
+  var maxW = Math.max(app.rpx(80), app.W - x - app.rpx(16));
+  var fontUi =
+    '"PingFang SC","Hiragino Sans GB",sans-serif';
+  var labelW = 0;
+  var codeW = 0;
+  var attempt;
+  for (attempt = 0; attempt < 20; attempt++) {
+    ctx.font = '500 ' + fs + 'px ' + fontUi;
+    labelW = ctx.measureText(label).width;
+    codeW = ctx.measureText(roomCode).width;
+    if (labelW + labelGap + codeW <= maxW) {
+      break;
+    }
+    if (fs <= minFs) {
+      break;
+    }
+    fs = Math.max(minFs, fs - app.rpx(0.5));
+  }
+  ctx.save();
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.font = '500 ' + fs + 'px ' + fontUi;
+  ctx.fillStyle = labelMute != null ? labelMute : '#888888';
+  ctx.fillText(label, app.snapPx(x), app.snapPx(cy));
+  ctx.fillStyle = codeC;
+  ctx.fillText(roomCode, app.snapPx(x + labelW + labelGap), app.snapPx(cy));
+  ctx.restore();
+};
+
+/**
+ * 左上角观战人数：胶囊样式（label 灰色 + value 强调色）。
+ * @param {object} [opts] autoWidth/minW/maxW/padX
+ */
+app.drawWatchStyleLabelPill = function(
+  ctx,
+  bx,
+  by,
+  bw,
+  bh,
+  FL,
+  th,
+  labelText,
+  valueText,
+  opts
+) {
+  if (!ctx || bw <= 0 || bh <= 0) {
+    return;
+  }
+  opts = opts || {};
+  th = th || (typeof app.getUiTheme === 'function' ? app.getUiTheme() : {});
+  var padX = opts.padX != null ? opts.padX : app.rpx(14);
+  var minW = opts.minW != null ? opts.minW : bw;
+  var maxW = opts.maxW != null ? opts.maxW : bw;
+  var bfs = Math.max(10, app.rpx(12));
+  var minFs = Math.max(8, app.rpx(9));
+  var fontUi =
+    '"PingFang SC","Hiragino Sans GB",sans-serif';
+
+  var labelW = 0;
+  var valueW = 0;
+  var totalW = 0;
+  var fitBw = bw;
+  var attempt;
+  for (attempt = 0; attempt < 24; attempt++) {
+    ctx.font = '500 ' + bfs + 'px ' + fontUi;
+    labelW = ctx.measureText(labelText).width;
+    valueW = ctx.measureText(valueText).width;
+    totalW = labelW + valueW;
+    var innerNeed = totalW + padX * 2;
+    if (opts.autoWidth) {
+      fitBw = Math.min(maxW, Math.max(minW, innerNeed));
+    } else {
+      fitBw = bw;
+    }
+    if (totalW <= fitBw - padX * 2 - 0.5) {
+      break;
+    }
+    if (opts.autoWidth && innerNeed <= maxW) {
+      fitBw = innerNeed;
+      if (totalW <= fitBw - padX * 2 - 0.5) {
+        break;
+      }
+    }
+    if (bfs <= minFs) {
+      break;
+    }
+    bfs = Math.max(minFs, bfs - app.rpx(0.5));
+  }
+  bw = fitBw;
+
+  var g0 =
+    FL && FL.watchPillG0 ? FL.watchPillG0 : 'rgba(255, 255, 255, 0.99)';
+  var g1 =
+    FL && FL.watchPillG1 ? FL.watchPillG1 : 'rgba(234, 244, 236, 0.96)';
+  var strokeC =
+    FL && FL.watchPillStroke
+      ? FL.watchPillStroke
+      : 'rgba(46, 125, 50, 0.24)';
+  var shadeC =
+    FL && FL.watchPillShade ? FL.watchPillShade : 'rgba(20, 70, 32, 0.06)';
+  var labelMute =
+    FL && FL.spectatorBadgeMuted != null ? FL.spectatorBadgeMuted : th.muted;
+  var countC =
+    FL && FL.spectatorBadgeCount != null
+      ? FL.spectatorBadgeCount
+      : FL && FL.watchPillText
+        ? FL.watchPillText
+        : '#2e7d32';
+
+  ctx.save();
+  var capR = Math.min(
+    Math.min(bw, bh) * 0.5,
+    bw * 0.5,
+    bh * 0.5,
+    app.rpx(9)
+  );
+  if (capR < 0.5) {
+    capR = 0.5;
+  }
+  if (typeof app.roundRect === 'function') {
+    ctx.fillStyle = shadeC;
+    app.roundRect(bx + app.rpx(0.5), by + app.rpx(1), bw, bh, capR);
+    ctx.fill();
+  }
+  var fillB = g1;
+  try {
+    if (ctx.createLinearGradient) {
+      var gradB = ctx.createLinearGradient(bx, by, bx, by + bh);
+      gradB.addColorStop(0, g0);
+      gradB.addColorStop(1, g1);
+      fillB = gradB;
+    }
+  } catch (eBg) {
+    fillB = g1;
+  }
+  ctx.fillStyle = fillB;
+  if (typeof app.roundRect === 'function') {
+    app.roundRect(bx, by, bw, bh, capR);
+    ctx.fill();
+    app.roundRect(bx, by, bw, bh, capR);
+    ctx.strokeStyle = strokeC;
+    ctx.lineWidth = Math.max(1, app.rpx(1));
+    ctx.stroke();
+  } else {
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeStyle = strokeC;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx, by, bw, bh);
+  }
+
+  ctx.font = '500 ' + bfs + 'px ' + fontUi;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  labelW = ctx.measureText(labelText).width;
+  valueW = ctx.measureText(valueText).width;
+  totalW = labelW + valueW;
+  var startX = bx + (bw - totalW) * 0.5;
+  var minX = bx + padX;
+  var maxX = bx + bw - padX - totalW;
+  if (startX < minX) {
+    startX = minX;
+  }
+  if (startX > maxX) {
+    startX = maxX;
+  }
+  var ty = by + bh * 0.5 + 0.5;
+  ctx.save();
+  if (typeof app.roundRect === 'function') {
+    app.roundRect(bx, by, bw, bh, capR);
+    ctx.clip();
+  }
+  ctx.fillStyle = labelMute;
+  ctx.fillText(labelText, app.snapPx(startX), app.snapPx(ty));
+  ctx.fillStyle = countC;
+  ctx.fillText(
+    valueText,
+    app.snapPx(startX + labelW),
+    app.snapPx(ty)
+  );
+  ctx.restore();
+  ctx.restore();
+};
+
 app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
   var th = app.getUiTheme();
   var L = app.getGameActionBarLayout();
@@ -2135,13 +2353,11 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
   var rBar = app.rpx(12);
   var barIconFg = th.btnGhostText || '#3a3836';
   ctx.save();
-  if (th.id === 'ink' || th.id === 'mint' || th.id === 'cyberpunk') {
+  if (th.id === 'ink' || th.id === 'mint') {
     ctx.shadowColor =
-      th.id === 'cyberpunk'
-        ? 'rgba(0, 0, 0, 0.1)'
-        : th.id === 'mint'
-          ? 'rgba(20, 52, 62, 0.06)'
-          : 'rgba(50, 42, 34, 0.06)';
+      th.id === 'mint'
+        ? 'rgba(20, 52, 62, 0.06)'
+        : 'rgba(50, 42, 34, 0.06)';
     ctx.shadowBlur = app.rpx(5);
     ctx.shadowOffsetY = app.rpx(1);
   } else {
@@ -2157,9 +2373,6 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
     /** 与 mint.bg[2] 乳白青釉底一致，弱化「悬浮卡片」 */
     ctx.fillStyle = 'rgba(241, 247, 245, 0.96)';
     ctx.strokeStyle = 'rgba(28, 58, 70, 0.11)';
-  } else if (th.id === 'cyberpunk') {
-    ctx.fillStyle = 'rgba(32, 36, 44, 0.96)';
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
   } else {
     ctx.fillStyle = '#ffffff';
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
@@ -2174,13 +2387,11 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
   var divTop = L.y0 + app.rpx(9);
   var divBot = L.y0 + L.barH - app.rpx(9);
   ctx.strokeStyle =
-    th.id === 'cyberpunk'
-      ? 'rgba(255, 255, 255, 0.1)'
-      : th.id === 'ink'
-        ? 'rgba(72, 66, 58, 0.14)'
-        : th.id === 'mint'
-          ? 'rgba(28, 58, 70, 0.12)'
-          : 'rgba(0, 0, 0, 0.08)';
+    th.id === 'ink'
+      ? 'rgba(72, 66, 58, 0.14)'
+      : th.id === 'mint'
+        ? 'rgba(28, 58, 70, 0.12)'
+        : 'rgba(0, 0, 0, 0.08)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   var divI;
@@ -2284,9 +2495,7 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
       ? th.subtitle || '#585046'
       : th.id === 'mint'
         ? th.subtitle || '#3a5862'
-        : th.id === 'cyberpunk'
-          ? th.subtitle || '#7a96ac'
-          : '#3a3836';
+        : '#3a3836';
   var i;
   for (i = 0; i < cols.length; i++) {
     var col = cols[i];
@@ -2333,17 +2542,6 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
       );
       ctx.fill();
     }
-    if (i === 1 && undoActive && th.id === 'cyberpunk') {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
-      app.roundRect(
-        colLeft + app.rpx(3),
-        L.y0 + app.rpx(4),
-        L.colW - app.rpx(6),
-        L.barH - app.rpx(8),
-        app.rpx(8)
-      );
-      ctx.fill();
-    }
     if (!pveBarOnly && i === 2 && drawOk && app.onlineDrawPending && th.id === 'ink') {
       ctx.fillStyle = 'rgba(88, 78, 68, 0.1)';
       app.roundRect(
@@ -2357,17 +2555,6 @@ app.drawGameActionBar = function(undoLabel, undoActive, drawLabel) {
     }
     if (!pveBarOnly && i === 2 && drawOk && app.onlineDrawPending && th.id === 'mint') {
       ctx.fillStyle = 'rgba(28, 72, 84, 0.09)';
-      app.roundRect(
-        colLeft + app.rpx(3),
-        L.y0 + app.rpx(4),
-        L.colW - app.rpx(6),
-        L.barH - app.rpx(8),
-        app.rpx(8)
-      );
-      ctx.fill();
-    }
-    if (!pveBarOnly && i === 2 && drawOk && app.onlineDrawPending && th.id === 'cyberpunk') {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
       app.roundRect(
         colLeft + app.rpx(3),
         L.y0 + app.rpx(4),
@@ -2788,29 +2975,40 @@ app.hitHomeButton = function(clientX, clientY) {
     return null;
   }
   var halfW = hl.btnW / 2 + 4;
-  var halfH = hl.btnH / 2 + 6;
+  var cellHalfW = (hl.gridCellW || hl.halfBtnW) / 2 + 4;
+  var cellHalfH = (hl.gridCellH || hl.btnH) / 2 + 6;
+  var heroHalfH = (hl.heroH || hl.btnH) / 2 + 6;
   if (
     Math.abs(clientX - hl.cx) <= halfW &&
-    Math.abs(clientY - hl.yRandom) <= halfH
+    Math.abs(clientY - hl.yRandom) <= heroHalfH
   ) {
     return 'random';
   }
+  var yRow1 = hl.yGridRow1 != null ? hl.yGridRow1 : hl.yRoomPair;
+  var yRow2 = hl.yGridRow2 != null ? hl.yGridRow2 : hl.yPvePair;
+  var cxL = hl.cxGridL != null ? hl.cxGridL : hl.cxCreate;
+  var cxR = hl.cxGridR != null ? hl.cxGridR : hl.cxJoin;
   if (
-    Math.abs(clientX - hl.cx) <= halfW &&
-    Math.abs(clientY - hl.yFriend) <= halfH
+    Math.abs(clientX - cxL) <= cellHalfW &&
+    Math.abs(clientY - yRow1) <= cellHalfH
   ) {
-    return 'pvp';
+    return 'room_create';
   }
-  var pairHalfW = hl.halfBtnW * 0.5 + 4;
   if (
-    Math.abs(clientX - hl.cxPve) <= pairHalfW &&
-    Math.abs(clientY - hl.yPvePair) <= halfH
+    Math.abs(clientX - cxR) <= cellHalfW &&
+    Math.abs(clientY - yRow1) <= cellHalfH
+  ) {
+    return 'room_join';
+  }
+  if (
+    Math.abs(clientX - cxL) <= cellHalfW &&
+    Math.abs(clientY - yRow2) <= cellHalfH
   ) {
     return 'pve';
   }
   if (
-    Math.abs(clientX - hl.cxDaily) <= pairHalfW &&
-    Math.abs(clientY - hl.yPvePair) <= halfH
+    Math.abs(clientX - cxR) <= cellHalfW &&
+    Math.abs(clientY - yRow2) <= cellHalfH
   ) {
     return 'daily';
   }
@@ -2829,17 +3027,27 @@ app.hitMatchingCancel = function(clientX, clientY) {
 
 app.hitPveColorButton = function(clientX, clientY) {
   var cl = app.getPveColorLayout();
-  var bw = cl.btnW / 2 + 12;
-  var bh = cl.btnH / 2 + 12;
   if (
-    Math.abs(clientX - cl.cx) <= bw &&
-    Math.abs(clientY - cl.yBlack) <= bh
+    app.hitHomeGridCell(
+      clientX,
+      clientY,
+      cl.cx,
+      cl.yBlack,
+      cl.btnW,
+      cl.btnH
+    )
   ) {
     return 'black';
   }
   if (
-    Math.abs(clientX - cl.cx) <= bw &&
-    Math.abs(clientY - cl.yWhite) <= bh
+    app.hitHomeGridCell(
+      clientX,
+      clientY,
+      cl.cx,
+      cl.yWhite,
+      cl.btnW,
+      cl.btnH
+    )
   ) {
     return 'white';
   }
@@ -4505,8 +4713,41 @@ wx.onTouchStart(function (e) {
         app.onHomeFriendListTouchStart(x, y, e)) {
       return;
     }
-    if (typeof app.handleReviewHubTouchStart === 'function') {
-      app.handleReviewHubTouchStart(x, y);
+    var rhHit = app.hitReviewHubButton(x, y);
+    app.subPagePressedButton =
+      rhHit === 'continue'
+        ? 'review_continue'
+        : rhHit === 'history'
+        ? 'review_history'
+        : rhHit === 'clear'
+        ? 'review_clear'
+        : rhHit === 'back'
+        ? 'back'
+        : null;
+    if (app.subPagePressedButton) {
+      app.draw();
+    }
+    return;
+  }
+
+  if (app.screen === 'friend_battle') {
+    if (typeof app.onHomeFriendListTouchStart === 'function' &&
+        app.onHomeFriendListTouchStart(x, y, e)) {
+      return;
+    }
+    var fbBtn = typeof app.hitFriendBattleButton === 'function'
+      ? app.hitFriendBattleButton(x, y)
+      : null;
+    app.subPagePressedButton =
+      fbBtn === 'invite'
+        ? 'fb_invite'
+        : fbBtn === 'create'
+        ? 'fb_create'
+        : fbBtn === 'back'
+        ? 'back'
+        : null;
+    if (app.subPagePressedButton) {
+      app.draw();
     }
     return;
   }
@@ -4704,6 +4945,33 @@ wx.onTouchStart(function (e) {
     return;
   }
 
+  if (app.screen === 'home' && app.joinRoomModalVisible) {
+    if (app.hitJoinRoomModalInput(x, y)) {
+      if (typeof app.openJoinRoomKeyboard === 'function') {
+        app.openJoinRoomKeyboard();
+      }
+      return;
+    }
+    if (app.hitJoinRoomModalConfirm(x, y)) {
+      app.joinRoomPressedButton = 'confirm';
+      app.draw();
+      return;
+    }
+    if (app.hitJoinRoomModalCancel(x, y)) {
+      app.joinRoomPressedButton = 'cancel';
+      app.draw();
+      return;
+    }
+    if (!app.hitJoinRoomModalPanel(x, y)) {
+      if (typeof app.closeJoinRoomModal === 'function') {
+        app.closeJoinRoomModal();
+      }
+      app.draw();
+      return;
+    }
+    return;
+  }
+
   if (app.screen === 'home' && app.checkinModalVisible) {
     if (app.hitCheckinModalHeaderClose(x, y)) {
       app.checkinModalVisible = false;
@@ -4855,6 +5123,7 @@ wx.onTouchStart(function (e) {
     (app.screen === 'home' ||
       app.screen === 'game' ||
       app.screen === 'matching' ||
+      app.screen === 'friend_battle' ||
       app.screen === 'pve_color' ||
       app.screen === 'replay') &&
     typeof app.onHomeFriendListTouchStart === 'function' &&
@@ -4866,6 +5135,15 @@ wx.onTouchStart(function (e) {
   if (app.screen === 'game' && app.isPvpOnline) {
     if (typeof app.computeLayout === 'function') {
       app.layout = app.computeLayout();
+    }
+    if (
+      typeof app.hitFriendRoomIdLineRect === 'function' &&
+      app.hitFriendRoomIdLineRect(x, y)
+    ) {
+      if (typeof app.copyFriendRoomIdToClipboard === 'function') {
+        app.copyFriendRoomIdToClipboard();
+      }
+      return;
     }
     if (typeof app.hitSpectatorBadgeRect === 'function' && app.hitSpectatorBadgeRect(x, y)) {
       return;
@@ -4920,6 +5198,7 @@ wx.onTouchStart(function (e) {
     !app.homeDrawerOpen &&
     !app.ratingCardVisible &&
     !app.checkinModalVisible &&
+    !app.joinRoomModalVisible &&
     !app.pieceSkinModalVisible &&
     !app.homeFriendListOpen &&
     typeof app.hitHomeDrawerTab === 'function' &&
@@ -5094,17 +5373,16 @@ wx.onTouchStart(function (e) {
 
   if (app.screen === 'pve_color') {
     var colorBtn = app.hitPveColorButton(x, y);
-    if (colorBtn === 'black') {
-      app.startPve(app.BLACK);
-      return;
-    }
-    if (colorBtn === 'white') {
-      app.startPve(app.WHITE);
-      return;
-    }
-    if (colorBtn === 'back') {
-      app.backToHome();
-      return;
+    app.subPagePressedButton =
+      colorBtn === 'black'
+        ? 'pve_black'
+        : colorBtn === 'white'
+        ? 'pve_white'
+        : colorBtn === 'back'
+        ? 'back'
+        : null;
+    if (app.subPagePressedButton) {
+      app.draw();
     }
     return;
   }
@@ -5680,6 +5958,7 @@ if (typeof wx.onTouchEnd === 'function') {
         !app.homeDrawerOpen &&
         !app.ratingCardVisible &&
         !app.checkinModalVisible &&
+        !app.joinRoomModalVisible &&
         !app.pieceSkinModalVisible &&
         !app.homeFriendListOpen &&
         typeof app.hitHomeDrawerTab === 'function' &&
@@ -5695,12 +5974,91 @@ if (typeof wx.onTouchEnd === 'function') {
       }
       return;
     }
+    if (
+      app.subPagePressedButton &&
+      (app.screen === 'review_hub' ||
+        app.screen === 'pve_color' ||
+        app.screen === 'friend_battle')
+    ) {
+      var spb = app.subPagePressedButton;
+      app.subPagePressedButton = null;
+      app.draw();
+      if (t) {
+        if (app.screen === 'review_hub') {
+          var endRh = app.hitReviewHubButton(t.clientX, t.clientY);
+          var rhExpected =
+            spb === 'review_continue'
+              ? 'continue'
+              : spb === 'review_history'
+              ? 'history'
+              : spb === 'review_clear'
+              ? 'clear'
+              : spb === 'back'
+              ? 'back'
+              : null;
+          if (endRh === rhExpected && typeof app.handleReviewHubAction === 'function') {
+            app.handleReviewHubAction(endRh);
+          }
+        } else if (app.screen === 'pve_color') {
+          var endColor = app.hitPveColorButton(t.clientX, t.clientY);
+          if (spb === 'pve_black' && endColor === 'black') {
+            app.startPve(app.BLACK);
+          } else if (spb === 'pve_white' && endColor === 'white') {
+            app.startPve(app.WHITE);
+          } else if (spb === 'back' && endColor === 'back') {
+            app.backToHome();
+          }
+        } else if (app.screen === 'friend_battle') {
+          var endFb =
+            typeof app.hitFriendBattleButton === 'function'
+              ? app.hitFriendBattleButton(t.clientX, t.clientY)
+              : null;
+          if (spb === 'fb_invite' && endFb === 'invite') {
+            if (typeof app.startOnlineAsHostInviteWeChat === 'function') {
+              app.startOnlineAsHostInviteWeChat();
+            } else {
+              app.startOnlineAsHost(null);
+            }
+          } else if (spb === 'fb_create' && endFb === 'create') {
+            if (typeof app.startOnlineAsHostByRoomCode === 'function') {
+              app.startOnlineAsHostByRoomCode();
+            } else {
+              app.startOnlineAsHost({ skipWeChatShare: true });
+            }
+          } else if (spb === 'back' && endFb === 'back') {
+            app.backToHome();
+          }
+        }
+      }
+      return;
+    }
+    if (app.screen === 'home' && app.joinRoomPressedButton) {
+      var jpb = app.joinRoomPressedButton;
+      app.joinRoomPressedButton = null;
+      app.draw();
+      if (t) {
+        if (
+          jpb === 'confirm' &&
+          app.hitJoinRoomModalConfirm(t.clientX, t.clientY)
+        ) {
+          app.submitJoinRoomFromModal();
+        } else if (
+          jpb === 'cancel' &&
+          app.hitJoinRoomModalCancel(t.clientX, t.clientY)
+        ) {
+          app.closeJoinRoomModal();
+          app.draw();
+        }
+      }
+      return;
+    }
     if (app.screen === 'home' && app.homePressedButton) {
       if (
         !t ||
         app.homeDrawerOpen ||
         app.ratingCardVisible ||
         app.checkinModalVisible ||
+        app.joinRoomModalVisible ||
         app.pieceSkinModalVisible ||
         app.homeFriendListOpen
       ) {
@@ -5715,11 +6073,19 @@ if (typeof wx.onTouchEnd === 'function') {
         app.homePressedButton = null;
         app.draw();
         if (endHit === pb) {
-          if (pb === 'pvp') {
-            if (typeof app.startOnlineAsHostFromHome === 'function') {
-              app.startOnlineAsHostFromHome();
+          if (pb === 'room_create') {
+            if (typeof app.openFriendBattleHub === 'function') {
+              app.openFriendBattleHub();
+            } else if (typeof app.startOnlineAsHostInviteWeChat === 'function') {
+              app.startOnlineAsHostInviteWeChat();
             } else {
               app.startOnlineAsHost(null);
+            }
+            return;
+          }
+          if (pb === 'room_join') {
+            if (typeof app.promptJoinRoomById === 'function') {
+              app.promptJoinRoomById();
             }
             return;
           }
@@ -5748,6 +6114,7 @@ if (typeof wx.onTouchEnd === 'function') {
         app.homeDrawerOpen ||
         app.ratingCardVisible ||
         app.checkinModalVisible ||
+        app.joinRoomModalVisible ||
         app.pieceSkinModalVisible ||
         app.homeFriendListOpen
       ) {
@@ -5851,6 +6218,7 @@ if (typeof wx.onTouchEnd === 'function') {
       app.homeDrawerOpen ||
       app.ratingCardVisible ||
       app.checkinModalVisible ||
+      app.joinRoomModalVisible ||
       app.pieceSkinModalVisible ||
       app.homeFriendListOpen
     ) {
