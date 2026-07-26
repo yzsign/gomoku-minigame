@@ -11,6 +11,23 @@ var WHITE = 2;
 var CENTER_R = 7;
 var CENTER_C = 7;
 
+/** 15 路黑 1 池：中心 5×5（25 点，与 RIF 黑 3 活动区一致） */
+var BLACK_FIRST_POINTS = (function () {
+  var list = [];
+  var r;
+  var c;
+  for (r = 5; r <= 9; r++) {
+    for (c = 5; c <= 9; c++) {
+      list.push({ r: r, c: c });
+    }
+  }
+  return list;
+})();
+
+function pickRandomBlackFirstMove() {
+  return BLACK_FIRST_POINTS[Math.floor(Math.random() * BLACK_FIRST_POINTS.length)];
+}
+
 /** 直指 13 局名称（与 Wikipedia / RIF 直指 1D–13D 顺序一致） */
 var NAMES_DIRECT = [
   '寒星',
@@ -416,7 +433,7 @@ function getJosekiMove(board, aiColor, options) {
   var stones = countStones(board);
 
   if (stones === 0 && aiColor === BLACK) {
-    return { r: CENTER_R, c: CENTER_C };
+    return pickRandomBlackFirstMove();
   }
 
   if (stones === 1 && aiColor === WHITE) {
