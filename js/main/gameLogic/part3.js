@@ -2801,6 +2801,8 @@ app.startRandomMatch = function() {
   app.homeDrawerOpen = false;
   app.cancelMatchingTimers();
   app.randomMatchHostWaiting = false;
+  app._onlineInviteJoinInFlight = false;
+  app._pvpInviteJoinInProgress = false;
   if (typeof app.clearPendingOnlineInviteQuery === 'function') {
     app.clearPendingOnlineInviteQuery();
   }

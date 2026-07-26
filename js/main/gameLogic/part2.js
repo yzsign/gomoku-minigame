@@ -1001,6 +1001,18 @@ app.joinOnlineAsGuest = function(roomId, opts) {
     success: function (res) {
       wx.hideLoading();
       app._onlineInviteJoinInFlight = false;
+      if (
+        app.isPvpOnline &&
+        app.onlineRoomId &&
+        String(app.onlineRoomId) !== String(roomId)
+      ) {
+        app._pvpInviteJoinInProgress = false;
+        return;
+      }
+      if (app.screen === 'matching' && app.randomMatchHostWaiting) {
+        app._pvpInviteJoinInProgress = false;
+        return;
+      }
         if (res.statusCode !== 200 || !res.data) {
         app._pvpInviteJoinInProgress = false;
         var msg = '无法加入';

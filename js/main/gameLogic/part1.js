@@ -3720,11 +3720,14 @@ app.clearOnlineWsPingTimer = function() {
 
 /** 联机对局/匹配等待中是否应保持 roomId+token 并允许自动重连 */
 app.shouldAutoReconnectOnline = function() {
-  if (app._onlineInviteJoinInFlight) {
-    return false;
-  }
   if (!app.onlineRoomId || !app.onlineToken) {
     return false;
+  }
+  if (app._onlineInviteJoinInFlight) {
+    /** 邀请 join 的 HTTP 未完成时勿打断；已在联机盘则必须允许重连，否则落子只会提示「无法连接」 */
+    if (!(app.isPvpOnline && app.screen === 'game')) {
+      return false;
+    }
   }
   if (app.screen === 'game') {
     return true;
@@ -3796,6 +3799,8 @@ app.disconnectOnline = function() {
     app.stopResultTuanPointsAnim();
   }
   app.isPvpOnline = false;
+  app._onlineInviteJoinInFlight = false;
+  app._pvpInviteJoinInProgress = false;
   app.isCasualRoom = false;
   app.friendRoomCodeHostPending = false;
   app.friendRoomCodeManualJoin = false;
@@ -4184,7 +4189,16 @@ app.notifyOnlineSocketSendBlocked = function() {
     wx.showToast({ title: '观战模式无法操作', icon: 'none' });
     return;
   }
-  if (typeof app.shouldAutoReconnectOnline === 'function' && app.shouldAutoReconnectOnline()) {
+  var liveOnlineGame =
+    app.isPvpOnline &&
+    app.screen === 'game' &&
+    app.onlineRoomId &&
+    app.onlineToken;
+  if (
+    liveOnlineGame ||
+    (typeof app.shouldAutoReconnectOnline === 'function' &&
+      app.shouldAutoReconnectOnline())
+  ) {
     if (
       app.socketTask &&
       typeof app.socketTask.send === 'function' &&
