@@ -2806,11 +2806,12 @@ app.drawHomeBottomDock = function(hl, th) {
   app.ctx.stroke();
   var labels = [
     app.isHomeCheckinDoneToday() ? '今日已签' : '每日签到',
+    '对战排行',
     '我的战绩',
     '杂货铺'
   ];
   var innerW = app.W - padH * 2;
-  var colW = innerW / 3;
+  var colW = innerW / 4;
   var baseX = padH;
   var iconBox = app.rpx(78);
   var iconY = y0 + app.rpx(34) + iconBox / 2;
@@ -2819,18 +2820,19 @@ app.drawHomeBottomDock = function(hl, th) {
   var labelCy = iconY + iconBox / 2 + app.rpx(20);
   var dockPivotY = (iconY + labelCy) * 0.5;
   var i;
-  /** 三格对应原四格资源列 0、2、3（已去掉对战排行列） */
   var dockImgs = [
     app.homeDockCheckinImg,
+    app.homeDockRankImg,
     app.homeDockHistoryImg,
     app.homeDockSkinImg
   ];
   var dockDrawVec = [
     app.drawHomeDockIconCheckin,
+    app.drawHomeDockIconRank,
     app.drawHomeDockIconHistory,
     app.drawHomeDockIconSkin
   ];
-  for (i = 0; i < 3; i++) {
+  for (i = 0; i < 4; i++) {
     var cxi = baseX + colW * i + colW / 2;
     var pressed = app.homePressedDockCol === i;
     var stroke = pressed ? th.title : th.subtitle;

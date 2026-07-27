@@ -2014,7 +2014,7 @@ app.homeDrawerOpen = false;
 app.homePressedButton = null;
 /** 子页全屏入口按下态：人机选色 / 复盘 hub 等 */
 app.subPagePressedButton = null;
-/** 首页底部 Dock 按下列：0～2 或 null（与 hitHomeBottomNav 一致：签、战绩、杂货铺） */
+/** 首页底部 Dock 按下列：0～3 或 null（与 hitHomeBottomNav 一致：签、对战排行、战绩、杂货铺） */
 app.homePressedDockCol = null;
 
 /** 我的战绩页：本机最近对局 + 滚动 */

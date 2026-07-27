@@ -1163,6 +1163,15 @@ app.draw = function() {
     }
     return;
   }
+  if (app.screen === 'rank_board') {
+    if (typeof app.drawRankLeaderboardScreen === 'function') {
+      app.drawRankLeaderboardScreen();
+    }
+    if (typeof app.drawFriendListGlobalChrome === 'function') {
+      app.drawFriendListGlobalChrome();
+    }
+    return;
+  }
   if (app.screen === 'friend_battle') {
     if (typeof app.drawFriendBattleHub === 'function') {
       app.drawFriendBattleHub();
@@ -2952,9 +2961,9 @@ app.hitHomeBottomNav = function(clientX, clientY) {
     return null;
   }
   var innerW = app.W - pad * 2;
-  var colW = innerW / 3;
+  var colW = innerW / 4;
   var col = Math.floor((clientX - pad) / colW);
-  if (col < 0 || col > 2) {
+  if (col < 0 || col > 3) {
     return null;
   }
   return col;
@@ -5022,6 +5031,28 @@ wx.onTouchStart(function (e) {
     return;
   }
 
+  if (app.screen === 'rank_board') {
+    if (
+      typeof app.hitRankBoardBack === 'function' &&
+      app.hitRankBoardBack(x, y)
+    ) {
+      if (typeof app.closeRankLeaderboardScreen === 'function') {
+        app.closeRankLeaderboardScreen();
+      }
+      return;
+    }
+    if (
+      e.touches &&
+      e.touches[0] &&
+      typeof app.hitRankBoardListZone === 'function' &&
+      app.hitRankBoardListZone(x, y)
+    ) {
+      app.rankBoardScrollTouchId = e.touches[0].identifier;
+      app.rankBoardScrollLastY = y;
+    }
+    return;
+  }
+
   if (
     (app.screen === 'home' || app.screen === 'game') &&
     app.ratingCardVisible
@@ -5827,6 +5858,24 @@ if (typeof wx.onTouchMove === 'function') {
       return;
     }
     if (app.screen !== 'history' || app.historyScrollTouchId == null) {
+      if (
+        app.screen === 'rank_board' &&
+        app.rankBoardScrollTouchId != null &&
+        e.touches &&
+        e.touches.length
+      ) {
+        var trb = null;
+        var irb;
+        for (irb = 0; irb < e.touches.length; irb++) {
+          if (e.touches[irb].identifier == app.rankBoardScrollTouchId) {
+            trb = e.touches[irb];
+            break;
+          }
+        }
+        if (trb && typeof app.onRankBoardTouchMove === 'function') {
+          app.onRankBoardTouchMove(trb);
+        }
+      }
       return;
     }
     var touches = e.touches;
@@ -6271,7 +6320,7 @@ if (typeof wx.onTouchEnd === 'function') {
       app.homePressedDockCol = null;
       app.draw();
       if (endDock === pdc) {
-        if (pdc === 2) {
+        if (pdc === 3) {
           app.openPieceSkinModal();
           return;
         }
@@ -6344,6 +6393,12 @@ if (typeof wx.onTouchEnd === 'function') {
           return;
         }
         if (pdc === 1) {
+          if (typeof app.openRankLeaderboardScreen === 'function') {
+            app.openRankLeaderboardScreen();
+          }
+          return;
+        }
+        if (pdc === 2) {
           app.openHistoryScreen();
           return;
         }
@@ -6429,6 +6484,9 @@ if (typeof wx.onTouchCancel === 'function') {
       app.historyScrollTouchId = null;
       app.stopHistoryMomentum();
       app.scheduleHistoryScrollbarFadeRedraw();
+    }
+    if (app.screen === 'rank_board') {
+      app.rankBoardScrollTouchId = null;
     }
     if (app.replayControlPressedId != null || app.replayTouchIdentifier != null) {
       app.replayControlPressedId = null;

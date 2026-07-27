@@ -149,6 +149,19 @@ function meRatingOptions() {
   };
 }
 
+/** GET /api/rating/leaderboard?limit=：天梯实时榜（需 Authorization） */
+function ratingLeaderboardOptions(limit) {
+  var lim =
+    limit !== undefined && limit !== null && !isNaN(Number(limit))
+      ? Math.max(1, Math.min(100, Math.floor(Number(limit))))
+      : 100;
+  return {
+    url: GOMOKU_API_BASE + '/api/rating/leaderboard?limit=' + lim,
+    method: 'GET',
+    header: withAuthHeaders({})
+  };
+}
+
 /** GET /api/me/shop/catalog：全量（无参），与旧版一致，供价表覆盖 */
 function meShopCatalogOptions() {
   return {
@@ -665,6 +678,7 @@ module.exports = {
   roomApiRandomMatchFallbackOptions: roomApiRandomMatchFallbackOptions,
   roomApiRandomBotProfileOptions: roomApiRandomBotProfileOptions,
   meRatingOptions: meRatingOptions,
+  ratingLeaderboardOptions: ratingLeaderboardOptions,
   meShopCatalogOptions: meShopCatalogOptions,
   meShopCatalogPageOptions: meShopCatalogPageOptions,
   mePveGameOptions: mePveGameOptions,
