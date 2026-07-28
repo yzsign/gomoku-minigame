@@ -24,7 +24,19 @@ var AI_MAX_CANDIDATES = 34;
 
 /** 主线程兜底：尽量强但仍控卡顿；常用人机走 Worker */
 var AI_TIME_BUDGET_MS = 800;
+/** VCF（连续冲四）最大递归层数（含双方着手） */
+var VCF_MAX_PLIES = 24;
+/** VCF 根与每层扩展的冲四候选上限 */
+var VCF_MAX_CANDIDATES = 28;
+/** VCT 候选略多（含活三） */
+var VCT_MAX_CANDIDATES = 36;
+/** 防守方必防点分支上限（活三多路防） */
+var VCT_MAX_DEFENSE_BRANCH = 10;
 var searchDeadline = 0;
+
+function searchTimeUp() {
+  return AI_TIME_BUDGET_MS > 0 && searchDeadline > 0 && Date.now() > searchDeadline;
+}
 
 function createBoard() {
   var b = [];
@@ -766,6 +778,358 @@ function forcedPriorityMove(board, aiColor) {
   return null;
 }
 
+/* ---------- VCF / VCT：连续威胁必胜（与 GomokuAiEngine 一致） ---------- */
+
+function continuousThreatAtStone(board, r, c, color) {
+  if (checkWin(board, r, c, color)) {
+    return {
+      win: true,
+      nL4: 0,
+      nR4: 0,
+      nL3: 0,
+      independentDoubleRush: false,
+      doubleLiveThree: false,
+      liveThreeAndRushFour: false
+    };
+  }
+  var nL4 = 0;
+  var nR4 = 0;
+  var nL3 = 0;
+  var d;
+  for (d = 0; d < DIRS.length; d++) {
+    var seg = directionSegmentMerged(board, r, c, DIRS[d][0], DIRS[d][1], color);
+    if (seg === 'L4') {
+      nL4++;
+    } else if (seg === 'R4') {
+      nR4++;
+    } else if (seg === 'L3') {
+      nL3++;
+    }
+  }
+  return {
+    win: false,
+    nL4: nL4,
+    nR4: nR4,
+    nL3: nL3,
+    independentDoubleRush: nR4 >= 2 && areIndependentRushFours(board, r, c, color),
+    doubleLiveThree: nL3 >= 2,
+    liveThreeAndRushFour: nL3 >= 1 && nR4 >= 1
+  };
+}
+
+function isTerminalContinuousThreat(t) {
+  return (
+    t.win ||
+    t.nL4 >= 1 ||
+    t.independentDoubleRush ||
+    t.doubleLiveThree ||
+    t.liveThreeAndRushFour
+  );
+}
+
+function isVctForcingThreat(t, vct) {
+  if (t.win || t.nL4 >= 1 || t.nR4 >= 1) {
+    return true;
+  }
+  if (!vct) {
+    return false;
+  }
+  return (
+    t.nL3 >= 1 ||
+    t.doubleLiveThree ||
+    t.liveThreeAndRushFour
+  );
+}
+
+function isStrongAttackerReply(board, r, c, color, vct) {
+  var t = continuousThreatAtStone(board, r, c, color);
+  if (isTerminalContinuousThreat(t)) {
+    return true;
+  }
+  if (!vct) {
+    return t.nR4 >= 1;
+  }
+  return (
+    t.nR4 >= 1 ||
+    t.nL3 >= 1 ||
+    t.doubleLiveThree ||
+    t.liveThreeAndRushFour
+  );
+}
+
+function mergeDefensePoints(listA, listB) {
+  var seen = {};
+  var out = [];
+  var i;
+  function add(mv) {
+    var k = mv.r + ',' + mv.c;
+    if (!seen[k]) {
+      seen[k] = 1;
+      out.push(mv);
+    }
+  }
+  for (i = 0; i < listA.length; i++) {
+    add(listA[i]);
+  }
+  for (i = 0; i < listB.length; i++) {
+    add(listB[i]);
+  }
+  return out;
+}
+
+function collectRushFourBlockPoints(board, r, c, color) {
+  var seen = {};
+  var out = [];
+  var d;
+  for (d = 0; d < DIRS.length; d++) {
+    if (directionSegmentMerged(board, r, c, DIRS[d][0], DIRS[d][1], color) !== 'R4') {
+      continue;
+    }
+    var w = rushWinningCellAlongLine(board, r, c, DIRS[d][0], DIRS[d][1], color);
+    if (!w || board[w.r][w.c] !== EMPTY) {
+      continue;
+    }
+    var k = w.r + ',' + w.c;
+    if (!seen[k]) {
+      seen[k] = 1;
+      out.push(w);
+    }
+  }
+  return out;
+}
+
+function collectNextTurnCriticalPoints(board, attacker, vct) {
+  var seen = {};
+  var out = [];
+  var pool = getCandidates(board);
+  var i;
+  for (i = 0; i < pool.length; i++) {
+    if (searchTimeUp()) {
+      break;
+    }
+    var p = pool[i];
+    if (board[p.r][p.c] !== EMPTY) {
+      continue;
+    }
+    board[p.r][p.c] = attacker;
+    if (isStrongAttackerReply(board, p.r, p.c, attacker, vct)) {
+      var k = p.r + ',' + p.c;
+      if (!seen[k]) {
+        seen[k] = 1;
+        out.push({ r: p.r, c: p.c });
+      }
+    }
+    board[p.r][p.c] = EMPTY;
+  }
+  return out;
+}
+
+function hasUnblockableDoubleThreat(blocks) {
+  return blocks.length >= 2;
+}
+
+function continuousThreatResolveAfterAttack(board, ar, ac, attacker, depthLeft, vct) {
+  if (searchTimeUp() || depthLeft <= 0) {
+    return false;
+  }
+  var t = continuousThreatAtStone(board, ar, ac, attacker);
+  if (isTerminalContinuousThreat(t)) {
+    return true;
+  }
+  var rushBlocks = collectRushFourBlockPoints(board, ar, ac, attacker);
+  if (hasUnblockableDoubleThreat(rushBlocks)) {
+    return true;
+  }
+  var nextCrit = vct ? collectNextTurnCriticalPoints(board, attacker, true) : [];
+  if (vct && hasUnblockableDoubleThreat(nextCrit)) {
+    return true;
+  }
+  var defenses = mergeDefensePoints(rushBlocks, nextCrit);
+  if (defenses.length === 0) {
+    return false;
+  }
+  var defender = attacker === BLACK ? WHITE : BLACK;
+  var limit =
+    defenses.length < VCT_MAX_DEFENSE_BRANCH
+      ? defenses.length
+      : VCT_MAX_DEFENSE_BRANCH;
+  var di;
+  for (di = 0; di < limit; di++) {
+    if (searchTimeUp()) {
+      break;
+    }
+    var b = defenses[di];
+    if (board[b.r][b.c] !== EMPTY) {
+      continue;
+    }
+    board[b.r][b.c] = defender;
+    var ok = continuousThreatSearchAttacker(board, attacker, depthLeft - 1, vct);
+    board[b.r][b.c] = EMPTY;
+    if (!ok) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function continuousThreatCandidateMoves(board, color, vct) {
+  var pool = getCandidates(board);
+  var forcing = [];
+  var cap = vct ? VCT_MAX_CANDIDATES : VCF_MAX_CANDIDATES;
+  var i;
+  for (i = 0; i < pool.length; i++) {
+    var m = pool[i];
+    if (board[m.r][m.c] !== EMPTY) {
+      continue;
+    }
+    board[m.r][m.c] = color;
+    var t = continuousThreatAtStone(board, m.r, m.c, color);
+    board[m.r][m.c] = EMPTY;
+    if (isVctForcingThreat(t, vct)) {
+      forcing.push(m);
+    }
+  }
+  if (!forcing.length) {
+    return forcing;
+  }
+  return sortMovesByHeuristic(board, forcing, color, true, cap);
+}
+
+function continuousThreatSearchAttacker(board, attacker, depthLeft, vct) {
+  if (searchTimeUp() || depthLeft <= 0) {
+    return false;
+  }
+  var moves = continuousThreatCandidateMoves(board, attacker, vct);
+  var i;
+  for (i = 0; i < moves.length; i++) {
+    if (searchTimeUp()) {
+      break;
+    }
+    var m = moves[i];
+    if (board[m.r][m.c] !== EMPTY) {
+      continue;
+    }
+    board[m.r][m.c] = attacker;
+    if (checkWin(board, m.r, m.c, attacker)) {
+      board[m.r][m.c] = EMPTY;
+      return true;
+    }
+    if (continuousThreatResolveAfterAttack(board, m.r, m.c, attacker, depthLeft, vct)) {
+      board[m.r][m.c] = EMPTY;
+      return true;
+    }
+    board[m.r][m.c] = EMPTY;
+  }
+  return false;
+}
+
+function findContinuousThreatMove(board, aiColor, vct) {
+  var moves = continuousThreatCandidateMoves(board, aiColor, vct);
+  var i;
+  for (i = 0; i < moves.length; i++) {
+    if (searchTimeUp()) {
+      break;
+    }
+    var m = moves[i];
+    if (board[m.r][m.c] !== EMPTY) {
+      continue;
+    }
+    board[m.r][m.c] = aiColor;
+    if (checkWin(board, m.r, m.c, aiColor)) {
+      board[m.r][m.c] = EMPTY;
+      return m;
+    }
+    if (
+      continuousThreatResolveAfterAttack(
+        board,
+        m.r,
+        m.c,
+        aiColor,
+        VCF_MAX_PLIES,
+        vct
+      )
+    ) {
+      board[m.r][m.c] = EMPTY;
+      return m;
+    }
+    board[m.r][m.c] = EMPTY;
+  }
+  return null;
+}
+
+function findVcfMove(board, aiColor) {
+  return findContinuousThreatMove(board, aiColor, false);
+}
+
+function findVctMove(board, aiColor) {
+  return findContinuousThreatMove(board, aiColor, true);
+}
+
+function findOpponentContinuousThreatBlock(board, aiColor) {
+  var opp = aiColor === BLACK ? WHITE : BLACK;
+  var m = findContinuousThreatMove(board, opp, false);
+  if (m) {
+    return m;
+  }
+  return findContinuousThreatMove(board, opp, true);
+}
+
+function runRootMinimax(board, aiColor, searchDepth, maxCandidates, ordered) {
+  var bestMove = ordered[0];
+  var bestScore = -1e15;
+  var rootMoves = [];
+  var rootScores = [];
+  var alpha = -1e15;
+  var beta = 1e15;
+  var i;
+  for (i = 0; i < ordered.length; i++) {
+    if (searchTimeUp()) {
+      break;
+    }
+    var m = ordered[i];
+    if (board[m.r][m.c] !== EMPTY) {
+      continue;
+    }
+    board[m.r][m.c] = aiColor;
+    if (checkWin(board, m.r, m.c, aiColor)) {
+      board[m.r][m.c] = EMPTY;
+      return {
+        instant: m,
+        move: m,
+        score: bestScore,
+        rootMoves: rootMoves,
+        rootScores: rootScores
+      };
+    }
+    var sc = minimax(
+      board,
+      searchDepth - 1,
+      alpha,
+      beta,
+      false,
+      aiColor,
+      maxCandidates
+    );
+    board[m.r][m.c] = EMPTY;
+    rootMoves.push(m);
+    rootScores.push(sc);
+    if (sc > bestScore) {
+      bestScore = sc;
+      bestMove = m;
+    }
+    if (sc > alpha) {
+      alpha = sc;
+    }
+  }
+  return {
+    instant: null,
+    move: bestMove,
+    score: bestScore,
+    rootMoves: rootMoves,
+    rootScores: rootScores
+  };
+}
+
 /**
  * 沿每条线扫描连续棋块（活二/活三/活四等），比五格窗口更能反映防守压力
  */
@@ -1191,6 +1555,21 @@ function aiMove(board, aiColor, options) {
       return forced;
     }
 
+    var vcfMove = findVcfMove(board, aiColor);
+    if (vcfMove) {
+      return vcfMove;
+    }
+
+    var vctMove = findVctMove(board, aiColor);
+    if (vctMove) {
+      return vctMove;
+    }
+
+    var blockContinuous = findOpponentContinuousThreatBlock(board, aiColor);
+    if (blockContinuous) {
+      return blockContinuous;
+    }
+
     var joseki = openingBook.getJosekiMove(board, aiColor, options);
     var ordered = sortMovesByHeuristic(
       board,
@@ -1223,37 +1602,23 @@ function aiMove(board, aiColor, options) {
       }
     }
     var bestMove = ordered[0];
-    var bestScore = -1e15;
     var rootMoves = [];
     var rootScores = [];
-    var alpha = -1e15;
-    var beta = 1e15;
-    var i;
-    for (i = 0; i < ordered.length; i++) {
-      var m = ordered[i];
-      if (board[m.r][m.c] !== EMPTY) continue;
-      board[m.r][m.c] = aiColor;
-      if (checkWin(board, m.r, m.c, aiColor)) {
-        board[m.r][m.c] = EMPTY;
-        return m;
+    var minDepth = searchDepth <= 3 ? 2 : Math.max(2, searchDepth - 4);
+    var d;
+    for (d = minDepth; d <= searchDepth; d++) {
+      if (searchTimeUp()) {
+        break;
       }
-      var sc = minimax(
-        board,
-        searchDepth - 1,
-        alpha,
-        beta,
-        false,
-        aiColor,
-        maxCandidates
-      );
-      board[m.r][m.c] = EMPTY;
-      rootMoves.push(m);
-      rootScores.push(sc);
-      if (sc > bestScore) {
-        bestScore = sc;
-        bestMove = m;
+      var rootRes = runRootMinimax(board, aiColor, d, maxCandidates, ordered);
+      if (rootRes.instant) {
+        return rootRes.instant;
       }
-      if (sc > alpha) alpha = sc;
+      if (rootRes.rootMoves.length) {
+        bestMove = rootRes.move;
+        rootMoves = rootRes.rootMoves;
+        rootScores = rootRes.rootScores;
+      }
     }
 
     var picked = pickNearBestRootMove(rootMoves, rootScores, nearBestMargin);

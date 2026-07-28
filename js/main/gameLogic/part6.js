@@ -111,6 +111,9 @@ authApi.silentLogin(null, function () {
       try {
         wx.setStorageSync(app.PROFILE_PROMPT_STORAGE_KEY, '1');
       } catch (ePriv) {}
+      if (typeof app.ensureServerNicknameOrGuest === 'function') {
+        app.ensureServerNicknameOrGuest();
+      }
     }
   );
 });

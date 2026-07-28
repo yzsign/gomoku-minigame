@@ -431,6 +431,20 @@ module.exports = function registerFriendListHome(app, deps) {
       }
     }
 
+    if (
+      app.screen === 'rank_board' &&
+      typeof app.getRankBoardPageLayout === 'function'
+    ) {
+      var rbL = app.getRankBoardPageLayout();
+      if (
+        rbL &&
+        typeof rbL.listTop === 'number' &&
+        typeof rbL.listBottom === 'number'
+      ) {
+        return fin(rbL.listTop - r - app.rpx(8), rbL.listBottom - r - m);
+      }
+    }
+
     if (app.screen === 'matching' && typeof app.getMatchingPageLayout === 'function') {
       var mL = app.getMatchingPageLayout();
       if (mL && typeof mL.cancelCy === 'number') {
@@ -2721,6 +2735,13 @@ module.exports = function registerFriendListHome(app, deps) {
 
   app.onHomeFriendListTouchStart = function (x, y, e) {
     app.ensureHomeFriendListPersistedStateOnce();
+    if (
+      app.screen === 'rank_board' &&
+      typeof app.hitRankBoardListZone === 'function' &&
+      app.hitRankBoardListZone(x, y)
+    ) {
+      return false;
+    }
     if (app._flAnimMode === 'out') {
       return true;
     }
@@ -2851,12 +2872,25 @@ module.exports = function registerFriendListHome(app, deps) {
     }
 
     if (!insidePanel) {
+      if (
+        app.screen === 'rank_board' &&
+        typeof app.hitRankBoardListZone === 'function' &&
+        app.hitRankBoardListZone(x, y)
+      ) {
+        return false;
+      }
       return true;
     }
     return true;
   };
 
   app.onHomeFriendListTouchMove = function (e) {
+    if (
+      app.screen === 'rank_board' &&
+      app.rankBoardScrollTouchId != null
+    ) {
+      return false;
+    }
     if (!app.homeFriendListOpen && app._friendFabTouchId != null) {
       var touchesFab = e.touches;
       if (!touchesFab || !touchesFab.length) {

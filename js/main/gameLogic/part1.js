@@ -56,6 +56,7 @@ app.playPlaceStoneSound = function() {
 /** 首页画布战绩卡片（替代 wx.showModal） */
 app.ratingCardVisible = false;
 app.ratingCardData = null;
+app.ratingCardAvatarPreviewVisible = false;
 app.ratingFetchInFlight = false;
 /** 好友申请 POST 防重复点击（friend-request-social-spec §6.1） */
 app.addFriendInFlight = false;
@@ -73,9 +74,11 @@ app.clearRatingCardAddFriendTouch = function () {
 
 /** 每日签到：服务端 wxcloudrun-gomoku（POST /api/me/checkin）+ 画布弹窗 */
 app.CHECKIN_DAILY_POINTS = 10;
+app.CHECKIN_MAKEUP_POINTS = 20;
 app.checkinStateCache = null;
 app.checkinModalVisible = false;
 app.checkinModalData = null;
+app.checkinMakeupInFlight = false;
 
 /** 首页「加入房间」自绘弹窗（替代 wx.showModal） */
 app.joinRoomModalVisible = false;
@@ -1758,6 +1761,115 @@ app.hitWhichGameBoardNameAvatar = function(clientX, clientY) {
  * 调用的时机见 part6：在 silentLogin 之后执行，以便用 token 拉取服务端资料。
  */
 app.profileModalServerCheckInFlight = false;
+app._ensureGuestNickInFlight = false;
+
+/**
+ * 已标记「不再弹完善资料」但服务端仍无昵称时，补写随机游客名（与拒绝微信授权同路径）。
+ * 首访未弹窗前不自动写，以免绕过用户选择。
+ */
+app.ensureServerNicknameOrGuest = function(onDone) {
+  if (app._ensureGuestNickInFlight) {
+    if (typeof onDone === 'function') {
+      onDone(false);
+    }
+    return;
+  }
+  if (typeof wx === 'undefined') {
+    if (typeof onDone === 'function') {
+      onDone(false);
+    }
+    return;
+  }
+  try {
+    if (wx.getStorageSync(app.PROFILE_PROMPT_STORAGE_KEY) !== '1') {
+      if (typeof onDone === 'function') {
+        onDone(false);
+      }
+      return;
+    }
+  } catch (eKey) {
+    if (typeof onDone === 'function') {
+      onDone(false);
+    }
+    return;
+  }
+  if (
+    !roomApi ||
+    typeof roomApi.meRatingOptions !== 'function' ||
+    !authApi.getSessionToken ||
+    !authApi.getSessionToken()
+  ) {
+    if (typeof onDone === 'function') {
+      onDone(false);
+    }
+    return;
+  }
+  var cachedWx =
+    typeof app.readCachedWeChatUserInfo === 'function'
+      ? app.readCachedWeChatUserInfo()
+      : null;
+  if (
+    cachedWx &&
+    cachedWx.nickName &&
+    !app.isRandomGuestDisplayName(String(cachedWx.nickName).trim())
+  ) {
+    authApi.silentLogin(cachedWx, function (ok) {
+      if (typeof onDone === 'function') {
+        onDone(ok);
+      }
+    });
+    return;
+  }
+  app._ensureGuestNickInFlight = true;
+  wx.request(
+    Object.assign(roomApi.meRatingOptions(), {
+      complete: function() {
+        app._ensureGuestNickInFlight = false;
+      },
+      success: function (res) {
+        if (res.statusCode !== 200 || !res.data) {
+          if (typeof onDone === 'function') {
+            onDone(false);
+          }
+          return;
+        }
+        var d = res.data;
+        if (d && typeof d === 'string') {
+          try {
+            d = JSON.parse(d);
+          } catch (pe) {
+            d = null;
+          }
+        }
+        var nick =
+          d && typeof d.nickname === 'string' ? String(d.nickname).trim() : '';
+        if (nick) {
+          if (typeof onDone === 'function') {
+            onDone(true);
+          }
+          return;
+        }
+        if (typeof app.applyGuestProfileAfterWeChatDeclined !== 'function') {
+          if (typeof onDone === 'function') {
+            onDone(false);
+          }
+          return;
+        }
+        app.applyGuestProfileAfterWeChatDeclined(function (ok) {
+          if (typeof onDone === 'function') {
+            onDone(!!ok);
+          }
+        });
+      },
+      fail: function () {
+        if (typeof onDone === 'function') {
+          onDone(false);
+        }
+      }
+    })
+  );
+};
+
 app.trySkipFirstVisitProfileFromServer = function() {
   if (app.profileModalServerCheckInFlight) {
     return;
@@ -1819,6 +1931,14 @@ app.trySkipFirstVisitProfileFromServer = function() {
           }
           return;
         }
+        try {
+          if (wx.getStorageSync(app.PROFILE_PROMPT_STORAGE_KEY) === '1') {
+            if (typeof app.ensureServerNicknameOrGuest === 'function') {
+              app.ensureServerNicknameOrGuest();
+            }
+            return;
+          }
+        } catch (eDone) {}
         app.scheduleFirstVisitProfileModal();
       },
       fail: function () {
@@ -1936,6 +2056,9 @@ app.maybeFirstVisitProfileModal = function() {
   }
   try {
     if (wx.getStorageSync(app.PROFILE_PROMPT_STORAGE_KEY) === '1') {
+      if (typeof app.ensureServerNicknameOrGuest === 'function') {
+        app.ensureServerNicknameOrGuest();
+      }
       return;
     }
   } catch (e0) {}
@@ -2233,7 +2356,7 @@ app.getOrLoadHistoryOpponentAvatar = function(url) {
   var img = wx.createImage();
   img.onload = function () {
     app.historyOppAvatarImgCache[url] = img;
-    if (app.screen === 'history') {
+    if (app.screen === 'history' || app.screen === 'rank_board' || app.ratingCardVisible) {
       try {
         app.draw();
       } catch (e) {}
@@ -2241,7 +2364,7 @@ app.getOrLoadHistoryOpponentAvatar = function(url) {
   };
   img.onerror = function () {
     app.historyOppAvatarImgCache[url] = false;
-    if (app.screen === 'history') {
+    if (app.screen === 'history' || app.screen === 'rank_board' || app.ratingCardVisible) {
       try {
         app.draw();
       } catch (e) {}

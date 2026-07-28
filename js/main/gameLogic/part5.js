@@ -4906,67 +4906,11 @@ wx.onTouchStart(function (e) {
   }
 
   if (app.screen === 'history') {
-    if (app.ratingCardVisible) {
-      if (app.hitRatingCardClose(x, y)) {
-        if (typeof app.clearRatingCardAddFriendTouch === 'function') {
-          app.clearRatingCardAddFriendTouch();
-        }
-        app.ratingCardVisible = false;
-        app.ratingCardData = null;
-        if (typeof app.destroyRatingCardSyncProfileNativeBtn === 'function') {
-          app.destroyRatingCardSyncProfileNativeBtn();
-        }
-        app.draw();
-        return;
-      }
-      if (
-        typeof app.hitRatingCardAddFriend === 'function' &&
-        app.hitRatingCardAddFriend(x, y)
-      ) {
-        var rdHist = app.ratingCardData;
-        if (
-          rdHist &&
-          rdHist.addFriendEnabled !== false &&
-          !app.addFriendInFlight
-        ) {
-          app.ratingCardAddFriendArmed = true;
-          app.ratingCardAddFriendPressed = true;
-          app.ratingCardAddFriendTouchStartX = x;
-          app.ratingCardAddFriendTouchStartY = y;
-          app.ratingCardAddFriendTouchId =
-            e.touches && e.touches[0] ? e.touches[0].identifier : null;
-          app.draw();
-          return;
-        }
-        if (typeof app.onRatingCardAddFriendTap === 'function') {
-          app.onRatingCardAddFriendTap();
-        }
-        return;
-      }
-      if (
-        typeof app.hitRatingCardSyncProfile === 'function' &&
-        app.hitRatingCardSyncProfile(x, y)
-      ) {
-        if (
-          !app.ratingCardSyncProfileNativeBtn &&
-          typeof app.onRatingCardProfileSyncTap === 'function'
-        ) {
-          app.onRatingCardProfileSyncTap();
-        }
-        return;
-      }
-      if (!app.hitRatingCardInside(x, y)) {
-        if (typeof app.clearRatingCardAddFriendTouch === 'function') {
-          app.clearRatingCardAddFriendTouch();
-        }
-        app.ratingCardVisible = false;
-        app.ratingCardData = null;
-        if (typeof app.destroyRatingCardSyncProfileNativeBtn === 'function') {
-          app.destroyRatingCardSyncProfileNativeBtn();
-        }
-        app.draw();
-        return;
-      }
+    if (
+      app.ratingCardVisible &&
+      typeof app.handleRatingCardOverlayTouchStart === 'function' &&
+      app.handleRatingCardOverlayTouchStart(x, y, e)
+    ) {
       return;
     }
     if (typeof app.onHomeFriendListTouchStart === 'function' &&
@@ -5033,12 +4977,10 @@ wx.onTouchStart(function (e) {
 
   if (app.screen === 'rank_board') {
     if (
-      typeof app.hitRankBoardBack === 'function' &&
-      app.hitRankBoardBack(x, y)
+      app.ratingCardVisible &&
+      typeof app.handleRatingCardOverlayTouchStart === 'function' &&
+      app.handleRatingCardOverlayTouchStart(x, y, e)
     ) {
-      if (typeof app.closeRankLeaderboardScreen === 'function') {
-        app.closeRankLeaderboardScreen();
-      }
       return;
     }
     if (
@@ -5047,8 +4989,31 @@ wx.onTouchStart(function (e) {
       typeof app.hitRankBoardListZone === 'function' &&
       app.hitRankBoardListZone(x, y)
     ) {
+      if (typeof app.stopRankBoardMomentum === 'function') {
+        app.stopRankBoardMomentum();
+      }
       app.rankBoardScrollTouchId = e.touches[0].identifier;
       app.rankBoardScrollLastY = y;
+      app.rankBoardScrollLastTs = Date.now();
+      app.rankBoardScrollVel = 0;
+      app.rankBoardListTouchStartX = x;
+      app.rankBoardListTouchStartY = y;
+      return;
+    }
+    if (
+      typeof app.onHomeFriendListTouchStart === 'function' &&
+      app.onHomeFriendListTouchStart(x, y, e)
+    ) {
+      return;
+    }
+    if (
+      typeof app.hitRankBoardBack === 'function' &&
+      app.hitRankBoardBack(x, y)
+    ) {
+      if (typeof app.closeRankLeaderboardScreen === 'function') {
+        app.closeRankLeaderboardScreen();
+      }
+      return;
     }
     return;
   }
@@ -5057,67 +5022,12 @@ wx.onTouchStart(function (e) {
     (app.screen === 'home' || app.screen === 'game') &&
     app.ratingCardVisible
   ) {
-    if (app.hitRatingCardClose(x, y)) {
-      if (typeof app.clearRatingCardAddFriendTouch === 'function') {
-        app.clearRatingCardAddFriendTouch();
-      }
-      app.ratingCardVisible = false;
-      app.ratingCardData = null;
-      if (typeof app.destroyRatingCardSyncProfileNativeBtn === 'function') {
-        app.destroyRatingCardSyncProfileNativeBtn();
-      }
-      app.draw();
-      return;
-    }
     if (
-      typeof app.hitRatingCardAddFriend === 'function' &&
-      app.hitRatingCardAddFriend(x, y)
+      typeof app.handleRatingCardOverlayTouchStart === 'function' &&
+      app.handleRatingCardOverlayTouchStart(x, y, e)
     ) {
-      var rdCard = app.ratingCardData;
-      if (
-        rdCard &&
-        rdCard.addFriendEnabled !== false &&
-        !app.addFriendInFlight
-      ) {
-        app.ratingCardAddFriendArmed = true;
-        app.ratingCardAddFriendPressed = true;
-        app.ratingCardAddFriendTouchStartX = x;
-        app.ratingCardAddFriendTouchStartY = y;
-        app.ratingCardAddFriendTouchId =
-          e.touches && e.touches[0] ? e.touches[0].identifier : null;
-        app.draw();
-        return;
-      }
-      if (typeof app.onRatingCardAddFriendTap === 'function') {
-        app.onRatingCardAddFriendTap();
-      }
       return;
     }
-    if (
-      typeof app.hitRatingCardSyncProfile === 'function' &&
-      app.hitRatingCardSyncProfile(x, y)
-    ) {
-      if (
-        !app.ratingCardSyncProfileNativeBtn &&
-        typeof app.onRatingCardProfileSyncTap === 'function'
-      ) {
-        app.onRatingCardProfileSyncTap();
-      }
-      return;
-    }
-    if (!app.hitRatingCardInside(x, y)) {
-      if (typeof app.clearRatingCardAddFriendTouch === 'function') {
-        app.clearRatingCardAddFriendTouch();
-      }
-      app.ratingCardVisible = false;
-      app.ratingCardData = null;
-      if (typeof app.destroyRatingCardSyncProfileNativeBtn === 'function') {
-        app.destroyRatingCardSyncProfileNativeBtn();
-      }
-      app.draw();
-      return;
-    }
-    return;
   }
 
   if (app.screen === 'home' && app.joinRoomModalVisible) {
@@ -5261,6 +5171,50 @@ wx.onTouchStart(function (e) {
       app.hitCheckinModalNextMonth(x, y)
     ) {
       return;
+    }
+    if (app.checkinModalData) {
+      var dayPick = app.hitCheckinModalCalendarDay(
+        x,
+        y,
+        app.checkinModalData.viewYear,
+        app.checkinModalData.viewMonth
+      );
+      if (
+        dayPick &&
+        app.isCheckinDayMakeupEligible(
+          dayPick.viewYear,
+          dayPick.viewMonth,
+          dayPick.dayNum
+        )
+      ) {
+        var ptsNeed = app.CHECKIN_MAKEUP_POINTS;
+        var ptsHave = app.getCheckinState().tuanPoints;
+        if (ptsHave < ptsNeed) {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '积分不足', icon: 'none' });
+          }
+          return;
+        }
+        var ymdLabel = dayPick.ymd;
+        if (typeof wx.showModal === 'function') {
+          wx.showModal({
+            title: '补签',
+            content: '消耗 ' + ptsNeed + ' 积分补签 ' + ymdLabel + '？',
+            confirmText: '补签',
+            success: function(mr) {
+              if (mr.confirm) {
+                app.requestCheckinMakeup(ymdLabel);
+              }
+            }
+          });
+        } else {
+          app.requestCheckinMakeup(ymdLabel);
+        }
+        return;
+      }
+      if (dayPick) {
+        return;
+      }
     }
     if (!app.hitCheckinModalInside(x, y)) {
       app.checkinModalVisible = false;
@@ -5779,6 +5733,43 @@ wx.onTouchStart(function (e) {
 if (typeof wx.onTouchMove === 'function') {
   wx.onTouchMove(function (e) {
     if (
+      app.screen === 'rank_board' &&
+      app.rankBoardScrollTouchId != null &&
+      e.touches &&
+      e.touches.length
+    ) {
+      var trb0 = null;
+      var irb0;
+      for (irb0 = 0; irb0 < e.touches.length; irb0++) {
+        if (e.touches[irb0].identifier == app.rankBoardScrollTouchId) {
+          trb0 = e.touches[irb0];
+          break;
+        }
+      }
+      if (trb0) {
+        var dyRb = trb0.clientY - app.rankBoardScrollLastY;
+        app.rankBoardScrollLastY = trb0.clientY;
+        var nowRb = Date.now();
+        var dtRb = Math.max(5, nowRb - app.rankBoardScrollLastTs);
+        app.rankBoardScrollLastTs = nowRb;
+        var instVelRb = -dyRb / dtRb;
+        app.rankBoardScrollVel =
+          app.rankBoardScrollVel * 0.62 + instVelRb * 0.38;
+        app.rankBoardScrollY -= dyRb;
+        if (typeof app.getRankBoardScrollMetrics === 'function') {
+          var smRb = app.getRankBoardScrollMetrics();
+          if (app.rankBoardScrollY > smRb.maxScroll) {
+            app.rankBoardScrollY = smRb.maxScroll;
+          }
+          if (app.rankBoardScrollY < 0) {
+            app.rankBoardScrollY = 0;
+          }
+        }
+        app.draw();
+        return;
+      }
+    }
+    if (
       typeof app.onHomeFriendListTouchMove === 'function' &&
       app.onHomeFriendListTouchMove(e)
     ) {
@@ -5858,24 +5849,6 @@ if (typeof wx.onTouchMove === 'function') {
       return;
     }
     if (app.screen !== 'history' || app.historyScrollTouchId == null) {
-      if (
-        app.screen === 'rank_board' &&
-        app.rankBoardScrollTouchId != null &&
-        e.touches &&
-        e.touches.length
-      ) {
-        var trb = null;
-        var irb;
-        for (irb = 0; irb < e.touches.length; irb++) {
-          if (e.touches[irb].identifier == app.rankBoardScrollTouchId) {
-            trb = e.touches[irb];
-            break;
-          }
-        }
-        if (trb && typeof app.onRankBoardTouchMove === 'function') {
-          app.onRankBoardTouchMove(trb);
-        }
-      }
       return;
     }
     var touches = e.touches;
@@ -5918,6 +5891,56 @@ if (typeof wx.onTouchMove === 'function') {
 
 if (typeof wx.onTouchEnd === 'function') {
   wx.onTouchEnd(function (e) {
+    var teRankEarly = null;
+    if (
+      app.screen === 'rank_board' &&
+      app.rankBoardScrollTouchId != null &&
+      e.changedTouches
+    ) {
+      var riE;
+      for (riE = 0; riE < e.changedTouches.length; riE++) {
+        if (e.changedTouches[riE].identifier == app.rankBoardScrollTouchId) {
+          teRankEarly = e.changedTouches[riE];
+          break;
+        }
+      }
+    }
+    if (teRankEarly) {
+      var tapSlopRankE = app.rpx(56);
+      var rdxE = teRankEarly.clientX - app.rankBoardListTouchStartX;
+      var rdyE = teRankEarly.clientY - app.rankBoardListTouchStartY;
+      if (rdxE * rdxE + rdyE * rdyE <= tapSlopRankE * tapSlopRankE) {
+        var rankTapUidE =
+          typeof app.hitRankBoardRowAvatar === 'function'
+            ? app.hitRankBoardRowAvatar(
+                app.rankBoardListTouchStartX,
+                app.rankBoardListTouchStartY
+              )
+            : null;
+        if (rankTapUidE != null && rankTapUidE > 0) {
+          if (typeof app.showHistoryOpponentRatingModal === 'function') {
+            app.showHistoryOpponentRatingModal(rankTapUidE);
+          }
+        }
+      }
+      app.rankBoardScrollTouchId = null;
+      var vminRankE = 0.055;
+      if (Math.abs(app.rankBoardScrollVel) >= vminRankE) {
+        app.rankBoardMomentumLastTs = Date.now();
+        if (app.rankBoardMomentumRafId == null) {
+          app.rankBoardMomentumRafId = app.themeBubbleRaf(
+            app.tickRankBoardScrollMomentum
+          );
+        }
+      } else {
+        app.rankBoardScrollVel = 0;
+        if (typeof app.scheduleRankBoardScrollbarFadeRedraw === 'function') {
+          app.scheduleRankBoardScrollbarFadeRedraw();
+        }
+      }
+      app.draw();
+    }
+
     var t = e.changedTouches && e.changedTouches[0];
     if (
       t &&
@@ -5930,9 +5953,13 @@ if (typeof wx.onTouchEnd === 'function') {
     if (
       t &&
       typeof app.onHomeFriendListTouchEnd === 'function' &&
-      app.onHomeFriendListTouchEnd(t.clientX, t.clientY)
+      app.onHomeFriendListTouchEnd(t.clientX, t.clientY) &&
+      !teRankEarly
     ) {
       return;
+    }
+    if (teRankEarly && t && typeof app.onHomeFriendListTouchEnd === 'function') {
+      app.onHomeFriendListTouchEnd(t.clientX, t.clientY);
     }
 
     if (
@@ -6487,6 +6514,12 @@ if (typeof wx.onTouchCancel === 'function') {
     }
     if (app.screen === 'rank_board') {
       app.rankBoardScrollTouchId = null;
+      if (typeof app.stopRankBoardMomentum === 'function') {
+        app.stopRankBoardMomentum();
+      }
+      if (typeof app.scheduleRankBoardScrollbarFadeRedraw === 'function') {
+        app.scheduleRankBoardScrollbarFadeRedraw();
+      }
     }
     if (app.replayControlPressedId != null || app.replayTouchIdentifier != null) {
       app.replayControlPressedId = null;

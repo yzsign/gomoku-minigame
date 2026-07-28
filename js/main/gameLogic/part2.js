@@ -3005,22 +3005,68 @@ app.getHomeLayout = function() {
 }
 
 app.getRatingCardLayout = function() {
-  var w = Math.min(app.W - 48, 300);
+  var cd =
+    app.ratingCardVisible && app.ratingCardData ? app.ratingCardData : null;
+  var headerAvatar = !!(cd && cd.showHeaderAvatar);
+  var w = headerAvatar
+    ? Math.min(app.W - app.rpx(36), app.rpx(680))
+    : Math.min(app.W - 48, 300);
   var extra = 0;
-  if (app.ratingCardVisible && app.ratingCardData) {
-    var cd = app.ratingCardData;
+  if (cd) {
     if (cd.showSyncProfileBtn) {
-      extra += app.rpx(52);
+      extra += headerAvatar ? app.rpx(52) : 52;
     }
     if (cd.showAddFriendBtn) {
-      extra += app.rpx(58);
+      extra += headerAvatar ? app.rpx(58) : 58;
     }
   }
-  var h = 212 + extra;
+  var h = headerAvatar ? app.rpx(372) + extra : 200 + extra;
   var cx = app.W / 2;
-  var cy = app.H * 0.42;
-  return { cx: cx, cy: cy, w: w, h: h, r: 18 };
+  var cy = headerAvatar ? app.H * 0.4 : app.H * 0.42;
+  return { cx: cx, cy: cy, w: w, h: h, r: headerAvatar ? app.rpx(24) : 18 };
 }
+
+/** 对手战绩卡顶栏头像与昵称区（与 drawRatingCardOverlay 一致） */
+app.getRatingCardHeaderAvatarLayout = function() {
+  var d =
+    app.ratingCardVisible && app.ratingCardData ? app.ratingCardData : null;
+  if (!d || !d.showHeaderAvatar) {
+    return null;
+  }
+  var L = app.getRatingCardLayout();
+  var x = L.cx - L.w / 2;
+  var y = L.cy - L.h / 2;
+  var padHeaderX = app.rpx(28);
+  var headerAvR = app.rpx(48);
+  var headerTop = y + app.rpx(44);
+  var avCx = x + padHeaderX + headerAvR;
+  var avCy = headerTop + headerAvR;
+  return {
+    padHeaderX: padHeaderX,
+    headerAvR: headerAvR,
+    headerTop: headerTop,
+    cx: avCx,
+    cy: avCy,
+    r: headerAvR,
+    cardX: x,
+    cardY: y,
+    cardW: L.w
+  };
+};
+
+app.hitRatingCardHeaderAvatar = function(clientX, clientY) {
+  var H = app.getRatingCardHeaderAvatarLayout();
+  if (!H) {
+    return false;
+  }
+  return app.hitCircleAvatar(
+    clientX,
+    clientY,
+    H.cx,
+    H.cy,
+    H.r + app.rpx(10)
+  );
+};
 
 /** 信息看板底部「同步头像昵称」按钮几何（与 drawRatingCardOverlay 一致） */
 app.getRatingCardSyncProfileLayout = function() {
@@ -3468,6 +3514,8 @@ app.checkinModalThemePalette = function(th) {
     signedCellBg: winTitle,
     signedCellText: '#ffffff',
     todayRing: th.btnPrimary,
+    makeupRing: th.btnPrimary,
+    makeupHint: th.muted,
     boardLine: th.board.line,
     navAccent: th.btnPrimary,
     titleFill: th.title,
@@ -3481,50 +3529,71 @@ app.checkinModalThemePalette = function(th) {
     primaryDisabledText: 'rgba(255,255,255,0.95)',
     modalShadow: th.btnShadow || 'rgba(0,0,0,0.18)',
     arrowFillHi: 'rgba(255,255,255,0.88)',
-    arrowFillLo: 'rgba(255,255,255,0.42)'
+    arrowFillLo: 'rgba(255,255,255,0.42)',
+    statsBg: 'rgba(255, 255, 255, 0.52)',
+    statsStroke: 'rgba(255, 255, 255, 0.75)',
+    streakAccent: winTitle,
+    progressTrack: 'rgba(0,0,0,0.08)',
+    progressFill: h0,
+    makeupCellBg: 'rgba(255, 244, 220, 0.85)',
+    makeupBadge: th.btnPrimary,
+    doneBtnBg:
+      id === 'mint'
+        ? 'rgba(34, 120, 100, 0.35)'
+        : id === 'ink'
+        ? 'rgba(72, 92, 72, 0.38)'
+        : 'rgba(76, 130, 88, 0.42)',
+    calPanelBg: 'rgba(255, 252, 246, 0.96)'
   };
 }
 
 app.getCheckinModalLayout = function() {
-  var topPad = app.rpx(10);
-  var headerBandH = app.rpx(88);
-  var innerAfterHead = app.rpx(14);
-  var calInnerPad = app.rpx(16);
-  var monthNavH = app.rpx(50);
-  var weekH = app.rpx(38);
-  var cell = app.rpx(48);
-  var rowGap = app.rpx(6);
+  var topPad = app.rpx(14);
+  var headerBandH = app.rpx(56);
+  var gapHeadCal = app.rpx(16);
+  var statsStripH = 0;
+  var innerAfterHead = gapHeadCal;
+  var calInnerPad = app.rpx(18);
+  var monthNavH = app.rpx(52);
+  var weekH = app.rpx(34);
+  var cell = app.rpx(52);
+  var rowGap = app.rpx(8);
   var gridH = 6 * cell + 5 * rowGap;
-  var calCardH = calInnerPad * 2 + monthNavH + weekH + gridH;
-  var gapCalPrimary = app.rpx(18);
-  var primaryBtnH = app.rpx(58);
-  var bottomPad = app.rpx(24);
-  var w = Math.min(app.W - app.rpx(22), app.rpx(704));
+  var calCardH = calInnerPad * 2 + monthNavH + weekH + app.rpx(12) + gridH;
+  var gapCalHint = app.rpx(14);
+  var hintH = app.rpx(36);
+  var gapHintPrimary = app.rpx(14);
+  var primaryBtnH = app.rpx(56);
+  var bottomPad = app.rpx(26);
+  var w = Math.min(app.W - app.rpx(28), app.rpx(720));
   var innerH =
     topPad +
     headerBandH +
     innerAfterHead +
     calCardH +
-    gapCalPrimary +
+    gapCalHint +
+    hintH +
+    gapHintPrimary +
     primaryBtnH +
     bottomPad;
   var h = innerH;
   var cx = app.W / 2;
-  var cy = app.H * 0.47;
-  var rOuter = app.rpx(28);
+  var cy = app.H * 0.46;
+  var rOuter = app.rpx(26);
   var x0 = cx - w / 2;
   var y0 = cy - h / 2;
-  var calLeft = x0 + app.rpx(16);
-  var calW = w - app.rpx(32);
-  var calTop = y0 + topPad + headerBandH + innerAfterHead;
+  var calLeft = x0 + app.rpx(18);
+  var calW = w - app.rpx(36);
+  var calTop = y0 + topPad + headerBandH + gapHeadCal;
   var monthNavY = calTop + calInnerPad;
   var navMidY = monthNavY + monthNavH * 0.5;
   var leftAx = calLeft + calInnerPad + app.rpx(38);
   var rightAx = calLeft + calW - calInnerPad - app.rpx(38);
   var hitR = app.rpx(28);
-  var primaryBtnW = w - app.rpx(48);
-  var primaryY = calTop + calCardH + gapCalPrimary;
-  var headCloseCx = x0 + w - app.rpx(34);
+  var primaryBtnW = w - app.rpx(44);
+  var hintY = calTop + calCardH + gapCalHint + hintH * 0.5;
+  var primaryY = calTop + calCardH + gapCalHint + hintH + gapHintPrimary;
+  var headCloseCx = x0 + w - app.rpx(36);
   var headCloseCy = y0 + topPad + headerBandH * 0.5;
   return {
     cx: cx,
@@ -3546,12 +3615,16 @@ app.getCheckinModalLayout = function() {
     cell: cell,
     rowGap: rowGap,
     gridH: gridH,
+    hintY: hintY,
     primaryY: primaryY,
     primaryBtnH: primaryBtnH,
     primaryBtnW: primaryBtnW,
     headCloseCx: headCloseCx,
     headCloseCy: headCloseCy,
     monthNavY: monthNavY,
+    navMidY: navMidY,
+    leftAx: leftAx,
+    rightAx: rightAx,
     prevMonthHit: {
       x: leftAx - hitR,
       y: navMidY - hitR,

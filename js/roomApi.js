@@ -5,6 +5,11 @@
 // var GOMOKU_API_BASE = 'http://127.0.0.1:8080';
 // var GOMOKU_API_BASE = 'https://springboot-emh7-241395-4-1418403127.sh.run.tcloudbase.com';
 var GOMOKU_API_BASE = 'https://www.tuantuangmk.com';
+/**
+ * 运营 /api/admin/* 基址；独立部署 gomoku-admin-server 时改为管理端域名（须进 request 合法域名）。
+ * 未配置时与 GOMOKU_API_BASE 相同（兼容旧单服）。
+ */
+var GOMOKU_ADMIN_API_BASE = GOMOKU_API_BASE;
 /** 弱网下覆盖 game.json 默认 5s request 超时 */
 var DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 
@@ -154,7 +159,7 @@ function ratingLeaderboardOptions(limit) {
   var lim =
     limit !== undefined && limit !== null && !isNaN(Number(limit))
       ? Math.max(1, Math.min(100, Math.floor(Number(limit))))
-      : 100;
+      : 30;
   return {
     url: GOMOKU_API_BASE + '/api/rating/leaderboard?limit=' + lim,
     method: 'GET',
@@ -213,7 +218,7 @@ function meAdminStatusOptions() {
 /** POST /api/admin/daily-puzzles — 创建残局（openid 管理员 Bearer + JSON body） */
 function adminDailyPuzzleCreateOptions(bodyObj) {
   return {
-    url: GOMOKU_API_BASE + '/api/admin/daily-puzzles',
+    url: GOMOKU_ADMIN_API_BASE + '/api/admin/daily-puzzles',
     method: 'POST',
     header: withAuthHeaders({
       'content-type': 'application/json'
@@ -311,6 +316,18 @@ function meCheckinOptions() {
       'content-type': 'application/json'
     }),
     data: '{}'
+  };
+}
+
+/** POST /api/me/checkin/makeup：补签（body: { ymd }，消耗积分，需 Authorization） */
+function meCheckinMakeupOptions(ymd) {
+  return {
+    url: GOMOKU_API_BASE + '/api/me/checkin/makeup',
+    method: 'POST',
+    header: withAuthHeaders({
+      'content-type': 'application/json'
+    }),
+    data: JSON.stringify({ ymd: String(ymd != null ? ymd : '') })
   };
 }
 
@@ -690,6 +707,7 @@ module.exports = {
   mePuzzleFriendRoomOptions: mePuzzleFriendRoomOptions,
   meGameHistoryOptions: meGameHistoryOptions,
   meCheckinOptions: meCheckinOptions,
+  meCheckinMakeupOptions: meCheckinMakeupOptions,
   mePieceSkinRedeemOptions: mePieceSkinRedeemOptions,
   meConsumableRedeemOptions: meConsumableRedeemOptions,
   meConsumableUseOptions: meConsumableUseOptions,

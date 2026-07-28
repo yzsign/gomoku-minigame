@@ -99,6 +99,141 @@ app.hitCheckinModalNextMonth = function(x, y) {
   );
 }
 
+/** 月历格点击：返回 { viewYear, viewMonth, dayNum, ymd } 或 null */
+app.hitCheckinModalCalendarDay = function(x, y, viewYear, viewMonth) {
+  if (!viewYear || !viewMonth) {
+    return null;
+  }
+  var L = app.getCheckinModalLayout();
+  var navTop = L.calTop + L.calInnerPad;
+  var weekTop = navTop + L.monthNavH;
+  var gridTop = weekTop + L.weekH + app.rpx(12);
+  var gridTotalW = 7 * L.cell + 6 * L.rowGap;
+  var gridLeft = L.cx - gridTotalW / 2;
+  var first = new Date(viewYear, viewMonth - 1, 1);
+  var firstSun0 = first.getDay();
+  var dim = new Date(viewYear, viewMonth, 0).getDate();
+  var slotW = L.cell;
+  var slotH = L.cell - app.rpx(1);
+  var dayNum = 1;
+  var i;
+  for (i = 0; i < 42; i++) {
+    if (i < firstSun0 || dayNum > dim) {
+      continue;
+    }
+    var row = Math.floor(i / 7);
+    var col = i % 7;
+    var cxCell = gridLeft + col * (L.cell + L.rowGap) + L.cell / 2;
+    var cyCell = gridTop + row * (L.cell + L.rowGap) + L.cell / 2;
+    var bx0 = cxCell - slotW * 0.48;
+    var by0 = cyCell - slotH * 0.48;
+    var bw = slotW * 0.96;
+    var bh = slotH * 0.96;
+    if (x >= bx0 && x <= bx0 + bw && y >= by0 && y <= by0 + bh) {
+      return {
+        viewYear: viewYear,
+        viewMonth: viewMonth,
+        dayNum: dayNum,
+        ymd: app.formatCheckinYmdKey(viewYear, viewMonth, dayNum)
+      };
+    }
+    dayNum++;
+  }
+  return null;
+}
+
+app.isCheckinDayMakeupEligible = function(viewYear, viewMonth, dayNum) {
+  if (!app.checkinModalMonthInRange(viewYear, viewMonth)) {
+    return false;
+  }
+  var now = new Date();
+  var ty = now.getFullYear();
+  var tm = now.getMonth() + 1;
+  var td = now.getDate();
+  var isFuture =
+    viewYear > ty ||
+    (viewYear === ty && viewMonth > tm) ||
+    (viewYear === ty && viewMonth === tm && dayNum > td);
+  var isToday = viewYear === ty && viewMonth === tm && dayNum === td;
+  if (isFuture || isToday) {
+    return false;
+  }
+  var key = app.formatCheckinYmdKey(viewYear, viewMonth, dayNum);
+  var stCal = app.getCheckinState();
+  var historySet = (stCal && stCal.historySet) || {};
+  return !historySet[key];
+}
+
+app.requestCheckinMakeup = function(ymd) {
+  if (app.checkinMakeupInFlight) {
+    return;
+  }
+  if (!authApi.getSessionToken()) {
+    if (typeof wx.showToast === 'function') {
+      wx.showToast({ title: '请先登录', icon: 'none' });
+    }
+    return;
+  }
+  app.checkinMakeupInFlight = true;
+  wx.request(
+    Object.assign(roomApi.meCheckinMakeupOptions(ymd), {
+      success: function(res) {
+        app.checkinMakeupInFlight = false;
+        var d = res.data;
+        if (d && typeof d === 'string') {
+          try {
+            d = JSON.parse(d);
+          } catch (pe) {
+            d = null;
+          }
+        }
+        if (res.statusCode === 401) {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '请先登录', icon: 'none' });
+          }
+          return;
+        }
+        if (res.statusCode === 400 && d && d.message) {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: String(d.message), icon: 'none' });
+          }
+          app.draw();
+          return;
+        }
+        if (res.statusCode !== 200 || !d || !d.ok) {
+          if (typeof wx.showToast === 'function') {
+            wx.showToast({ title: '补签失败', icon: 'none' });
+          }
+          return;
+        }
+        app.syncCheckinStateFromServerPayload(d);
+        if (app.checkinModalData) {
+          app.checkinModalData.streak = app.getCheckinState().streak;
+          app.checkinModalData.totalPoints = app.getCheckinState().tuanPoints;
+        }
+        if (typeof wx.showToast === 'function') {
+          var spent =
+            typeof d.pointsSpent === 'number' && !isNaN(d.pointsSpent)
+              ? d.pointsSpent
+              : app.CHECKIN_MAKEUP_POINTS;
+          var msg = '补签成功 -' + spent + ' 积分';
+          if (d.newlyUnlockedTuanMoe) {
+            msg += '，「团团萌肤」已解锁';
+          }
+          wx.showToast({ title: msg, icon: 'none' });
+        }
+        app.draw();
+      },
+      fail: function() {
+        app.checkinMakeupInFlight = false;
+        if (typeof wx.showToast === 'function') {
+          wx.showToast({ title: '网络错误', icon: 'none' });
+        }
+      }
+    })
+  );
+}
+
 /** 签到月历：左右切换箭头（圆底 + 折线） */
 app.drawCheckinMonthArrow = function(cx, cy, dir, ref, enabled) {
   var rr = app.rpx(21);
@@ -133,6 +268,94 @@ app.drawCheckinMonthArrow = function(cx, cy, dir, ref, enabled) {
   app.ctx.restore();
 }
 
+/** 签到弹窗：连续签到 / 积分 / 萌肤进度 */
+app.drawCheckinStatsStrip = function(L, d, ref) {
+  var st =
+    typeof app.getCheckinState === 'function' ? app.getCheckinState() : null;
+  var streak =
+    d && typeof d.streak === 'number'
+      ? d.streak
+      : st && typeof st.streak === 'number'
+        ? st.streak
+        : 0;
+  var pts =
+    d && typeof d.totalPoints === 'number'
+      ? d.totalPoints
+      : st && typeof st.tuanPoints === 'number'
+        ? st.tuanPoints
+        : 0;
+  var need = 7;
+  var prog = Math.min(1, Math.max(0, streak / need));
+  var sx = L.x0 + app.rpx(18);
+  var sw = L.w - app.rpx(36);
+  var sy = L.statsTop;
+  var sh = L.statsStripH;
+  app.ctx.save();
+  app.ctx.fillStyle = ref.statsBg;
+  app.roundRect(sx, sy, sw, sh, app.rpx(16));
+  app.ctx.fill();
+  app.ctx.strokeStyle = ref.statsStroke;
+  app.ctx.lineWidth = 1;
+  app.roundRect(sx + 0.5, sy + 0.5, sw - 1, sh - 1, app.rpx(15));
+  app.ctx.stroke();
+
+  var row1Y = sy + sh * 0.34;
+  var row2Y = sy + sh * 0.72;
+  app.ctx.textBaseline = 'middle';
+  app.ctx.textAlign = 'left';
+  app.ctx.font =
+    '600 ' +
+    app.rpx(26) +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  app.ctx.fillStyle = ref.dayNumStrong;
+  app.ctx.fillText('连续签到', app.snapPx(sx + app.rpx(18)), app.snapPx(row1Y));
+  app.ctx.textAlign = 'right';
+  app.ctx.font =
+    '700 ' +
+    app.rpx(34) +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  app.ctx.fillStyle = ref.streakAccent;
+  app.ctx.fillText(
+    String(streak) + ' 天',
+    app.snapPx(sx + sw - app.rpx(18)),
+    app.snapPx(row1Y)
+  );
+
+  app.ctx.textAlign = 'left';
+  app.ctx.font =
+    app.rpx(22) +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  app.ctx.fillStyle = ref.makeupHint || ref.dayMuted;
+  app.ctx.fillText(
+    '团团积分 ' + String(pts),
+    app.snapPx(sx + app.rpx(18)),
+    app.snapPx(row2Y)
+  );
+  var barW = sw * 0.38;
+  var barH = app.rpx(8);
+  var barX = sx + sw - app.rpx(18) - barW;
+  var barY = row2Y - barH * 0.5;
+  app.ctx.fillStyle = ref.progressTrack;
+  app.roundRect(barX, barY, barW, barH, barH / 2);
+  app.ctx.fill();
+  if (prog > 0) {
+    app.ctx.fillStyle = ref.progressFill;
+    app.roundRect(barX, barY, Math.max(barH, barW * prog), barH, barH / 2);
+    app.ctx.fill();
+  }
+  app.ctx.textAlign = 'right';
+  app.ctx.font =
+    app.rpx(20) +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  app.ctx.fillStyle = ref.dayMuted;
+  app.ctx.fillText(
+    '萌肤 ' + Math.min(streak, need) + '/' + need,
+    app.snapPx(barX - app.rpx(8)),
+    app.snapPx(row2Y)
+  );
+  app.ctx.restore();
+};
+
 app.drawCheckinCalendarMonth = function(th, L, d, ref) {
   var viewYear = d.viewYear;
   var viewMonth = d.viewMonth;
@@ -147,8 +370,9 @@ app.drawCheckinCalendarMonth = function(th, L, d, ref) {
   var navMidY = navTop + L.monthNavH * 0.5;
   var canPrev = app.checkinModalCanGoPrevMonth(viewYear, viewMonth);
   var canNext = app.checkinModalCanGoNextMonth(viewYear, viewMonth);
-  var leftAx = L.calLeft + L.calInnerPad + app.rpx(38);
-  var rightAx = L.calLeft + L.calW - L.calInnerPad - app.rpx(38);
+  var leftAx = L.leftAx != null ? L.leftAx : L.calLeft + L.calInnerPad + app.rpx(38);
+  var rightAx =
+    L.rightAx != null ? L.rightAx : L.calLeft + L.calW - L.calInnerPad - app.rpx(38);
   app.drawCheckinMonthArrow(leftAx, navMidY, -1, ref, canPrev);
   app.drawCheckinMonthArrow(rightAx, navMidY, 1, ref, canNext);
 
@@ -166,20 +390,10 @@ app.drawCheckinCalendarMonth = function(th, L, d, ref) {
   );
 
   var weekTop = navTop + L.monthNavH;
-  app.ctx.fillStyle = ref.weekBar;
-  app.roundRect(
-    L.calLeft + L.calInnerPad,
-    weekTop,
-    L.calW - L.calInnerPad * 2,
-    L.weekH,
-    app.rpx(10)
-  );
-  app.ctx.fill();
-
   var labels = ['日', '一', '二', '三', '四', '五', '六'];
   app.ctx.font =
     '600 ' +
-    app.rpx(23) +
+    app.rpx(22) +
     'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
   app.ctx.fillStyle = ref.weekLabel;
   app.ctx.textBaseline = 'middle';
@@ -189,20 +403,22 @@ app.drawCheckinCalendarMonth = function(th, L, d, ref) {
   for (c = 0; c < 7; c++) {
     var tcx = gridLeft + c * (L.cell + L.rowGap) + L.cell / 2;
     app.ctx.textAlign = 'center';
+    app.ctx.globalAlpha = 0.72;
     app.ctx.fillText(
       labels[c],
       app.snapPx(tcx),
       app.snapPx(weekTop + L.weekH * 0.5)
     );
   }
+  app.ctx.globalAlpha = 1;
 
   var first = new Date(viewYear, viewMonth - 1, 1);
   var firstSun0 = first.getDay();
   var dim = new Date(viewYear, viewMonth, 0).getDate();
-  var gridTop = weekTop + L.weekH + app.rpx(10);
+  var gridTop = weekTop + L.weekH + app.rpx(12);
   var slotW = L.cell;
-  var slotH = L.cell - app.rpx(1);
-  var cellR = app.rpx(6);
+  var slotH = L.cell - app.rpx(2);
+  var cellR = app.rpx(10);
   var dayNum = 1;
   var i;
   for (i = 0; i < 42; i++) {
@@ -230,33 +446,65 @@ app.drawCheckinCalendarMonth = function(th, L, d, ref) {
 
     app.ctx.save();
     if (signed) {
-      app.ctx.fillStyle = ref.signedCellBg;
+      var sg = app.ctx.createLinearGradient(bx0, by0, bx0, by0 + bh);
+      sg.addColorStop(0, ref.signedCellBg);
+      sg.addColorStop(1, ref.primary1 || ref.signedCellBg);
+      app.ctx.fillStyle = sg;
       app.roundRect(bx0, by0, bw, bh, cellR);
       app.ctx.fill();
       app.ctx.fillStyle = ref.signedCellText;
       app.ctx.font =
-        '600 ' +
-        app.rpx(27) +
+        '700 ' +
+        app.rpx(26) +
         'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
       app.ctx.textAlign = 'center';
       app.ctx.textBaseline = 'middle';
       app.ctx.fillText(String(dayNum), app.snapPx(cxCell), app.snapPx(cyCell));
     } else {
+      var canMakeup =
+        !isFuture &&
+        !isToday &&
+        app.isCheckinDayMakeupEligible(viewYear, viewMonth, dayNum);
+      if (canMakeup) {
+        app.ctx.fillStyle = ref.makeupCellBg;
+        app.roundRect(bx0, by0, bw, bh, cellR);
+        app.ctx.fill();
+        app.ctx.strokeStyle = ref.makeupBadge || ref.makeupRing;
+        app.ctx.lineWidth = app.rpx(1.5);
+        app.roundRect(bx0 + 0.5, by0 + 0.5, bw - 1, bh - 1, cellR - 0.5);
+        app.ctx.stroke();
+      } else if (!isFuture) {
+        app.ctx.fillStyle = 'rgba(0,0,0,0.04)';
+        app.roundRect(bx0, by0, bw, bh, cellR);
+        app.ctx.fill();
+      }
       app.ctx.fillStyle = isFuture ? ref.dayMuted : ref.dayNumStrong;
       app.ctx.font =
         '600 ' +
-        app.rpx(27) +
+        app.rpx(26) +
         'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
       app.ctx.textAlign = 'center';
       app.ctx.textBaseline = 'middle';
-      app.ctx.globalAlpha = isFuture ? 0.45 : 1;
+      app.ctx.globalAlpha = isFuture ? 0.38 : 1;
       app.ctx.fillText(String(dayNum), app.snapPx(cxCell), app.snapPx(cyCell));
       app.ctx.globalAlpha = 1;
     }
-    if (isToday) {
+    if (isToday && !signed) {
       app.ctx.strokeStyle = ref.todayRing;
-      app.ctx.lineWidth = app.rpx(2.75);
-      app.roundRect(bx0 - app.rpx(1), by0 - app.rpx(1), bw + app.rpx(2), bh + app.rpx(2), cellR + app.rpx(1));
+      app.ctx.lineWidth = app.rpx(2.5);
+      app.roundRect(
+        bx0 - app.rpx(1),
+        by0 - app.rpx(1),
+        bw + app.rpx(2),
+        bh + app.rpx(2),
+        cellR + app.rpx(1)
+      );
+      app.ctx.stroke();
+    }
+    if (isToday && signed) {
+      app.ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+      app.ctx.lineWidth = app.rpx(2);
+      app.roundRect(bx0 + 0.5, by0 + 0.5, bw - 1, bh - 1, cellR);
       app.ctx.stroke();
     }
     app.ctx.restore();
@@ -277,21 +525,20 @@ app.drawCheckinModalOverlay = function(th) {
   }
   var L = app.getCheckinModalLayout();
   var ref = app.checkinModalThemePalette(th);
-  var checkinShellThemeId = th.id || 'classic';
   var x = L.cx - L.w / 2;
   var y = L.cy - L.h / 2;
   var doneToday = app.isHomeCheckinDoneToday();
 
   app.ctx.save();
-  app.ctx.fillStyle = 'rgba(0,0,0,0.52)';
+  app.ctx.fillStyle = 'rgba(0,0,0,0.55)';
   app.ctx.fillRect(0, 0, app.W, app.H);
 
   app.ctx.shadowColor = ref.modalShadow;
-  app.ctx.shadowBlur = app.rpx(40);
-  app.ctx.shadowOffsetY = app.rpx(14);
+  app.ctx.shadowBlur = app.rpx(36);
+  app.ctx.shadowOffsetY = app.rpx(12);
   var shellG = app.ctx.createLinearGradient(x, y, x, y + L.h);
-  shellG.addColorStop(0, ref.shellTop);
-  shellG.addColorStop(0.45, ref.shellMid);
+  shellG.addColorStop(0, '#fffefb');
+  shellG.addColorStop(0.55, ref.shellMid);
   shellG.addColorStop(1, ref.shellBot);
   app.ctx.fillStyle = shellG;
   app.roundRect(x, y, L.w, L.h, L.r);
@@ -299,15 +546,12 @@ app.drawCheckinModalOverlay = function(th) {
   app.ctx.shadowBlur = 0;
   app.ctx.shadowOffsetY = 0;
 
-  app.ctx.strokeStyle =
-    checkinShellThemeId === 'ink' || checkinShellThemeId === 'mint'
-      ? 'rgba(255, 248, 240, 0.4)'
-      : 'rgba(255,255,255,0.55)';
-  app.ctx.lineWidth = app.rpx(2);
+  app.ctx.strokeStyle = ref.cardStroke;
+  app.ctx.lineWidth = app.rpx(1.5);
   app.roundRect(x, y, L.w, L.h, L.r);
   app.ctx.stroke();
 
-  var titleCy = y + L.topPad + L.headerBandH * 0.5;
+  var titleY = y + L.topPad + L.headerBandH * 0.5;
   var titleFs = Math.max(1, Math.round(app.rpx(32)));
   app.ctx.textAlign = 'center';
   app.ctx.textBaseline = 'middle';
@@ -316,7 +560,7 @@ app.drawCheckinModalOverlay = function(th) {
     titleFs +
     'px -apple-system, "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
   app.ctx.fillStyle = ref.titleFill;
-  app.ctx.fillText('团团每日签到', app.snapPx(L.cx), app.snapPx(titleCy));
+  app.ctx.fillText('团团每日签到', app.snapPx(L.cx), app.snapPx(titleY));
 
   var hx = L.headCloseCx;
   var hy = L.headCloseCy;
@@ -331,39 +575,71 @@ app.drawCheckinModalOverlay = function(th) {
   app.ctx.lineTo(hx - cs, hy + cs);
   app.ctx.stroke();
 
-  var cardG = app.ctx.createLinearGradient(
-    L.calLeft,
-    L.calTop,
-    L.calLeft,
-    L.calTop + L.calCardH
-  );
-  cardG.addColorStop(0, ref.innerCard);
-  cardG.addColorStop(1, ref.innerCardShade);
-  app.ctx.fillStyle = cardG;
-  app.roundRect(L.calLeft, L.calTop, L.calW, L.calCardH, app.rpx(20));
+  app.ctx.fillStyle = ref.calPanelBg || ref.innerCard;
+  app.roundRect(L.calLeft, L.calTop, L.calW, L.calCardH, app.rpx(18));
   app.ctx.fill();
-  app.ctx.strokeStyle = ref.cardStroke;
-  app.ctx.lineWidth = 1.25;
-  app.roundRect(L.calLeft, L.calTop, L.calW, L.calCardH, app.rpx(20));
+  app.ctx.strokeStyle = 'rgba(92, 75, 58, 0.1)';
+  app.ctx.lineWidth = 1;
+  app.roundRect(L.calLeft + 0.5, L.calTop + 0.5, L.calW - 1, L.calCardH - 1, app.rpx(17));
   app.ctx.stroke();
 
   app.drawCheckinCalendarMonth(th, L, d, ref);
 
+  var hintW = L.w - app.rpx(36);
+  var hintH = app.rpx(36);
+  var hintX = L.cx - hintW / 2;
+  var hintTop = L.hintY - hintH / 2;
+  app.ctx.fillStyle = 'rgba(0,0,0,0.05)';
+  app.roundRect(hintX, hintTop, hintW, hintH, hintH / 2);
+  app.ctx.fill();
+  app.ctx.font =
+    '500 ' +
+    app.rpx(23) +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  app.ctx.fillStyle = ref.dayNumStrong;
+  app.ctx.textAlign = 'center';
+  app.ctx.textBaseline = 'middle';
+  app.ctx.fillText(
+    '漏签日期点一下，消耗 ' + app.CHECKIN_MAKEUP_POINTS + ' 积分补签',
+    app.snapPx(L.cx),
+    app.snapPx(L.hintY)
+  );
+
   var px0 = L.cx - L.primaryBtnW / 2;
   var py0 = L.primaryY;
   app.ctx.shadowColor = ref.modalShadow;
-  app.ctx.shadowBlur = app.rpx(14);
-  app.ctx.shadowOffsetY = app.rpx(6);
-  var pGrad = app.ctx.createLinearGradient(px0, py0, px0, py0 + L.primaryBtnH);
-  pGrad.addColorStop(0, ref.primary0);
-  pGrad.addColorStop(0.5, ref.primary1);
-  pGrad.addColorStop(1, ref.primary2);
-  app.ctx.fillStyle = doneToday ? ref.primaryDisabled : pGrad;
-  app.roundRect(px0, py0, L.primaryBtnW, L.primaryBtnH, L.primaryBtnH * 0.5);
-  app.ctx.fill();
-  app.ctx.shadowBlur = 0;
-  app.ctx.shadowOffsetY = 0;
-  if (!doneToday) {
+  app.ctx.shadowBlur = doneToday ? 0 : app.rpx(14);
+  app.ctx.shadowOffsetY = doneToday ? 0 : app.rpx(6);
+  if (doneToday) {
+    app.ctx.fillStyle = ref.doneBtnBg;
+    app.roundRect(px0, py0, L.primaryBtnW, L.primaryBtnH, L.primaryBtnH * 0.5);
+    app.ctx.fill();
+    app.ctx.strokeStyle = 'rgba(76, 130, 88, 0.35)';
+    app.ctx.lineWidth = 1;
+    app.roundRect(px0 + 0.5, py0 + 0.5, L.primaryBtnW - 1, L.primaryBtnH - 1, L.primaryBtnH * 0.5 - 0.5);
+    app.ctx.stroke();
+    app.ctx.font =
+      '600 ' +
+      app.rpx(28) +
+      'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+    app.ctx.fillStyle = ref.dayNumStrong;
+    app.ctx.textAlign = 'center';
+    app.ctx.textBaseline = 'middle';
+    app.ctx.fillText(
+      '今日已签 ✓',
+      app.snapPx(L.cx),
+      app.snapPx(py0 + L.primaryBtnH * 0.5)
+    );
+  } else {
+    var pGrad = app.ctx.createLinearGradient(px0, py0, px0, py0 + L.primaryBtnH);
+    pGrad.addColorStop(0, ref.primary0);
+    pGrad.addColorStop(0.5, ref.primary1);
+    pGrad.addColorStop(1, ref.primary2);
+    app.ctx.fillStyle = pGrad;
+    app.roundRect(px0, py0, L.primaryBtnW, L.primaryBtnH, L.primaryBtnH * 0.5);
+    app.ctx.fill();
+    app.ctx.shadowBlur = 0;
+    app.ctx.shadowOffsetY = 0;
     var shine = app.ctx.createLinearGradient(px0, py0, px0, py0 + L.primaryBtnH);
     shine.addColorStop(0, ref.primaryShine);
     shine.addColorStop(0.45, 'rgba(255,255,255,0)');
@@ -375,19 +651,21 @@ app.drawCheckinModalOverlay = function(th) {
     app.ctx.lineWidth = 1;
     app.roundRect(px0, py0, L.primaryBtnW, L.primaryBtnH, L.primaryBtnH * 0.5);
     app.ctx.stroke();
+    app.ctx.font =
+      '600 ' +
+      app.rpx(30) +
+      'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+    app.ctx.fillStyle = '#ffffff';
+    app.ctx.textAlign = 'center';
+    app.ctx.textBaseline = 'middle';
+    app.ctx.fillText(
+      '今日签到 +' + app.CHECKIN_DAILY_POINTS + ' 积分',
+      app.snapPx(L.cx),
+      app.snapPx(py0 + L.primaryBtnH * 0.5)
+    );
   }
-  app.ctx.font =
-    '600 ' +
-    app.rpx(30) +
-    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
-  app.ctx.fillStyle = doneToday ? ref.primaryDisabledText : '#ffffff';
-  app.ctx.textAlign = 'center';
-  app.ctx.textBaseline = 'middle';
-  app.ctx.fillText(
-    doneToday ? '今日已签' : '今日签到',
-    app.snapPx(L.cx),
-    app.snapPx(py0 + L.primaryBtnH * 0.5)
-  );
+  app.ctx.shadowBlur = 0;
+  app.ctx.shadowOffsetY = 0;
 
   app.ctx.restore();
 }
@@ -752,8 +1030,165 @@ app.drawJoinRoomModalOverlay = function(th) {
   app.ctx.restore();
 };
 
+app.resolveRatingCardHeaderAvatarForCard = function(data) {
+  if (!data || !data.showHeaderAvatar) {
+    return defaultAvatars.getOpponentAvatarImage();
+  }
+  var url =
+    data.avatarUrl && typeof data.avatarUrl === 'string'
+      ? data.avatarUrl.trim()
+      : '';
+  if (url && typeof app.getOrLoadHistoryOpponentAvatar === 'function') {
+    var net = app.getOrLoadHistoryOpponentAvatar(url);
+    if (net && net.width && net.height) {
+      return net;
+    }
+  }
+  if (typeof data.gender === 'number') {
+    return defaultAvatars.getImageForWeChatGender(data.gender);
+  }
+  return defaultAvatars.getOpponentAvatarImage();
+};
+
+app.closeRatingCardOverlay = function() {
+  app.ratingCardVisible = false;
+  app.ratingCardData = null;
+  app.ratingCardAvatarPreviewVisible = false;
+  if (typeof app.clearRatingCardAddFriendTouch === 'function') {
+    app.clearRatingCardAddFriendTouch();
+  }
+  if (typeof app.destroyRatingCardSyncProfileNativeBtn === 'function') {
+    app.destroyRatingCardSyncProfileNativeBtn();
+  }
+  if (typeof app.draw === 'function') {
+    app.draw();
+  }
+};
+
+app.openRatingCardHeaderAvatarPreview = function() {
+  var d = app.ratingCardData;
+  if (!d || !d.showHeaderAvatar) {
+    return;
+  }
+  app.ratingCardAvatarPreviewVisible = true;
+  if (typeof app.draw === 'function') {
+    app.draw();
+  }
+};
+
+app.drawRatingCardAvatarPreviewOverlay = function(th) {
+  if (!app.ratingCardAvatarPreviewVisible || !app.ratingCardData) {
+    return;
+  }
+  var d = app.ratingCardData;
+  app.ctx.save();
+  app.ctx.fillStyle = 'rgba(0,0,0,0.92)';
+  app.ctx.fillRect(0, 0, app.W, app.H);
+  var cx = app.W * 0.5;
+  var cy = app.H * 0.44;
+  var side = Math.min(app.W, app.H) * 0.78;
+  var img = app.resolveRatingCardHeaderAvatarForCard(d);
+  if (img && img.width && img.height) {
+    var iw = img.width;
+    var ih = img.height;
+    var scale = Math.min(side / iw, side / ih);
+    var dw = iw * scale;
+    var dh = ih * scale;
+    app.ctx.drawImage(
+      img,
+      cx - dw * 0.5,
+      cy - dh * 0.5,
+      dw,
+      dh
+    );
+  } else {
+    var previewR = side * 0.5;
+    defaultAvatars.drawCircleAvatar(
+      app.ctx,
+      img,
+      cx,
+      cy,
+      previewR,
+      th
+    );
+  }
+  app.ctx.textAlign = 'center';
+  app.ctx.textBaseline = 'middle';
+  app.ctx.font =
+    app.rpx(24) +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  app.ctx.fillStyle = 'rgba(255,255,255,0.72)';
+  app.ctx.fillText(
+    '点击任意处关闭',
+    app.snapPx(cx),
+    app.snapPx(cy + side * 0.5 + app.rpx(40))
+  );
+  app.ctx.restore();
+};
+
+/** 战绩卡遮罩触摸（history / rank_board / home / game） */
+app.handleRatingCardOverlayTouchStart = function(x, y, e) {
+  if (!app.ratingCardVisible) {
+    return false;
+  }
+  if (app.ratingCardAvatarPreviewVisible) {
+    app.ratingCardAvatarPreviewVisible = false;
+    app.draw();
+    return true;
+  }
+  if (app.hitRatingCardClose(x, y)) {
+    app.closeRatingCardOverlay();
+    return true;
+  }
+  if (
+    typeof app.hitRatingCardHeaderAvatar === 'function' &&
+    app.hitRatingCardHeaderAvatar(x, y)
+  ) {
+    app.openRatingCardHeaderAvatarPreview();
+    return true;
+  }
+  if (
+    typeof app.hitRatingCardAddFriend === 'function' &&
+    app.hitRatingCardAddFriend(x, y)
+  ) {
+    var rd = app.ratingCardData;
+    if (rd && rd.addFriendEnabled !== false && !app.addFriendInFlight) {
+      app.ratingCardAddFriendArmed = true;
+      app.ratingCardAddFriendPressed = true;
+      app.ratingCardAddFriendTouchStartX = x;
+      app.ratingCardAddFriendTouchStartY = y;
+      app.ratingCardAddFriendTouchId =
+        e.touches && e.touches[0] ? e.touches[0].identifier : null;
+      app.draw();
+      return true;
+    }
+    if (typeof app.onRatingCardAddFriendTap === 'function') {
+      app.onRatingCardAddFriendTap();
+    }
+    return true;
+  }
+  if (
+    typeof app.hitRatingCardSyncProfile === 'function' &&
+    app.hitRatingCardSyncProfile(x, y)
+  ) {
+    if (
+      !app.ratingCardSyncProfileNativeBtn &&
+      typeof app.onRatingCardProfileSyncTap === 'function'
+    ) {
+      app.onRatingCardProfileSyncTap();
+    }
+    return true;
+  }
+  if (!app.hitRatingCardInside(x, y)) {
+    app.closeRatingCardOverlay();
+    return true;
+  }
+  return true;
+};
+
 app.drawRatingCardOverlay = function(th) {
   if (!app.ratingCardVisible || !app.ratingCardData) {
+    app.ratingCardAvatarPreviewVisible = false;
     if (typeof app.destroyRatingCardSyncProfileNativeBtn === 'function') {
       app.destroyRatingCardSyncProfileNativeBtn();
     }
@@ -788,34 +1223,90 @@ app.drawRatingCardOverlay = function(th) {
       : 0;
 
   var crClose = app.rpx(36);
-  var padClose = app.rpx(32);
+  var padClose = d.showHeaderAvatar ? app.rpx(18) : app.rpx(32);
   var closeCx = x + L.w - padClose - crClose / 2;
   var closeCy = y + padClose + crClose / 2;
 
   var titleBlock = 0;
   var titleCx = L.cx;
+
+  function drawRatingCardHLine(yLine) {
+    app.ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+    app.ctx.lineWidth = 1;
+    app.ctx.beginPath();
+    app.ctx.moveTo(app.snapPx(lineX0), app.snapPx(yLine));
+    app.ctx.lineTo(app.snapPx(lineX1), app.snapPx(yLine));
+    app.ctx.stroke();
+  }
+
+  var lineX0 = x + app.rpx(14);
+  var lineX1 = x + L.w - app.rpx(14);
+
   app.ctx.textAlign = 'center';
   app.ctx.textBaseline = 'middle';
-  if (d.cardTitle) {
-    app.ctx.font =
-      'bold 15px "PingFang SC","Hiragino Sans GB",sans-serif';
-    app.ctx.fillStyle = th.title;
-    app.ctx.fillText(d.cardTitle, app.snapPx(titleCx), app.snapPx(closeCy));
-    titleBlock = closeCy - y + 12;
-  }
-  if (d.nicknameLine) {
-    app.ctx.font = '12px "PingFang SC","Hiragino Sans GB",sans-serif';
-    app.ctx.fillStyle = th.muted;
-    var nickCy = d.cardTitle ? closeCy + 18 : closeCy;
-    app.ctx.fillText(d.nicknameLine, app.snapPx(titleCx), app.snapPx(nickCy));
-    titleBlock = nickCy - y + 10;
+  if (d.showHeaderAvatar) {
+    var headerGeom = app.getRatingCardHeaderAvatarLayout();
+    var headerAvR = headerGeom ? headerGeom.headerAvR : app.rpx(48);
+    var avCx = headerGeom ? headerGeom.cx : x + app.rpx(76);
+    var avCy = headerGeom ? headerGeom.cy : y + app.rpx(92);
+    var headerTop = headerGeom ? headerGeom.headerTop : y + app.rpx(44);
+    defaultAvatars.drawCircleAvatar(
+      app.ctx,
+      app.resolveRatingCardHeaderAvatarForCard(d),
+      avCx,
+      avCy,
+      headerAvR,
+      th
+    );
+    var textLeft = avCx + headerAvR + app.rpx(16);
+    var textRightLimit = closeCx - app.rpx(28);
+    var textMaxW = Math.max(app.rpx(40), textRightLimit - textLeft);
+    if (d.nicknameLine) {
+      app.ctx.textAlign = 'left';
+      app.ctx.textBaseline = 'middle';
+      app.ctx.font =
+        '600 ' +
+        app.rpx(36) +
+        'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+      app.ctx.fillStyle = th.title;
+      var nickStr = app.truncateNameToWidth
+        ? app.truncateNameToWidth(app.ctx, d.nicknameLine, textMaxW)
+        : d.nicknameLine;
+      app.ctx.fillText(nickStr, app.snapPx(textLeft), app.snapPx(avCy));
+    }
+    var headerBottom = headerTop + headerAvR * 2;
+    titleBlock = headerBottom - y + app.rpx(16);
+    drawRatingCardHLine(y + titleBlock - app.rpx(2));
+  } else {
+    if (d.cardTitle) {
+      app.ctx.font =
+        'bold 15px "PingFang SC","Hiragino Sans GB",sans-serif';
+      app.ctx.fillStyle = th.title;
+      app.ctx.fillText(d.cardTitle, app.snapPx(titleCx), app.snapPx(closeCy));
+      titleBlock = closeCy - y + 12;
+    }
+    if (d.nicknameLine) {
+      app.ctx.font = '12px "PingFang SC","Hiragino Sans GB",sans-serif';
+      app.ctx.fillStyle = th.muted;
+      var nickCy = d.cardTitle ? closeCy + 18 : closeCy;
+      app.ctx.fillText(d.nicknameLine, app.snapPx(titleCx), app.snapPx(nickCy));
+      titleBlock = nickCy - y + 10;
+    }
   }
 
   var showActivityPoints = d.showActivityPoints !== false;
 
   var bottomBtnReserve =
-    (d.showSyncProfileBtn ? app.rpx(52) : 0) +
-    (d.showAddFriendBtn ? app.rpx(58) : 0);
+    (d.showSyncProfileBtn
+      ? d.showHeaderAvatar
+        ? app.rpx(52)
+        : 52
+      : 0) +
+    (d.showAddFriendBtn
+      ? d.showHeaderAvatar
+        ? app.rpx(58)
+        : 58
+      : 0);
   var contentBottomPad = 18;
   var gapAboveContent = 14;
   var availH =
@@ -832,28 +1323,43 @@ app.drawRatingCardOverlay = function(th) {
   var contentBlockH = showActivityPoints
     ? row1H + sectGap * 2 + threeColInnerH
     : sectGap + threeColInnerH;
-  var rowTop = y + titleBlock + (availH - contentBlockH) / 2;
-  if (rowTop < y + 10 + titleBlock) {
-    rowTop = y + 10 + titleBlock;
+  var rowTop;
+  if (!d.showHeaderAvatar) {
+    rowTop = y + titleBlock + 8;
+  } else {
+    rowTop = y + titleBlock + (availH - contentBlockH) / 2;
+    if (rowTop < y + 10 + titleBlock) {
+      rowTop = y + 10 + titleBlock;
+    }
   }
   /** 横线分隔团团积分与三列统计；对手战绩不展示团团积分 */
   var accent =
     th.homeCards && th.homeCards[0] ? String(th.homeCards[0]) : '#6b4a38';
-  var padX = 16;
-  var lineX0 = x + 14;
-  var lineX1 = x + L.w - 14;
+  var padX = app.rpx(16);
 
-  function drawRatingCardHLine(yLine) {
-    app.ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-    app.ctx.lineWidth = 1;
-    app.ctx.beginPath();
-    app.ctx.moveTo(app.snapPx(lineX0), app.snapPx(yLine));
-    app.ctx.lineTo(app.snapPx(lineX1), app.snapPx(yLine));
-    app.ctx.stroke();
-  }
+  var statsTopFixed = null;
+  var statsSx = x;
+  var statsSw = L.w;
 
   var threeTop;
-  if (showActivityPoints) {
+  var statLabelSize = d.showHeaderAvatar ? app.rpx(26) : 12;
+  var statValueSize = d.showHeaderAvatar ? app.rpx(38) : 17;
+  var statTitleSize = d.showHeaderAvatar ? app.rpx(30) : 15;
+  var statValueDy = d.showHeaderAvatar ? app.rpx(30) : 20;
+
+  if (d.showHeaderAvatar && !showActivityPoints) {
+    statsSx = x + app.rpx(28);
+    statsSw = L.w - app.rpx(56);
+    var statsBlockH = statLabelSize + statValueDy + statValueSize * 0.85;
+    var statsAreaTop = y + titleBlock + app.rpx(14);
+    var statsAreaBottom =
+      y + L.h - bottomBtnReserve - app.rpx(20);
+    threeTop =
+      statsAreaTop +
+      Math.max(0, (statsAreaBottom - statsAreaTop - statsBlockH) * 0.5);
+  } else if (statsTopFixed != null) {
+    threeTop = statsTopFixed;
+  } else if (showActivityPoints) {
     var r1Mid = rowTop + row1H * 0.5;
     var labelX = x + padX;
     var gapLabelToPoints = 10;
@@ -873,36 +1379,80 @@ app.drawRatingCardOverlay = function(th) {
 
     var line1Y = rowTop + row1H + sectGap;
     drawRatingCardHLine(line1Y);
-    threeTop = line1Y + sectGap;
-  } else {
+    if (!d.showHeaderAvatar) {
+      var classicStatsH = 12 + 20 + 16;
+      var classicStatsBottom =
+        y + L.h - bottomBtnReserve - (d.showSyncProfileBtn ? 10 : 14);
+      threeTop = classicStatsBottom - classicStatsH;
+      if (threeTop < line1Y + sectGap) {
+        threeTop = line1Y + sectGap;
+      }
+    } else {
+      threeTop = line1Y + sectGap;
+    }
+  } else if (statsTopFixed == null) {
     threeTop = rowTop + sectGap;
   }
-  var c1 = x + L.w / 6;
-  var c2 = x + L.w / 2;
-  var c3 = x + (5 * L.w) / 6;
+  var c1 = statsSx + statsSw / 6;
+  var c2 = statsSx + statsSw / 2;
+  var c3 = statsSx + (5 * statsSw) / 6;
+  if (!d.showHeaderAvatar) {
+    c1 = x + L.w / 6;
+    c2 = x + L.w / 2;
+    c3 = x + (5 * L.w) / 6;
+  }
   app.ctx.textAlign = 'center';
   app.ctx.textBaseline = 'top';
-  app.ctx.font = '12px "PingFang SC","Hiragino Sans GB",sans-serif';
+  app.ctx.font =
+    statLabelSize +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
   app.ctx.fillStyle = th.muted;
   app.ctx.fillText('得分', app.snapPx(c1), app.snapPx(threeTop));
   app.ctx.fillText('胜率', app.snapPx(c2), app.snapPx(threeTop));
   app.ctx.fillText('称号', app.snapPx(c3), app.snapPx(threeTop));
 
-  app.ctx.font = 'bold 17px "PingFang SC","Hiragino Sans GB",sans-serif';
+  app.ctx.font =
+    'bold ' +
+    statValueSize +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
   app.ctx.fillStyle = th.title;
-  app.ctx.fillText(String(d.elo), app.snapPx(c1), app.snapPx(threeTop + 20));
-  app.ctx.fillText(d.winPctDisplay, app.snapPx(c2), app.snapPx(threeTop + 20));
-  app.ctx.font = 'bold 15px "PingFang SC","Hiragino Sans GB",sans-serif';
-  app.ctx.fillText(d.titleName, app.snapPx(c3), app.snapPx(threeTop + 20));
+  app.ctx.fillText(String(d.elo), app.snapPx(c1), app.snapPx(threeTop + statValueDy));
+  app.ctx.fillText(
+    d.winPctDisplay,
+    app.snapPx(c2),
+    app.snapPx(threeTop + statValueDy)
+  );
+  app.ctx.font =
+    'bold ' +
+    statTitleSize +
+    'px "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+  var titleNameStr =
+    d.titleName && d.showHeaderAvatar
+      ? app.truncateNameToWidth
+        ? app.truncateNameToWidth(
+            app.ctx,
+            d.titleName,
+            statsSw / 3 - app.rpx(16)
+          )
+        : d.titleName
+      : d.titleName;
+  app.ctx.fillText(
+    titleNameStr,
+    app.snapPx(c3),
+    app.snapPx(threeTop + statValueDy)
+  );
 
   app.ctx.strokeStyle = 'rgba(0,0,0,0.06)';
   app.ctx.lineWidth = 1;
-  var divTop = threeTop + 6;
-  var divBot = threeTop + 42;
+  var divTop = threeTop + (d.showHeaderAvatar ? app.rpx(8) : 6);
+  var divBot = threeTop + (d.showHeaderAvatar ? app.rpx(54) : 42);
   for (var dx = 1; dx <= 2; dx++) {
+    var colLineX = d.showHeaderAvatar
+      ? statsSx + (dx * statsSw) / 3 - 0.5
+      : x + (dx * L.w) / 3 - 0.5;
     app.ctx.beginPath();
-    app.ctx.moveTo(x + (dx * L.w) / 3 - 0.5, divTop);
-    app.ctx.lineTo(x + (dx * L.w) / 3 - 0.5, divBot);
+    app.ctx.moveTo(colLineX, divTop);
+    app.ctx.lineTo(colLineX, divBot);
     app.ctx.stroke();
   }
 
@@ -1026,6 +1576,10 @@ app.drawRatingCardOverlay = function(th) {
     app.destroyRatingCardSyncProfileNativeBtn();
   }
 
+  if (typeof app.drawRatingCardAvatarPreviewOverlay === 'function') {
+    app.drawRatingCardAvatarPreviewOverlay(th);
+  }
+
   app.ctx.restore();
 }
 
@@ -1035,8 +1589,14 @@ app.drawRatingCardOverlay = function(th) {
  */
 app.fillRatingCardFromApiData = function(d, opts) {
   opts = opts || {};
-  var cardTitle =
-    (opts.cardTitle && String(opts.cardTitle).trim()) || '信息看板';
+  var cardTitle;
+  if (opts.cardTitle === '') {
+    cardTitle = '';
+  } else if (opts.cardTitle) {
+    cardTitle = String(opts.cardTitle).trim();
+  } else {
+    cardTitle = '信息看板';
+  }
   var nicknameLine = opts.nicknameLine;
   if (nicknameLine === undefined) {
     if (opts.usePayloadNickname) {
@@ -1075,6 +1635,12 @@ app.fillRatingCardFromApiData = function(d, opts) {
   app.ratingCardData = {
     cardTitle: cardTitle,
     nicknameLine: nicknameLine,
+    showHeaderAvatar: opts.showHeaderAvatar === true,
+    avatarUrl:
+      typeof d.avatarUrl === 'string' && d.avatarUrl.trim()
+        ? d.avatarUrl.trim()
+        : '',
+    gender: typeof d.gender === 'number' ? d.gender : null,
     elo: elo,
     titleName: rt.titleName,
     winPctDisplay: winPctDisplay,
@@ -1087,7 +1653,12 @@ app.fillRatingCardFromApiData = function(d, opts) {
     showAddFriendBtn: opts.showAddFriendBtn === true,
     addFriendLabel: '添加好友',
     addFriendEnabled: false,
-    opponentUserId: null,
+    opponentUserId:
+      opts.opponentUserId != null
+        ? opts.opponentUserId
+        : d.userId != null
+          ? d.userId
+          : null,
     addFriendRateLimited: false
   };
   app.homeRatingEloCache = elo;
@@ -1763,13 +2334,15 @@ app.showOpponentRatingModal = function() {
           return;
         }
         app.applyOnlineOpponentProfilePayload(d);
+        var oid = d.userId != null ? Number(d.userId) : NaN;
         app.fillRatingCardFromApiData(d, {
-          cardTitle: '对手战绩',
+          cardTitle: '',
           usePayloadNickname: true,
           hideActivityPoints: true,
-          showSyncProfileBtn: false
+          showSyncProfileBtn: false,
+          showHeaderAvatar: true,
+          opponentUserId: oid
         });
-        var oid = d.userId != null ? Number(d.userId) : NaN;
         function finishOpponentCard() {
           app.ratingFetchInFlight = false;
           if (typeof wx.hideLoading === 'function') {
@@ -1873,11 +2446,16 @@ app.showHistoryOpponentRatingModal = function(opponentUserId) {
         if (!d) {
           return;
         }
+        if (typeof d.avatarUrl === 'string' && d.avatarUrl.trim()) {
+          app.getOrLoadHistoryOpponentAvatar(d.avatarUrl.trim());
+        }
         app.fillRatingCardFromApiData(d, {
-          cardTitle: '对手战绩',
+          cardTitle: '',
           usePayloadNickname: true,
           hideActivityPoints: true,
-          showSyncProfileBtn: false
+          showSyncProfileBtn: false,
+          showHeaderAvatar: true,
+          opponentUserId: opponentUserId
         });
         app.ratingCardVisible = true;
         app.draw();
