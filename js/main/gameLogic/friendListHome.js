@@ -2735,13 +2735,6 @@ module.exports = function registerFriendListHome(app, deps) {
 
   app.onHomeFriendListTouchStart = function (x, y, e) {
     app.ensureHomeFriendListPersistedStateOnce();
-    if (
-      app.screen === 'rank_board' &&
-      typeof app.hitRankBoardListZone === 'function' &&
-      app.hitRankBoardListZone(x, y)
-    ) {
-      return false;
-    }
     if (app._flAnimMode === 'out') {
       return true;
     }
@@ -2768,6 +2761,13 @@ module.exports = function registerFriendListHome(app, deps) {
           app.draw();
         }
         return true;
+      }
+      if (
+        app.screen === 'rank_board' &&
+        typeof app.hitRankBoardListZone === 'function' &&
+        app.hitRankBoardListZone(x, y)
+      ) {
+        return false;
       }
       return false;
     }
@@ -2887,7 +2887,8 @@ module.exports = function registerFriendListHome(app, deps) {
   app.onHomeFriendListTouchMove = function (e) {
     if (
       app.screen === 'rank_board' &&
-      app.rankBoardScrollTouchId != null
+      app.rankBoardScrollTouchId != null &&
+      app._friendFabTouchId == null
     ) {
       return false;
     }

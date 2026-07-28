@@ -4984,6 +4984,12 @@ wx.onTouchStart(function (e) {
       return;
     }
     if (
+      typeof app.onHomeFriendListTouchStart === 'function' &&
+      app.onHomeFriendListTouchStart(x, y, e)
+    ) {
+      return;
+    }
+    if (
       e.touches &&
       e.touches[0] &&
       typeof app.hitRankBoardListZone === 'function' &&
@@ -4998,12 +5004,6 @@ wx.onTouchStart(function (e) {
       app.rankBoardScrollVel = 0;
       app.rankBoardListTouchStartX = x;
       app.rankBoardListTouchStartY = y;
-      return;
-    }
-    if (
-      typeof app.onHomeFriendListTouchStart === 'function' &&
-      app.onHomeFriendListTouchStart(x, y, e)
-    ) {
       return;
     }
     if (
@@ -5733,6 +5733,12 @@ wx.onTouchStart(function (e) {
 if (typeof wx.onTouchMove === 'function') {
   wx.onTouchMove(function (e) {
     if (
+      typeof app.onHomeFriendListTouchMove === 'function' &&
+      app.onHomeFriendListTouchMove(e)
+    ) {
+      return;
+    }
+    if (
       app.screen === 'rank_board' &&
       app.rankBoardScrollTouchId != null &&
       e.touches &&
@@ -5768,12 +5774,6 @@ if (typeof wx.onTouchMove === 'function') {
         app.draw();
         return;
       }
-    }
-    if (
-      typeof app.onHomeFriendListTouchMove === 'function' &&
-      app.onHomeFriendListTouchMove(e)
-    ) {
-      return;
     }
     if (
       app.screen === 'game' &&
