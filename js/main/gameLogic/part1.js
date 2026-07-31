@@ -2470,8 +2470,8 @@ app.enrichPieceSkinTheme = function(theme, skinId) {
     ) {
       theme.pieceTextureBlackImg = app.tuanMoePieceBlackImg;
       theme.pieceTextureWhiteImg = app.tuanMoePieceWhiteImg;
+      return theme;
     }
-    return theme;
   }
   if (skinId === 'qingtao_libai') {
     if (
@@ -2482,8 +2482,28 @@ app.enrichPieceSkinTheme = function(theme, skinId) {
     ) {
       theme.pieceTextureBlackImg = app.qingtaoLibaiPieceBlackImg;
       theme.pieceTextureWhiteImg = app.qingtaoLibaiPieceWhiteImg;
+      return theme;
     }
-    return theme;
+  }
+  var tex =
+    typeof themes.getPieceSkinTextureImages === 'function'
+      ? themes.getPieceSkinTextureImages(skinId)
+      : null;
+  if (tex) {
+    if (tex.black && tex.black.width) {
+      theme.pieceTextureBlackImg = tex.black;
+    }
+    if (tex.white && tex.white.width) {
+      theme.pieceTextureWhiteImg = tex.white;
+    }
+  } else if (
+    themes.PIECE_SKINS &&
+    themes.PIECE_SKINS[skinId] &&
+    (themes.PIECE_SKINS[skinId].pieceTextureBlack ||
+      themes.PIECE_SKINS[skinId].pieceTextureWhite) &&
+    typeof themes.ensurePieceSkinTexturesLoaded === 'function'
+  ) {
+    themes.ensurePieceSkinTexturesLoaded(skinId);
   }
   return theme;
 }
@@ -3895,7 +3915,8 @@ app.handleOnlineSocketDead = function() {
   }
 }
 
-app.disconnectOnline = function() {
+app.disconnectOnline = function(opts) {
+  opts = opts || {};
   if (typeof app.stopUndoRejectFloatAnim === 'function') {
     app.stopUndoRejectFloatAnim();
   }
@@ -3922,7 +3943,9 @@ app.disconnectOnline = function() {
     app.stopResultTuanPointsAnim();
   }
   app.isPvpOnline = false;
-  app._onlineInviteJoinInFlight = false;
+  if (!opts.preserveInviteJoinInFlight) {
+    app._onlineInviteJoinInFlight = false;
+  }
   app._pvpInviteJoinInProgress = false;
   app.isCasualRoom = false;
   app.friendRoomCodeHostPending = false;
@@ -4312,16 +4335,25 @@ app.notifyOnlineSocketSendBlocked = function() {
     wx.showToast({ title: '观战模式无法操作', icon: 'none' });
     return;
   }
-  var liveOnlineGame =
-    app.isPvpOnline &&
+  var inOnlineGameBoard =
     app.screen === 'game' &&
-    app.onlineRoomId &&
-    app.onlineToken;
-  if (
-    liveOnlineGame ||
-    (typeof app.shouldAutoReconnectOnline === 'function' &&
-      app.shouldAutoReconnectOnline())
-  ) {
+    !app.onlineSpectatorMode &&
+    !app.isPvpLocal &&
+    !app.isDailyPuzzle &&
+    (app.isPvpOnline || !!(app.onlineRoomId && app.onlineToken));
+  var hasOnlineSeatCreds = !!(app.onlineRoomId && app.onlineToken);
+  var mayAutoReconnect =
+    hasOnlineSeatCreds &&
+    typeof app.shouldAutoReconnectOnline === 'function' &&
+    app.shouldAutoReconnectOnline();
+  if (inOnlineGameBoard || mayAutoReconnect) {
+    if (
+      hasOnlineSeatCreds &&
+      !app.isPvpOnline &&
+      typeof app.startOnlineSocket === 'function'
+    ) {
+      app.startOnlineSocket();
+    }
     if (
       app.socketTask &&
       typeof app.socketTask.send === 'function' &&
@@ -4330,13 +4362,17 @@ app.notifyOnlineSocketSendBlocked = function() {
       wx.showToast({ title: '正在连接服务器…', icon: 'none' });
       return;
     }
-    if (typeof app.clearOnlineReconnectTimer === 'function') {
-      app.clearOnlineReconnectTimer();
+    if (hasOnlineSeatCreds) {
+      if (typeof app.clearOnlineReconnectTimer === 'function') {
+        app.clearOnlineReconnectTimer();
+      }
+      if (typeof app.scheduleOnlineReconnect === 'function') {
+        app.scheduleOnlineReconnect(true);
+      }
+      wx.showToast({ title: '对战连接中断，正在重连…', icon: 'none' });
+      return;
     }
-    if (typeof app.scheduleOnlineReconnect === 'function') {
-      app.scheduleOnlineReconnect(true);
-    }
-    wx.showToast({ title: '对战连接中断，正在重连…', icon: 'none' });
+    wx.showToast({ title: '正在连接服务器…', icon: 'none' });
     return;
   }
   wx.showToast({ title: '无法连接到对战服务器', icon: 'none' });

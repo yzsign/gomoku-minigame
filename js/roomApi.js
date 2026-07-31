@@ -77,7 +77,8 @@ function roomApiRandomMatchOptions() {
   return withDefaultTimeout({
     url: GOMOKU_API_BASE + '/api/match/random',
     method: 'POST',
-    header: withAuthHeaders({})
+    header: withAuthHeaders({}),
+    dataType: 'json'
   });
 }
 
@@ -89,7 +90,8 @@ function roomApiRandomMatchPairedOptions(roomId) {
       '/api/match/random/paired?roomId=' +
       encodeURIComponent(roomId),
     method: 'GET',
-    header: withAuthHeaders({})
+    header: withAuthHeaders({}),
+    dataType: 'json'
   });
 }
 

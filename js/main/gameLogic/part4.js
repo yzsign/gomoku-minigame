@@ -2949,6 +2949,7 @@ app.getCatalogEntryAtGlobalIndex = function(gIdx) {
 
 /**
  * 拉取杂货铺一页（与 pieceSkinModalPage 一致由调用方维护；本函数不修改页码）。
+ * 分页失败时回退全量 catalog，避免继续使用本地硬编码列表。
  * @param {number} page 从 0 起
  * @param {function(boolean?)} onDone err 为 true 表示失败
  */
@@ -2960,59 +2961,109 @@ app.fetchShopCatalogForModalPage = function(page, onDone) {
     }
     return;
   }
+
+  function parseCatalogBody(raw) {
+    var d = raw;
+    if (d && typeof d === 'string') {
+      try {
+        d = JSON.parse(d);
+      } catch (eParse) {
+        d = null;
+      }
+    }
+    return d;
+  }
+
+  function applyModalCatalogFromItems(d, pageNum, pagedSlice) {
+    if (typeof themes.applyShopCatalogFromServerPayload === 'function') {
+      themes.applyShopCatalogFromServerPayload(d);
+    }
+    var rows = d.items;
+    var ents = [];
+    var ri;
+    for (ri = 0; ri < rows.length; ri++) {
+      var ent =
+        typeof themes.catalogEntryFromShopItemDto === 'function'
+          ? themes.catalogEntryFromShopItemDto(rows[ri])
+          : null;
+      if (ent) {
+        ents.push(ent);
+      }
+    }
+    if (Array.isArray(d.orderItemCodes) && d.orderItemCodes.length) {
+      app.shopCatalogOrderItemCodes = d.orderItemCodes;
+    } else {
+      app.shopCatalogOrderItemCodes = [];
+      for (ri = 0; ri < rows.length; ri++) {
+        if (rows[ri] && rows[ri].itemCode) {
+          app.shopCatalogOrderItemCodes.push(rows[ri].itemCode);
+        }
+      }
+    }
+    if (typeof themes.setShopCatalogEnabledOrderCodes === 'function') {
+      themes.setShopCatalogEnabledOrderCodes(app.shopCatalogOrderItemCodes);
+    }
+    app.shopCatalogTotal =
+      typeof d.total === 'number' && !isNaN(d.total) ? d.total : ents.length;
+    app.shopCatalogServerPaged = true;
+    if (pagedSlice) {
+      app.shopCatalogPageEntries = ents;
+    } else {
+      var start = Math.max(0, pageNum) * per;
+      app.shopCatalogPageEntries = ents.slice(start, start + per);
+    }
+    if (typeof app.refreshPieceSkinModalPendingEntry === 'function') {
+      app.refreshPieceSkinModalPendingEntry();
+    }
+    if (onDone) {
+      onDone(false);
+    }
+  }
+
+  function fetchFullCatalogFallback(pageNum) {
+    wx.request(
+      Object.assign(roomApi.meShopCatalogOptions(), {
+        success: function(res) {
+          if (res.statusCode !== 200 || !res.data) {
+            if (onDone) {
+              onDone(true);
+            }
+            return;
+          }
+          var d = parseCatalogBody(res.data);
+          if (!d || !Array.isArray(d.items)) {
+            if (onDone) {
+              onDone(true);
+            }
+            return;
+          }
+          applyModalCatalogFromItems(d, pageNum, false);
+        },
+        fail: function() {
+          if (onDone) {
+            onDone(true);
+          }
+        }
+      })
+    );
+  }
+
   wx.request(
     Object.assign(roomApi.meShopCatalogPageOptions(page, per), {
       success: function(res) {
         if (res.statusCode !== 200 || !res.data) {
-          if (onDone) {
-            onDone(true);
-          }
+          fetchFullCatalogFallback(page);
           return;
         }
-        var d = res.data;
-        if (d && typeof d === 'string') {
-          try {
-            d = JSON.parse(d);
-          } catch (eParse) {
-            d = null;
-          }
-        }
+        var d = parseCatalogBody(res.data);
         if (!d || !Array.isArray(d.items) || typeof d.total !== 'number') {
-          if (onDone) {
-            onDone(true);
-          }
+          fetchFullCatalogFallback(page);
           return;
         }
-        var orderCodes = d.orderItemCodes;
-        if (Array.isArray(orderCodes) && orderCodes.length) {
-          app.shopCatalogOrderItemCodes = orderCodes;
-        }
-        app.shopCatalogTotal = d.total;
-        app.shopCatalogServerPaged = true;
-        var rows = d.items;
-        var ents = [];
-        var ri;
-        for (ri = 0; ri < rows.length; ri++) {
-          var ent =
-            typeof themes.catalogEntryFromShopItemDto === 'function'
-              ? themes.catalogEntryFromShopItemDto(rows[ri])
-              : null;
-          if (ent) {
-            ents.push(ent);
-          }
-        }
-        app.shopCatalogPageEntries = ents;
-        if (typeof app.refreshPieceSkinModalPendingEntry === 'function') {
-          app.refreshPieceSkinModalPendingEntry();
-        }
-        if (onDone) {
-          onDone(false);
-        }
+        applyModalCatalogFromItems(d, page, true);
       },
       fail: function() {
-        if (onDone) {
-          onDone(true);
-        }
+        fetchFullCatalogFallback(page);
       }
     })
   );
@@ -3091,6 +3142,9 @@ app.openPieceSkinModal = function() {
     }
     if (err) {
       app.shopCatalogServerPaged = false;
+      if (typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
+        wx.showToast({ title: '商品列表加载失败', icon: 'none' });
+      }
     }
     app.syncPieceSkinModalSelectionFromCurrent();
     var tp = app.pieceSkinModalPage;

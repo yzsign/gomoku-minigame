@@ -244,6 +244,11 @@ app.startOnlineSocket = function() {
   });
   if (!app.socketTask || !app.socketTask.onOpen) {
     app._pvpInviteJoinInProgress = false;
+    app.onlineWsConnected = false;
+    if (app.shouldAutoReconnectOnline()) {
+      app.scheduleOnlineReconnect(false);
+      app.draw();
+    }
     return;
   }
   app.socketTask.onOpen(function () {
@@ -966,7 +971,7 @@ app.prepareForOnlineInviteJoin = function() {
     app.isPvpLocal = false;
   }
   if (typeof app.disconnectOnline === 'function') {
-    app.disconnectOnline();
+    app.disconnectOnline({ preserveInviteJoinInFlight: true });
   }
 };
 
@@ -982,8 +987,8 @@ app.joinOnlineAsGuest = function(roomId, opts) {
   }
   app.friendRoomCodeManualJoin = false;
   app.friendRoomCodeHostPending = false;
-  app._onlineInviteJoinInFlight = true;
   app.prepareForOnlineInviteJoin();
+  app._onlineInviteJoinInFlight = true;
   authApi.ensureSession(function (sessionOk, errHint) {
     if (!sessionOk) {
       app._onlineInviteJoinInFlight = false;

@@ -3193,6 +3193,74 @@ app.cancelMatchingTimers = function() {
   app.randomMatchPairedPollFailStreak = 0;
 }
 
+/** POST/GET 匹配接口 body：部分基础库未声明 dataType 时 res.data 仍为字符串 */
+app.coerceMatchApiBody = function(data) {
+  if (data == null) {
+    return null;
+  }
+  if (typeof data === 'string') {
+    try {
+      return JSON.parse(data);
+    } catch (eParse) {
+      return null;
+    }
+  }
+  return data;
+};
+
+/** 随机匹配 guest：按 yourColor 取对应 seat token（与 MatchmakingService 只填一侧 token 一致） */
+app.resolveRandomMatchSeatFromApi = function(d) {
+  if (!d) {
+    return null;
+  }
+  var colorName =
+    d.yourColor != null ? String(d.yourColor).toUpperCase().replace(/^\s+|\s+$/g, '') : '';
+  var yourTok =
+    d.yourToken != null && String(d.yourToken) !== '' ? String(d.yourToken) : '';
+  var blackTok =
+    d.blackToken != null && String(d.blackToken) !== '' ? String(d.blackToken) : '';
+  var whiteTok =
+    d.whiteToken != null && String(d.whiteToken) !== '' ? String(d.whiteToken) : '';
+  if (yourTok) {
+    if (colorName === 'WHITE') {
+      return { token: yourTok, yourColor: app.WHITE };
+    }
+    if (colorName === 'BLACK') {
+      return { token: yourTok, yourColor: app.BLACK };
+    }
+  }
+  if (colorName === 'BLACK' && blackTok) {
+    return { token: blackTok, yourColor: app.BLACK };
+  }
+  if (colorName === 'WHITE' && whiteTok) {
+    return { token: whiteTok, yourColor: app.WHITE };
+  }
+  if (blackTok && !whiteTok) {
+    return { token: blackTok, yourColor: app.BLACK };
+  }
+  if (whiteTok && !blackTok) {
+    return { token: whiteTok, yourColor: app.WHITE };
+  }
+  return null;
+};
+
+app.beginRandomMatchOnlineGameScreen = function() {
+  app.isPvpLocal = false;
+  app.isRandomMatch = false;
+  app.randomMatchHostWaiting = false;
+  app.randomMatchHostCancelToken = '';
+  app.screen = 'game';
+  app.lastOpponentMove = null;
+  app.board = gomoku.createBoard();
+  app.current = app.BLACK;
+  app.gameOver = false;
+  app.winner = null;
+  app.lastMsg = '';
+  if (typeof app.clearPerGameConsumableSkillState === 'function') {
+    app.clearPerGameConsumableSkillState();
+  }
+};
+
 /** 房主：轮询 paired，对手加入后拿 yourToken 再连 WS（与随机先后手一致） */
 app.pollRandomMatchPairedOnce = function() {
   if (!app.randomMatchHostWaiting || app.screen !== 'matching' || !app.onlineRoomId) {
@@ -3208,7 +3276,10 @@ app.pollRandomMatchPairedOnce = function() {
           return;
         }
         app.randomMatchPairedPollFailStreak = 0;
-        var p = res.data;
+        var p = app.coerceMatchApiBody(res.data);
+        if (!p) {
+          return;
+        }
         if (!p.guestJoined) {
           return;
         }
@@ -3217,21 +3288,13 @@ app.pollRandomMatchPairedOnce = function() {
         }
         app.cancelMatchingTimers();
         app.onlineToken = p.yourToken;
-        app.pvpOnlineYourColor = p.yourColor === 'WHITE' ? app.WHITE : app.BLACK;
+        var pairedColor =
+          p.yourColor != null ? String(p.yourColor).toUpperCase() : '';
+        app.pvpOnlineYourColor =
+          pairedColor === 'WHITE' ? app.WHITE : app.BLACK;
         app.randomMatchHostCancelToken = '';
         app.randomMatchHostWaiting = false;
-        app.isPvpLocal = false;
-        app.isRandomMatch = false;
-        app.screen = 'game';
-        app.lastOpponentMove = null;
-        app.board = gomoku.createBoard();
-        app.current = app.BLACK;
-        app.gameOver = false;
-        app.winner = null;
-        app.lastMsg = '';
-        if (typeof app.clearPerGameConsumableSkillState === 'function') {
-          app.clearPerGameConsumableSkillState();
-        }
+        app.beginRandomMatchOnlineGameScreen();
         app.startOnlineSocket();
         app.draw();
       },
@@ -3421,35 +3484,33 @@ app.startRandomMatch = function() {
           app.draw();
           return;
         }
-        var d = res.data;
+        var d = app.coerceMatchApiBody(res.data);
+        if (!d) {
+          wx.showToast({ title: '匹配数据异常', icon: 'none' });
+          app.cancelMatchingTimers();
+          app.disconnectOnline();
+          app.randomMatchHostWaiting = false;
+          app.screen = 'home';
+          app.draw();
+          return;
+        }
         var role = d.role;
         if (role === 'guest') {
           app.cancelMatchingTimers();
           app.onlineRoomId = d.roomId;
-          if (d.yourColor === 'BLACK') {
-            app.onlineToken = d.blackToken;
-            app.pvpOnlineYourColor = app.BLACK;
-          } else if (d.yourColor === 'WHITE') {
-            app.onlineToken = d.whiteToken;
-            app.pvpOnlineYourColor = app.WHITE;
-          } else {
-            app.onlineToken = d.whiteToken;
-            app.pvpOnlineYourColor = app.WHITE;
+          var seat = app.resolveRandomMatchSeatFromApi(d);
+          if (!app.onlineRoomId || !seat || !seat.token) {
+            wx.showToast({ title: '匹配凭证异常，请重试', icon: 'none' });
+            app.cancelMatchingTimers();
+            app.disconnectOnline();
+            app.randomMatchHostWaiting = false;
+            app.screen = 'home';
+            app.draw();
+            return;
           }
-          app.isPvpLocal = false;
-          app.isRandomMatch = false;
-          app.randomMatchHostWaiting = false;
-          app.randomMatchHostCancelToken = '';
-          app.screen = 'game';
-          app.lastOpponentMove = null;
-          app.board = gomoku.createBoard();
-          app.current = app.BLACK;
-          app.gameOver = false;
-          app.winner = null;
-          app.lastMsg = '';
-          if (typeof app.clearPerGameConsumableSkillState === 'function') {
-            app.clearPerGameConsumableSkillState();
-          }
+          app.onlineToken = seat.token;
+          app.pvpOnlineYourColor = seat.yourColor;
+          app.beginRandomMatchOnlineGameScreen();
           app.startOnlineSocket();
           app.draw();
           return;

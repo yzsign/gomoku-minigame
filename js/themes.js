@@ -440,23 +440,6 @@ var PIECE_SKINS = {
       stroke: '#888888'
     }
   },
-  /** 偏蓝灰胎、黑子厚实透亮 */
-  yunzi: {
-    id: 'yunzi',
-    name: '云子',
-    black: {
-      g0: '#5a5e66',
-      gm: '#2c3038',
-      g1: '#0c0e12',
-      stroke: 'rgba(255,255,255,0.22)'
-    },
-    white: {
-      g0: '#fffffc',
-      gm: '#eef1f6',
-      g1: '#c4cad4',
-      stroke: '#6a7a8a'
-    }
-  },
   /** 黑子微青绿、白子偏暖玉 */
   jade: {
     id: 'jade',
@@ -809,9 +792,69 @@ function isPieceSkinUnlockedOnServer(skinId) {
   return !!(skinId && pieceSkinUnlockedIdSet[skinId]);
 }
 
+/** 服务端下发的全量上架条目缓存（由 catalog API 填充，不再硬编码青瓷/水墨等） */
+var shopCatalogServerEntriesCache = [];
+/** 当前上架 item_code 顺序（分页 catalog 的 orderItemCodes 或全量 items 推导） */
+var shopCatalogEnabledOrderCodes = null;
+
+function catalogEntryItemCode(entry) {
+  if (!entry) {
+    return '';
+  }
+  if (entry.kind === 'theme') {
+    return entry.id;
+  }
+  return shopOrderItemCodeFromClientId(entry.id);
+}
+
+function setShopCatalogEnabledOrderCodes(codes) {
+  if (!Array.isArray(codes) || !codes.length) {
+    shopCatalogEnabledOrderCodes = null;
+    return;
+  }
+  shopCatalogEnabledOrderCodes = codes.slice();
+}
+
+function rebuildShopCatalogServerEntriesCache(items) {
+  var ents = [];
+  var i;
+  if (!Array.isArray(items)) {
+    shopCatalogServerEntriesCache = ents;
+    return;
+  }
+  for (i = 0; i < items.length; i++) {
+    var ent = catalogEntryFromShopItemDto(items[i]);
+    if (ent) {
+      ents.push(ent);
+    }
+  }
+  shopCatalogServerEntriesCache = ents;
+}
+
+function filterCatalogEntriesByEnabledOrder(entries) {
+  if (!shopCatalogEnabledOrderCodes || !shopCatalogEnabledOrderCodes.length) {
+    return entries;
+  }
+  var set = {};
+  var i;
+  for (i = 0; i < shopCatalogEnabledOrderCodes.length; i++) {
+    if (shopCatalogEnabledOrderCodes[i]) {
+      set[String(shopCatalogEnabledOrderCodes[i])] = true;
+    }
+  }
+  var out = [];
+  for (i = 0; i < entries.length; i++) {
+    var code = catalogEntryItemCode(entries[i]);
+    if (code && set[code]) {
+      out.push(entries[i]);
+    }
+  }
+  return out;
+}
+
 /**
- * 将 GET /api/me/shop/catalog 的 body 写入内存价表（覆盖式）。
- * @param {{ items?: Array<{ itemCode?: string, priceAmount?: number, currency?: string }> }} d
+ * 将 GET /api/me/shop/catalog 的 body 写入内存价表（覆盖式），并同步上架列表缓存。
+ * @param {{ items?: Array, orderItemCodes?: Array<string> }} d
  */
 function applyShopCatalogFromServerPayload(d) {
   if (!d || typeof d !== 'object') {
@@ -843,6 +886,195 @@ function applyShopCatalogFromServerPayload(d) {
     map[String(code)] = Math.max(0, Math.floor(amt));
   }
   shopCatalogPointsByItemCode = map;
+  applyShopCatalogRenderConfigs(items);
+  rebuildShopCatalogServerEntriesCache(items);
+  if (Array.isArray(d.orderItemCodes) && d.orderItemCodes.length) {
+    setShopCatalogEnabledOrderCodes(d.orderItemCodes);
+  } else {
+    var codes = [];
+    for (i = 0; i < items.length; i++) {
+      if (items[i] && items[i].itemCode) {
+        codes.push(String(items[i].itemCode));
+      }
+    }
+    setShopCatalogEnabledOrderCodes(codes);
+  }
+}
+
+/** 贴图棋子：按 skinId 缓存已加载的 Image 对象 */
+var pieceSkinTextureImgCache = {};
+
+function parseRenderConfig(raw) {
+  if (!raw) {
+    return null;
+  }
+  if (typeof raw === 'object') {
+    return raw;
+  }
+  if (typeof raw === 'string') {
+    var s = raw.trim();
+    if (!s) {
+      return null;
+    }
+    try {
+      return JSON.parse(s);
+    } catch (eParse) {
+      return null;
+    }
+  }
+  return null;
+}
+
+function loadImagePath(src, onReady) {
+  if (!src || typeof wx === 'undefined' || typeof wx.createImage !== 'function') {
+    if (typeof onReady === 'function') {
+      onReady(null);
+    }
+    return;
+  }
+  var paths = [src];
+  if (src.indexOf('/') !== 0) {
+    paths.push('/' + src);
+  }
+  if (src.indexOf('./') !== 0) {
+    paths.push('./' + src);
+  }
+  var idx = 0;
+  function tryNext() {
+    if (idx >= paths.length) {
+      if (typeof onReady === 'function') {
+        onReady(null);
+      }
+      return;
+    }
+    var img = wx.createImage();
+    img.onload = function () {
+      if (typeof onReady === 'function') {
+        onReady(img);
+      }
+    };
+    img.onerror = function () {
+      idx++;
+      tryNext();
+    };
+    img.src = paths[idx];
+    idx++;
+  }
+  tryNext();
+}
+
+function preloadPieceSkinTextures(skinId, skin) {
+  if (!skinId || !skin) {
+    return;
+  }
+  if (!pieceSkinTextureImgCache[skinId]) {
+    pieceSkinTextureImgCache[skinId] = { black: null, white: null };
+  }
+  var cache = pieceSkinTextureImgCache[skinId];
+  if (skin.pieceTextureBlack && (!cache.black || !cache.black.width)) {
+    loadImagePath(skin.pieceTextureBlack, function (im) {
+      if (im && im.width) {
+        cache.black = im;
+      }
+    });
+  }
+  if (skin.pieceTextureWhite && (!cache.white || !cache.white.width)) {
+    loadImagePath(skin.pieceTextureWhite, function (im) {
+      if (im && im.width) {
+        cache.white = im;
+      }
+    });
+  }
+}
+
+/**
+ * 将单条 shop catalog 的 renderConfig 合并进 PIECE_SKINS（DB 配置覆盖内置默认值）。
+ */
+function mergePieceSkinFromRenderConfig(itemCode, displayLabel, cfg) {
+  if (!itemCode || !cfg || typeof cfg !== 'object') {
+    return;
+  }
+  var skin = {
+    id: itemCode,
+    name:
+      displayLabel ||
+      (PIECE_SKINS[itemCode] && PIECE_SKINS[itemCode].name) ||
+      itemCode
+  };
+  if (cfg.black) {
+    skin.black = cfg.black;
+  }
+  if (cfg.white) {
+    skin.white = cfg.white;
+  }
+  if (cfg.stoneShading) {
+    skin.stoneShading = cfg.stoneShading;
+  }
+  if (typeof cfg.pieceBoardRadiusCell === 'number') {
+    skin.pieceBoardRadiusCell = cfg.pieceBoardRadiusCell;
+  }
+  if (typeof cfg.pieceTextureDrawScale === 'number') {
+    skin.pieceTextureDrawScale = cfg.pieceTextureDrawScale;
+  }
+  if (cfg.pieceTextureBlack) {
+    skin.pieceTextureBlack = cfg.pieceTextureBlack;
+  }
+  if (cfg.pieceTextureWhite) {
+    skin.pieceTextureWhite = cfg.pieceTextureWhite;
+  }
+  if (cfg.opponentLastMoveMarker) {
+    skin.opponentLastMoveMarker = cfg.opponentLastMoveMarker;
+  }
+  if (cfg.winningLineHighlight) {
+    skin.winningLineHighlight = cfg.winningLineHighlight;
+  }
+  var prev = PIECE_SKINS[itemCode];
+  if (prev && !prev.followTheme) {
+    var k;
+    for (k in skin) {
+      if (Object.prototype.hasOwnProperty.call(skin, k)) {
+        prev[k] = skin[k];
+      }
+    }
+    skin = prev;
+  }
+  PIECE_SKINS[itemCode] = skin;
+  preloadPieceSkinTextures(itemCode, skin);
+}
+
+/**
+ * 遍历 catalog items，将 piece_skin 的 renderConfig 写入 PIECE_SKINS。
+ */
+function applyShopCatalogRenderConfigs(items) {
+  if (!Array.isArray(items)) {
+    return;
+  }
+  var i;
+  for (i = 0; i < items.length; i++) {
+    var it = items[i];
+    if (!it || !it.itemCode) {
+      continue;
+    }
+    var cat = it.shopCategory;
+    if (cat !== SHOP_CATEGORY_PIECE_SKIN && cat !== 'piece_skin') {
+      continue;
+    }
+    var cfg = parseRenderConfig(it.renderConfig);
+    if (cfg) {
+      mergePieceSkinFromRenderConfig(it.itemCode, it.displayLabel, cfg);
+    }
+  }
+}
+
+function getPieceSkinTextureImages(skinId) {
+  return pieceSkinTextureImgCache[skinId] || null;
+}
+
+function ensurePieceSkinTexturesLoaded(skinId) {
+  var skin = PIECE_SKINS[skinId];
+  if (skin) {
+    preloadPieceSkinTextures(skinId, skin);
+  }
 }
 
 function pointsCostFromShopCatalog(itemCode, fallback) {
@@ -968,17 +1200,17 @@ function catalogEntryFromShopItemDto(d) {
       unlockHint: tuanOk ? undefined : tuanMoeLockedUnlockHint()
     };
   }
-  if (code === 'qingtao_libai') {
-    var qingOk = isPieceSkinUnlockedOnServer('qingtao_libai');
-    var defQ = PIECE_SKIN_QINGTAO_LIBAI_COST_POINTS;
-    var costQ = priceFromDto != null ? priceFromDto : pointsCostFromShopCatalog('qingtao_libai', defQ);
+  if (d.redeemMode === 'POINTS_ONE_TIME') {
+    var ptsOk = isPieceSkinUnlockedOnServer(code);
+    var defPts = 200;
+    var costPts = priceFromDto != null ? priceFromDto : pointsCostFromShopCatalog(code, defPts);
     return {
-      id: 'qingtao_libai',
+      id: code,
       shopCategory: SHOP_CATEGORY_PIECE_SKIN,
-      locked: !qingOk,
+      locked: !ptsOk,
       label: label,
-      rowStatus: qingOk ? 'owned' : 'points',
-      costPoints: qingOk ? 0 : costQ
+      rowStatus: ptsOk ? 'owned' : 'points',
+      costPoints: ptsOk ? 0 : costPts
     };
   }
   return {
@@ -992,10 +1224,10 @@ function catalogEntryFromShopItemDto(d) {
 }
 
 function getPieceSkinCatalog() {
-  var tuanOk = isTuanMoeUnlocked();
-  var qingOk = isPieceSkinUnlockedOnServer('qingtao_libai');
-  var mintOk = isPieceSkinUnlockedOnServer('mint');
-  var inkOk = isPieceSkinUnlockedOnServer('ink');
+  if (shopCatalogServerEntriesCache.length) {
+    return filterCatalogEntriesByEnabledOrder(shopCatalogServerEntriesCache).slice();
+  }
+  /** 从未拉取 catalog 前的极简兜底（不含可下架商品） */
   return [
     {
       id: 'basic',
@@ -1003,60 +1235,6 @@ function getPieceSkinCatalog() {
       locked: false,
       label: '基础黑白',
       rowStatus: 'owned'
-    },
-    {
-      id: 'tuan_moe',
-      shopCategory: SHOP_CATEGORY_PIECE_SKIN,
-      locked: !tuanOk,
-      label: '团团萌肤',
-      rowStatus: tuanOk ? 'owned' : 'locked',
-      unlockHint: tuanOk ? undefined : tuanMoeLockedUnlockHint()
-    },
-    {
-      id: 'qingtao_libai',
-      shopCategory: SHOP_CATEGORY_PIECE_SKIN,
-      locked: !qingOk,
-      label: '青萄荔白',
-      rowStatus: qingOk ? 'owned' : 'points',
-      costPoints: qingOk ? 0 : PIECE_SKIN_QINGTAO_LIBAI_COST_POINTS
-    },
-    {
-      kind: 'theme',
-      shopCategory: SHOP_CATEGORY_THEME,
-      id: 'mint',
-      locked: !mintOk,
-      label: '青瓷',
-      rowStatus: mintOk ? 'owned' : 'points',
-      costPoints: mintOk ? 0 : THEME_SHOP_COST_POINTS
-    },
-    {
-      kind: 'theme',
-      shopCategory: SHOP_CATEGORY_THEME,
-      id: 'ink',
-      locked: !inkOk,
-      label: '水墨',
-      rowStatus: inkOk ? 'owned' : 'points',
-      costPoints: inkOk ? 0 : THEME_SHOP_COST_POINTS
-    },
-    {
-      kind: 'consumable',
-      consumableKind: 'dagger',
-      shopCategory: SHOP_CATEGORY_CONSUMABLE,
-      id: 'dagger_skill',
-      locked: false,
-      label: '短剑',
-      rowStatus: 'points',
-      costPoints: CONSUMABLE_DAGGER_COST_POINTS
-    },
-    {
-      kind: 'consumable',
-      consumableKind: 'love',
-      shopCategory: SHOP_CATEGORY_CONSUMABLE,
-      id: 'love_skill',
-      locked: false,
-      label: '爱心',
-      rowStatus: 'points',
-      costPoints: CONSUMABLE_LOVE_COST_POINTS
     }
   ];
 }
@@ -1082,8 +1260,17 @@ function getPieceSkinCatalogLabel(entry) {
 
 /** 仅「已拥有」且可选择的皮肤可写入本地，避免锁位/占位 id 被保存 */
 function pieceSkinIdIsPersistable(id) {
-  if (!id || !PIECE_SKINS[id] || PIECE_SKINS[id].followTheme) {
+  if (!id || (PIECE_SKINS[id] && PIECE_SKINS[id].followTheme)) {
     return false;
+  }
+  if (id === 'basic') {
+    return true;
+  }
+  if (id === 'tuan_moe') {
+    return isTuanMoeUnlocked();
+  }
+  if (isPieceSkinUnlockedOnServer(id)) {
+    return true;
   }
   var cat = getPieceSkinCatalog();
   var i;
@@ -1198,7 +1385,10 @@ function applyPieceSkinIdFromServer(id) {
     return;
   }
   var sid = id.trim();
-  if (!sid || !PIECE_SKINS[sid] || PIECE_SKINS[sid].followTheme) {
+  if (!sid || sid === 'default') {
+    return;
+  }
+  if (PIECE_SKINS[sid] && PIECE_SKINS[sid].followTheme) {
     return;
   }
   try {
@@ -1334,6 +1524,10 @@ var themesExports = {
   shopOrderItemCodeFromClientId: shopOrderItemCodeFromClientId,
   catalogEntryFromShopItemDto: catalogEntryFromShopItemDto,
   applyShopCatalogFromServerPayload: applyShopCatalogFromServerPayload,
+  setShopCatalogEnabledOrderCodes: setShopCatalogEnabledOrderCodes,
+  applyShopCatalogRenderConfigs: applyShopCatalogRenderConfigs,
+  getPieceSkinTextureImages: getPieceSkinTextureImages,
+  ensurePieceSkinTexturesLoaded: ensurePieceSkinTexturesLoaded,
   getPieceSkinCatalog: getPieceSkinCatalog,
   getPieceSkinCatalogLabel: getPieceSkinCatalogLabel,
   isTuanMoeUnlocked: isTuanMoeUnlocked,

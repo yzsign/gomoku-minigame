@@ -1396,7 +1396,9 @@ app.draw = function() {
   var status = app.lastMsg;
   if (app.isPvpOnline) {
     var sideName = app.pvpOnlineYourColor === app.BLACK ? '黑' : '白';
-    if (!app.onlineWsConnected) {
+    var wsCanSend =
+      typeof app.onlineSocketCanSend === 'function' && app.onlineSocketCanSend();
+    if (!wsCanSend) {
       status = app.onlineWsEverOpened
         ? '连接中断，正在重连…'
         : '正在连接服务器…';
@@ -1457,6 +1459,19 @@ app.draw = function() {
     } else {
       status = '对方思考中…';
     }
+  } else if (
+    app.screen === 'game' &&
+    app.onlineRoomId &&
+    app.onlineToken &&
+    !app.isPvpLocal &&
+    !app.isDailyPuzzle &&
+    !app.onlineSpectatorMode &&
+    typeof app.onlineSocketCanSend === 'function' &&
+    !app.onlineSocketCanSend()
+  ) {
+    status = app.onlineWsEverOpened
+      ? '连接中断，正在重连…'
+      : '正在连接服务器…';
   } else if (app.isPvpLocal) {
     if (app.localDrawRequest) {
       var drL =
@@ -4722,7 +4737,18 @@ app.tryPlace = function(r, c) {
   if (app.isPvpOnline && app.onlineDrawPending) {
     return;
   }
-  if (app.isPvpOnline) {
+  var onlineMatchSeat =
+    app.isPvpOnline ||
+    (app.screen === 'game' &&
+      app.onlineRoomId &&
+      app.onlineToken &&
+      !app.isPvpLocal &&
+      !app.isDailyPuzzle &&
+      !app.onlineSpectatorMode);
+  if (onlineMatchSeat) {
+    if (!app.isPvpOnline && typeof app.startOnlineSocket === 'function') {
+      app.startOnlineSocket();
+    }
     if (app.current !== app.pvpOnlineYourColor) {
       return;
     }
@@ -6553,8 +6579,17 @@ if (typeof wx.onShow === 'function') {
     /**
      * 先完成静默登录再拉资源/分享进房，避免与首帧 silentLogin 并发导致进房失败（请先完成登录）。
      */
-    authApi.silentLogin(null, function () {
-      if (typeof app.restartUserSocialSocket === 'function') {
+    authApi.silentLogin(null, function (loginOk, payload) {
+      /**
+       * 完整 silent-login 成功时由 authApi.onSilentLoginComplete 建连；
+       * 本地 token 有效跳过 wx.login 时不会触发 listener，此处补一次。
+       */
+      if (
+        loginOk &&
+        payload &&
+        payload.sessionSkipped &&
+        typeof app.restartUserSocialSocket === 'function'
+      ) {
         app.restartUserSocialSocket();
       }
       app.loadHomeUiAssets();

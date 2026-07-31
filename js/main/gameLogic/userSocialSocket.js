@@ -11,6 +11,11 @@ module.exports = function registerUserSocialSocket(app, deps) {
   app._userSocialPingTimer = null;
   app._userSocialReconnectTimer = null;
   app.userSocialReconnectAttempt = 0;
+  /** 与对局 WS 类似：避免 close 仍在握手的连接时刷控制台报错 */
+  app._userSocialConnectGen = 0;
+  app._userSocialSocketOpen = false;
+  app._userSocialSocketSessionToken = '';
+  app._userSocialSocketConnectStartedAt = 0;
   app._incomingFriendRequestQueue = [];
   app._incomingFriendModalOpen = false;
   app._incomingRoomInviteQueue = [];
@@ -466,6 +471,7 @@ module.exports = function registerUserSocialSocket(app, deps) {
   app.stopUserSocialSocket = function() {
     clearUserSocialPing();
     clearUserSocialReconnectTimer();
+    app._userSocialConnectGen = (app._userSocialConnectGen || 0) + 1;
     if (app.userSocialSocketTask && typeof app.userSocialSocketTask.close === 'function') {
       try {
         app.userSocialSocketTask.close({});
@@ -473,6 +479,9 @@ module.exports = function registerUserSocialSocket(app, deps) {
     }
     app.userSocialSocketTask = null;
     app.userSocialReconnectAttempt = 0;
+    app._userSocialSocketOpen = false;
+    app._userSocialSocketSessionToken = '';
+    app._userSocialSocketConnectStartedAt = 0;
   };
 
   /**
@@ -484,23 +493,45 @@ module.exports = function registerUserSocialSocket(app, deps) {
       app.stopUserSocialSocket();
       return;
     }
+    if (
+      app.userSocialSocketTask &&
+      app._userSocialSocketSessionToken === st &&
+      app._userSocialSocketOpen
+    ) {
+      return;
+    }
+    if (
+      app.userSocialSocketTask &&
+      app._userSocialSocketSessionToken === st &&
+      !app._userSocialSocketOpen &&
+      app._userSocialSocketConnectStartedAt &&
+      Date.now() - app._userSocialSocketConnectStartedAt < 20000
+    ) {
+      return;
+    }
     clearUserSocialPing();
     clearUserSocialReconnectTimer();
+    app._userSocialConnectGen = (app._userSocialConnectGen || 0) + 1;
+    var myGen = app._userSocialConnectGen;
     if (app.userSocialSocketTask && typeof app.userSocialSocketTask.close === 'function') {
       try {
         app.userSocialSocketTask.close({});
       } catch (eOld) {}
     }
     app.userSocialSocketTask = null;
+    app._userSocialSocketOpen = false;
+    app._userSocialSocketSessionToken = st;
+    app._userSocialSocketConnectStartedAt = Date.now();
 
     var url = roomApi.userWebSocketUrl(st);
     var sock = wx.connectSocket({
       url: url,
       fail: function() {
-        if (app.userSocialSocketTask !== sock) {
+        if (app.userSocialSocketTask !== sock || myGen !== app._userSocialConnectGen) {
           return;
         }
         app.userSocialSocketTask = null;
+        app._userSocialSocketOpen = false;
         app.userSocialReconnectAttempt = (app.userSocialReconnectAttempt || 0) + 1;
         maybeNotifyUserSocialOffline();
         scheduleUserSocialReconnect(false);
@@ -511,13 +542,14 @@ module.exports = function registerUserSocialSocket(app, deps) {
       return;
     }
     sock.onOpen(function() {
-      if (app.userSocialSocketTask !== sock) {
+      if (app.userSocialSocketTask !== sock || myGen !== app._userSocialConnectGen) {
         return;
       }
+      app._userSocialSocketOpen = true;
       app.userSocialReconnectAttempt = 0;
       app._userSocialOfflineNotified = false;
       app._userSocialPingTimer = setInterval(function() {
-        if (app.userSocialSocketTask !== sock) {
+        if (app.userSocialSocketTask !== sock || myGen !== app._userSocialConnectGen) {
           return;
         }
         try {
@@ -526,24 +558,29 @@ module.exports = function registerUserSocialSocket(app, deps) {
       }, PING_INTERVAL_MS);
     });
     sock.onMessage(function(res) {
+      if (myGen !== app._userSocialConnectGen) {
+        return;
+      }
       handleUserSocialMessage(res.data, sock);
     });
     sock.onClose(function() {
-      if (app.userSocialSocketTask !== sock) {
+      if (app.userSocialSocketTask !== sock || myGen !== app._userSocialConnectGen) {
         return;
       }
       clearUserSocialPing();
       app.userSocialSocketTask = null;
+      app._userSocialSocketOpen = false;
       app.userSocialReconnectAttempt = (app.userSocialReconnectAttempt || 0) + 1;
       maybeNotifyUserSocialOffline();
       scheduleUserSocialReconnect(false);
     });
     sock.onError(function() {
-      if (app.userSocialSocketTask !== sock) {
+      if (app.userSocialSocketTask !== sock || myGen !== app._userSocialConnectGen) {
         return;
       }
       clearUserSocialPing();
       app.userSocialSocketTask = null;
+      app._userSocialSocketOpen = false;
       app.userSocialReconnectAttempt = (app.userSocialReconnectAttempt || 0) + 1;
       maybeNotifyUserSocialOffline();
       scheduleUserSocialReconnect(false);
