@@ -111,7 +111,7 @@ function roomApiRandomMatchCancelOptions(roomId, blackToken) {
   });
 }
 
-/** 匹配超时：POST /api/match/random/fallback-bot — 从数据库随机人机作为白方 */
+/** 匹配超时：POST /api/match/random/fallback-bot — 按段位带抽人机作为白方 */
 function roomApiRandomMatchFallbackOptions(roomId, blackToken) {
   return withDefaultTimeout({
     url: GOMOKU_API_BASE + '/api/match/random/fallback-bot',

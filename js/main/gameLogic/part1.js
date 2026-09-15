@@ -3739,7 +3739,7 @@ app.randomMatchHostCancelToken = '';
 app.randomMatchPairedPollTimer = null;
 /** 匹配轮询连续网络失败次数（用于 Toast 提示） */
 app.randomMatchPairedPollFailStreak = 0;
-app.RANDOM_MATCH_TIMEOUT_MS = 2000;
+app.RANDOM_MATCH_TIMEOUT_MS = 5000;
 app.RANDOM_MATCH_PAIRED_POLL_MS = 400;
 
 app.FAKE_OPPONENT_NAMES = [
